@@ -164,7 +164,7 @@ fn PriceLevelMap(comptime side: Side) type {
 
         pub fn deinit(self: *Self) void {
             self.levels.deinit();
-            self.sorted_prices.deinit();
+            self.sorted_prices.deinit(self.allocator);
         }
 
         pub fn get(self: *Self, price: Price) ?PriceLevel {
@@ -268,6 +268,12 @@ pub const OrderBook = struct {
             .orders = Orders.init(allocator),
             .shard_count = shard_count,
         };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.orders.deinit();
+        self.asks.deinit();
+        self.bids.deinit();
     }
 
     pub fn getBestBid(self: *Self) ?Price {

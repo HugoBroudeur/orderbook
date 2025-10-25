@@ -6,6 +6,7 @@ pub fn seedOrderbook(allocator: std.mem.Allocator) !orderbook.OrderBook {
     var book = try orderbook.OrderBook.init(allocator, 1);
 
     var trades = try std.ArrayList(orderbook.Trades).initCapacity(allocator, 10);
+    defer trades.deinit(allocator);
 
     try trades.append(allocator, try book.addOrder(orderbook.Order.init(1, .GoodTillCancel, .Buy, 10, 1)));
     try trades.append(allocator, try book.addOrder(orderbook.Order.init(2, .GoodTillCancel, .Buy, 11, 3)));
@@ -26,7 +27,8 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    const book = try seedOrderbook(allocator);
+    var book = try seedOrderbook(allocator);
+    defer book.deinit();
     const stats = book.snapshot();
 
     std.log.debug("[DEBUG][main] Orderbook: size {}", .{book.size()});
