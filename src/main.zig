@@ -11,12 +11,16 @@ pub fn seedOrderbook(allocator: std.mem.Allocator) !orderbook.OrderBook {
     try trades.append(allocator, try book.addOrder(orderbook.Order.init(1, .GoodTillCancel, .Buy, 10, 1)));
     try trades.append(allocator, try book.addOrder(orderbook.Order.init(2, .GoodTillCancel, .Buy, 11, 3)));
     try trades.append(allocator, try book.addOrder(orderbook.Order.init(3, .GoodTillCancel, .Buy, 9, 10)));
-    try trades.append(allocator, try book.addOrder(orderbook.Order.init(4, .GoodTillCancel, .Sell, 12, 10)));
-    try trades.append(allocator, try book.addOrder(orderbook.Order.init(5, .GoodTillCancel, .Sell, 10, 10)));
+    try trades.append(allocator, try book.addOrder(orderbook.Order.init(4, .GoodTillCancel, .Buy, 13, 10)));
+    try trades.append(allocator, try book.addOrder(orderbook.Order.init(5, .GoodTillCancel, .Sell, 12, 10)));
+    try trades.append(allocator, try book.addOrder(orderbook.Order.init(6, .GoodTillCancel, .Sell, 10, 10)));
+    // try trades.append(allocator, try book.addOrder(orderbook.Order.init(6, .GoodTillCancel, .Sell, 7, 10)));
     // _ = try book.addOrder(order);
 
     std.log.debug("[DEBUG][main.seedOrderbook] Trades made: {any}", .{trades});
     std.log.debug("[DEBUG][main.seedOrderbook] Trades made on the sell: {any}", .{trades.items[4].items});
+    // std.log.debug("[DEBUG][main.seedOrderbook] Trades made on the sell: {any}", .{trades.items[5].items});
+    // std.log.debug("[DEBUG][main.seedOrderbook] Trades made on the sell: {any}", .{trades.items[4].items});
 
     return book;
 }
