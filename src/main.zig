@@ -1,6 +1,6 @@
 const std = @import("std");
-const root = @import("root");
 const orderbook = @import("orderbook.zig");
+const networking = @import("networking");
 
 pub fn seedOrderbook(allocator: std.mem.Allocator) !orderbook.OrderBook {
     var book = try orderbook.OrderBook.init(allocator, 1);
@@ -37,6 +37,11 @@ pub fn main() !void {
 
     std.log.debug("[DEBUG][main] Orderbook: size {}", .{book.size()});
     std.log.debug("[DEBUG][main] Stats: {any}", .{stats});
+
+    var tcp_server = try networking.server.TcpServer.init(allocator, "127.0.0.1", 3000);
+    defer tcp_server.deinit();
+    try tcp_server.start();
+    tcp_server.listen();
 
     // Prints to stderr, ignoring potential errors.
     // std.debug.print("All your {s} are belong to us.\n", .{"codebase"});

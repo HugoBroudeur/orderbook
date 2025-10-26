@@ -556,8 +556,6 @@ pub const OrderBook = struct {
             },
         };
 
-        // const diff: i64 = @min(0, @as(i64, @intCast(level_ptr.order_count)) + order_count_delta);
-
         const current_count: i64 = @intCast(level_ptr.order_count);
         const new_count: i64 = current_count + order_count_delta;
         const safe_count: i64 = @max(0, new_count);
