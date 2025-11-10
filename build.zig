@@ -1,4 +1,7 @@
 const std = @import("std");
+const protobuf = @import("protobuf");
+
+const protobuf_files = &.{ "proto", "proto/all.proto", "proto/orderbook/v1/orderbook.proto" };
 
 // Although this function looks imperative, it does not perform the build
 // directly and instead it mutates the build graph (`b`) that will be then
@@ -25,6 +28,24 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/networking/mod.zig"),
         .target = target,
     });
+
+    const protobuf_dep = b.dependency("protobuf", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const dvui_dep = b.dependency("dvui", .{ .target = target, .optimize = optimize, .backend = .sdl3 });
+
+    // generateProtobuf(b, protobuf_dep, target);
+
+    // Generate Zig code from .proto
+    const gen_proto = b.step("gen-proto", "generate zig files from protocol buffer definitions");
+    const protoc_step = protobuf.RunProtocStep.create(protobuf_dep.*.builder, target, .{
+        .destination_directory = b.path("src/proto"),
+        .source_files = protobuf_files,
+        .include_directories = &.{""},
+    });
+    gen_proto.dependOn(&protoc_step.step);
 
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
@@ -65,9 +86,11 @@ pub fn build(b: *std.Build) void {
                 // importing modules from different packages).
                 // .{ .name = "root", .module = mod },
                 .{ .name = "networking", .module = mod_networking },
+                .{ .name = "protobuf", .module = protobuf_dep.module("protobuf") },
             },
         }),
     });
+    exe.root_module.addImport("dvui", dvui_dep.module("dvui_sdl3"));
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
@@ -90,6 +113,8 @@ pub fn build(b: *std.Build) void {
     // the user runs `zig build run`, so we create a dependency link.
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
+
+    run_step.dependOn(gen_proto);
 
     // By making the run step depend on the default step, it will be run from the
     // installation directory rather than directly from within the cache directory.
@@ -140,3 +165,16 @@ pub fn build(b: *std.Build) void {
     // Lastly, the Zig build system is relatively simple and self-contained,
     // and reading its source code will allow you to master it.
 }
+
+// fn generateProtobuf(b: *std.Build, proto_dep: *std.Build.Dependency, target: std.Build.ResolvedTarget) void {
+//     const gen_proto = b.step("gen-proto", "generate zig files from protocol buffer definitions");
+//
+//     const protoc_step = protobuf.RunProtocStep.create(proto_dep.*.builder, target, .{
+//         .destination_directory = b.path("src/proto"),
+//         .source_files = &.{main_proto_entry},
+//         .include_directories = &.{},
+//     });
+//
+//     std.log.info("Hello from build", .{});
+//     gen_proto.dependOn(&protoc_step.step);
+// }

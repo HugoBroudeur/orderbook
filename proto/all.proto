@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package trading;
+
+// import "orderbook/v1/orderbook.proto";
+
+service TestService {
+  rpc TestCall(Test) returns (Test);
+}
+
+message Test {
+  int32 test = 1;
+}

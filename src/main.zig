@@ -1,6 +1,7 @@
 const std = @import("std");
 const orderbook = @import("orderbook.zig");
 const networking = @import("networking");
+const env = @import("config.zig");
 
 pub fn seedOrderbook(allocator: std.mem.Allocator) !orderbook.OrderBook {
     var book = try orderbook.OrderBook.init(allocator, 1);
@@ -31,6 +32,8 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
+    const config = env.init();
+
     var book = try seedOrderbook(allocator);
     defer book.deinit();
     const stats = book.snapshot();
@@ -38,11 +41,20 @@ pub fn main() !void {
     std.log.debug("[DEBUG][main] Orderbook: size {}", .{book.size()});
     std.log.debug("[DEBUG][main] Stats: {any}", .{stats});
 
-    var tcp_server = try networking.server.TcpServer.init(allocator, "127.0.0.1", 3000);
+    var tcp_server = try networking.server.TcpServer.init(allocator, .{
+        .ip = "127.0.0.1",
+        .port = 3000,
+        .max_threads_count = config.http_max_threads_count,
+    });
     defer tcp_server.deinit();
     try tcp_server.start();
-    tcp_server.listen();
+    try tcp_server.listen();
 
+    // var grpc_server = try networking.grpc.TcpServer.init(allocator, "127.0.0.1", 3000);
+    // var grpc_server = try networking.grpc.OrderbookServiceImpl.Subscribe(self: *OrderbookServiceImpl, request: SubscribeRequest)
+    // defer grpc_server.deinit();
+    // try grpc_server.start();
+    // try grpc_server.listen();
     // Prints to stderr, ignoring potential errors.
     // std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
 

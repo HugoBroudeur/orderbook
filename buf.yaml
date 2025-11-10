@@ -1,0 +1,41 @@
+version: v2
+name: buf.build/hugo/trading
+
+modules:
+  - path: proto/orderbook
+
+deps: []
+
+build:
+  root:
+    - proto
+# # deps:
+# #   - buf.build/acme/paymentapis # The latest accepted commit.
+# #   - buf.build/acme/pkg:47b927cbb41c4fdea1292bafadb8976f # The '47b927cbb41c4fdea1292bafadb8976f' commit.
+# #   - buf.build/googleapis/googleapis:v1beta1.1.0 # The 'v1beta1.1.0' label.
+#
+# # The default lint configuration for any modules that don't have a specific lint configuration.
+# #
+# # If this section isn't present, AND a module doesn't have a specific lint configuration, the default
+# # lint configuration is used for the module.
+# lint:
+#   use:
+#     - STANDARD
+#     - TIMESTAMP_SUFFIX # This rule comes from the plugin example below.
+# # Default breaking configuration. It behaves the same as the default lint configuration.
+# breaking:
+#   use:
+#     - FILE
+# # Optional Buf plugins. Can use to require custom lint or breaking change rules specified in a locally
+# # installed plugin. Each Buf plugin is listed separately, and can include options if the plugin allows
+# # for them. If a rule has its `default` value set to true, the rule will be checked against even if
+# # the 'lint' and 'breaking' fields aren't set.
+# #
+# # See the example at https://github.com/bufbuild/bufplugin-go/blob/main/check/internal/example/cmd/buf-plugin-timestamp-suffix/main.go
+# # for more detail about the sample below.
+# plugins:
+#   - plugin: plugin-timestamp-suffix # Specifies the installed plugin to use
+#     options:
+#       # The TIMESTAMP_SUFFIX rule specified above allows the user to change the suffix by providing a
+#       # new value here.
+#       timestamp_suffix: _time

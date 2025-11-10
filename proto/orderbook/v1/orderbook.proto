@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package orderbook.v1;
+
+service OrderbookService {
+  rpc Subscribe(SubscribeRequest) returns (SubscribeResponse);
+}
+
+message SubscribeRequest {
+  int32 client_id = 1;
+}
+
+message SubscribeResponse {
+  int32 subscriber_id = 1;
+}
