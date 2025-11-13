@@ -2,6 +2,14 @@ const std = @import("std");
 const orderbook = @import("orderbook.zig");
 const networking = @import("networking");
 const env = @import("config.zig");
+const game = @import("game/game.zig");
+
+const sokol = @import("sokol");
+const slog = sokol.log;
+const sapp = sokol.app;
+
+const WINDOW_WIDTH = 1920;
+const WINDOW_HEIGHT = 1060;
 
 pub fn seedOrderbook(allocator: std.mem.Allocator) !orderbook.OrderBook {
     var book = try orderbook.OrderBook.init(allocator, 1);
@@ -29,6 +37,7 @@ pub fn seedOrderbook(allocator: std.mem.Allocator) !orderbook.OrderBook {
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+    // defer if (gpa_instance.deinit() != .ok) @panic("Memory leak on exit!");
 
     const allocator = arena.allocator();
 
@@ -45,10 +54,27 @@ pub fn main() !void {
         .ip = "127.0.0.1",
         .port = 3000,
         .max_threads_count = config.http_max_threads_count,
+        .max_client_connections = 4096,
     });
     defer tcp_server.deinit();
-    try tcp_server.start();
-    try tcp_server.listen();
+
+    // try game.start(allocator);
+
+    game.init(allocator);
+
+    sapp.run(.{
+        .init_cb = init,
+        .frame_cb = frame,
+        .cleanup_cb = cleanup,
+        .event_cb = event,
+        .window_title = "Price is Power",
+        .width = WINDOW_WIDTH,
+        .height = WINDOW_HEIGHT,
+        .icon = .{ .sokol_default = true },
+        .logger = .{ .func = slog.func },
+    });
+    // try tcp_server.start();
+    // try tcp_server.listen();
 
     // var grpc_server = try networking.grpc.TcpServer.init(allocator, "127.0.0.1", 3000);
     // var grpc_server = try networking.grpc.OrderbookServiceImpl.Subscribe(self: *OrderbookServiceImpl, request: SubscribeRequest)
@@ -61,22 +87,18 @@ pub fn main() !void {
     // try orderbook.main();
 }
 
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+export fn init() void {
+    game.setup();
 }
 
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
-    };
+export fn frame() void {
+    game.frame();
+}
 
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+export fn cleanup() void {
+    game.shutdown();
+}
+
+export fn event(ev: [*c]const sapp.Event) void {
+    game.handleEvent(ev);
 }

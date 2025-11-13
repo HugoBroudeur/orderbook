@@ -47,7 +47,9 @@ pub const TcpSocket = struct {
     }
 
     pub fn deinit(self: Self) void {
-        std.posix.close(self.listener.?);
+        if (null != self.listener) {
+            std.posix.close(self.listener.?);
+        }
     }
 };
 

@@ -37,7 +37,7 @@ pub const TcpServer = struct {
             .max_threads_count = ctx.max_threads_count,
             .is_started = false,
             .log_level = .Debug,
-            .client_sockets = std.ArrayList(*socket.ClientSocket).initCapacity(allocator, ctx.max_client_connections),
+            .client_sockets = try std.ArrayList(*socket.ClientSocket).initCapacity(allocator, ctx.max_client_connections),
         };
     }
 
@@ -57,7 +57,7 @@ pub const TcpServer = struct {
         try self.socket.listen(&self.address);
 
         const poll: std.posix.pollfd = .{
-            .fd = self.socket.listener,
+            .fd = self.socket.listener.?,
             .events = std.posix.POLL.IN,
             .revents = 0,
         };
