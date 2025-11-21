@@ -3,9 +3,10 @@ const uuid = @import("../math/uuid.zig");
 const vec = @import("../math/vec.zig");
 const hex = @import("../math/hex.zig");
 const color = @import("../math/color.zig");
-// const log = @import("../debug/log.zig").ecs;
+// const log = @import("../../debug/log.zig").ecs;
 const shape = @import("../math/shape.zig");
 const sokol = @import("sokol");
+const sg = sokol.gfx;
 const sapp = sokol.app;
 
 const Mat4 = vec.Mat4;
@@ -31,6 +32,108 @@ pub const ID = struct {
 
 pub const GameObject = struct {
     pos: vec.Vec3 = vec.Vec3.zero(),
+    is_visible: bool = false,
+};
+
+pub const Event = @import("events.zig");
+
+pub const TickRate = struct {
+    ratio: u32 = 1,
+};
+
+pub const Resource = struct {
+    asset: MetalTypes,
+    qty_owned: u32 = 0,
+    qty_max: u32 = 100,
+
+    fn produce(self: *Resource, qty: u32) void {
+        if (self.qty_owned + qty > self.qty_max) {
+            self.qty_owned = self.qty_max;
+            return;
+        }
+
+        self.qty_owned += qty;
+    }
+
+    fn consume(self: *Resource, qty: u32) Error!void {
+        if (self.qty_owned - qty < 0) {
+            return Error.NotEnoughResource;
+        }
+        self.qty_owned -= qty;
+    }
+};
+
+pub const Generator = struct {
+    ratio: u32 = 1,
+    multiplier: i32 = 1,
+};
+
+pub const Converter = struct {
+    inputs: []RecipeInput,
+    outputs: []RecipeOutput,
+    ratio: i32 = 1,
+};
+
+pub const RecipeInput = struct {
+    asset: MetalTypes,
+    qty: u32 = 1,
+};
+
+pub const RecipeOutput = struct {
+    asset: MetalTypes,
+    qty: u32 = 1,
+};
+
+pub const Error = error{
+    NotEnoughResource,
+};
+
+pub const UnlockState = struct {
+    resources: std.EnumMap(MetalTypes, bool) = .initFull(false),
+
+    pub fn unlock_resource(self: *UnlockState, res: MetalTypes) void {
+        self.resources.put(res, true);
+    }
+
+    pub fn is_resource_unlocked(self: *UnlockState, res: MetalTypes) bool {
+        return self.resources.get(res) orelse false;
+    }
+};
+
+// ██╗   ██╗██╗
+// ██║   ██║██║
+// ██║   ██║██║
+// ██║   ██║██║
+// ╚██████╔╝██║
+//  ╚═════╝ ╚═╝
+
+pub const Styles = @import("styles.zig");
+
+pub const Button = struct {
+    label: []const u8,
+    is_pressed: bool = false,
+};
+
+pub const UIState = struct {
+    show_first_window: bool = true,
+    show_second_window: bool = true,
+    current_theme: usize = 0,
+    themes: [2][]const u8 = .{
+        &@tagName(Styles.Theme.enemymouse).*,
+        &@tagName(Styles.Theme.spectrum_light).*,
+    },
+    window_width: u32 = 0,
+    window_height: u32 = 0,
+    is_demo_open: bool = true,
+    progress: f32 = 0,
+    progress_dir: f32 = 1,
+    progress_bar_overlay: [32]u8 = undefined,
+    is_buy_button_clicked: bool = false,
+
+    resource_view_ui: struct {
+        selected_resource_to_add_id: u8 = 0,
+        selected_resource_to_add: MetalTypes = undefined,
+    } = .{},
 };
 
 //  ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗██╗ ██████╗███████╗
@@ -39,6 +142,10 @@ pub const GameObject = struct {
 // ██║   ██║██╔══██╗██╔══██║██╔═══╝ ██╔══██║██║██║     ╚════██║
 // ╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║██║╚██████╗███████║
 //  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝
+
+pub const RenderPass = struct {
+    pass_action: sg.PassAction = .{},
+};
 
 pub const ShapeType = enum {
     hexagon,
@@ -156,6 +263,37 @@ pub const CircleCollider2D = struct {
     // };
 };
 
+//  ██████╗ ██████╗ ██████╗ ███████╗██████╗     ██████╗  ██████╗  ██████╗ ██╗  ██╗
+// ██╔═══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗    ██╔══██╗██╔═══██╗██╔═══██╗██║ ██╔╝
+// ██║   ██║██████╔╝██║  ██║█████╗  ██████╔╝    ██████╔╝██║   ██║██║   ██║█████╔╝
+// ██║   ██║██╔══██╗██║  ██║██╔══╝  ██╔══██╗    ██╔══██╗██║   ██║██║   ██║██╔═██╗
+// ╚██████╔╝██║  ██║██████╔╝███████╗██║  ██║    ██████╔╝╚██████╔╝╚██████╔╝██║  ██╗
+//  ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝    ╚═════╝  ╚═════╝  ╚═════╝ ╚═╝  ╚═╝
+
+pub const OrderBook = @import("orderbook.zig");
+
+pub const OrderBookPtr = struct {
+    ptr: *OrderBook,
+};
+
+pub const MarketTrading = struct {
+    book: OrderBook,
+    asset: MetalTypes,
+};
+
+pub const MarketAsset = struct {
+    name: []const u8,
+};
+
+pub const SingletonMarketData = struct {
+    last_order_id: u32 = 0,
+
+    pub fn getNextId(self: *SingletonMarketData) u32 {
+        self.last_order_id += 1;
+        return self.last_order_id;
+    }
+};
+
 // ███╗   ███╗ █████╗ ██████╗
 // ████╗ ████║██╔══██╗██╔══██╗
 // ██╔████╔██║███████║██████╔╝
@@ -215,7 +353,6 @@ pub const Scenario = struct {
 // ██║██║ ╚████║██║     ╚██████╔╝   ██║   ███████║
 // ╚═╝╚═╝  ╚═══╝╚═╝      ╚═════╝    ╚═╝   ╚══════╝
 
-pub const Event = sapp.Event;
 pub const InputEvent = packed struct {
     code: sapp.Keycode,
     status: sapp.EventType,
@@ -374,3 +511,31 @@ fn CameraMaker(comptime T: CameraType) type {
         }
     };
 }
+
+//  █████╗ ███████╗███████╗███████╗████████╗███████╗
+// ██╔══██╗██╔════╝██╔════╝██╔════╝╚══██╔══╝██╔════╝
+// ███████║███████╗███████╗█████╗     ██║   ███████╗
+// ██╔══██║╚════██║╚════██║██╔══╝     ██║   ╚════██║
+// ██║  ██║███████║███████║███████╗   ██║   ███████║
+// ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝   ╚═╝   ╚══════╝
+
+pub const MetalTypes = enum {
+    iron,
+    steel,
+    copper,
+    silver,
+    gold,
+    tin,
+    lead,
+    aluminium,
+    nickel,
+    zinc,
+    titanium,
+    tungsten,
+    silicon,
+    cobalt,
+    uranium,
+    chromium,
+    bismuth,
+    manganese,
+};

@@ -1,87 +1,86 @@
 // Interface definition for a system, using Vtable
-const zecs = @import("zecs");
+// const zecs = @import("zecs");
 const std = @import("std");
+const f = @import("zflecs");
+// const ecs = @import("../ecs.zig");
 
 const System = @This();
 
 ptr: *anyopaque,
 vtable: *const VTable,
 
-// pub const VTable = struct {
-/// Return a pointer to `len` bytes with specified `alignment`, or return
-/// `null` indicating the allocation failed.
-///
-/// `ret_addr` is optionally provided as the first return address of the
-/// allocation call stack. If the value is `0` it means no return address
-/// has been provided.
-// alloc: *const fn (*anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8,
 pub const VTable = struct {
-    // onSetup: *const fn (self: *System, reg: *zecs.Registry) void,
-    // onFrame: *const fn (self: *System, reg: *zecs.Registry) void,
-    onSetup: *const fn (*anyopaque, reg: *zecs.Registry) void = default,
-    onFrame: *const fn (*anyopaque, reg: *zecs.Registry) void = default,
-    // onRender: *const fn (*anyopaque, reg: *zecs.Registry, previous_pass: *delil_pass.RenderPass) *delil_pass.RenderPass = default_render,
-    onRender: *const fn (*anyopaque, reg: *zecs.Registry) void = default_render,
-    once: *const fn (*anyopaque, reg: *zecs.Registry) void = default,
+    // setup: *const fn (*anyopaque, reg: *zecs.Registry) void,
+    // update: *const fn (*anyopaque, reg: *zecs.Registry) void,
+    setup: *const fn (*anyopaque, world: *f.world_t) void,
+    update: *const fn (*anyopaque, world: *f.world_t) void,
+    deinit: *const fn (*anyopaque) void,
 };
 
-pub fn onSetup(self: *System, reg: *zecs.Registry) void {
-    return self.vtable.onSetup(self, reg);
-}
-
-pub fn onFrame(self: *System, reg: *zecs.Registry) void {
-    return self.vtable.onFrame(self, reg);
-}
-
-pub fn once(self: *System, reg: *zecs.Registry) void {
-    return self.vtable.once(self, reg);
-}
-
-// pub fn onRender(self: *System, reg: *zecs.Registry, previous_pass: *delil_pass.RenderPass) *delil_pass.RenderPass {
-//     return self.vtable.onRender(self, reg, previous_pass);
+// pub fn setup(self: System, reg: *zecs.Registry) void {
+//     return self.vtable.setup(self.ptr, reg);
 // }
-
-pub fn onRender(self: *System, reg: *zecs.Registry) void {
-    return self.vtable.onRender(self, reg);
-}
-
-fn default(ctx: *anyopaque, reg: *zecs.Registry) void {
-    _ = &ctx;
-    _ = &reg;
-}
-
-// fn default_render(ctx: *anyopaque, reg: *zecs.Registry, previous_pass: *delil_pass.RenderPass) *delil_pass.RenderPass {
-//     _ = &ctx;
-//     _ = &reg;
-//     return previous_pass;
+// pub fn update(self: System, reg: *zecs.Registry) void {
+//     return self.vtable.update(self.ptr, reg);
 // }
-
-fn default_render(ctx: *anyopaque, reg: *zecs.Registry) void {
-    _ = &ctx;
-    _ = &reg;
+pub fn setup(self: System, world: *f.world_t) void {
+    return self.vtable.setup(self.ptr, world);
+}
+pub fn update(self: System, world: *f.world_t) void {
+    return self.vtable.update(self.ptr, world);
+}
+pub fn deinit(self: System) void {
+    return self.vtable.deinit(self.ptr);
 }
 
-// Implementation look like:
-// const MySystem = struct {
-//     pub fn system(self: *MySystem) System {
-//         return .{
-//             .ptr = self,
-//             .vtable = &.{
-//                 .register = register,
-//                 .do = do,
-//             },
-//         };
-//     }
-//
-//     fn register(ctx: *anyopaque, reg: *zecs.Registry) void {
-//         const self: *MySystem = @ptrCast(@alignCast(ctx));
-//         _ = reg;
-//         _ = self;
-//     }
-//
-//     fn do(ctx: *anyopaque, reg: *zecs.Registry) void {
-//         const self: *MySystem = @ptrCast(@alignCast(ctx));
-//         _ = reg;
-//         _ = self;
-//     }
-// };
+pub fn init(ptr: anytype) System {
+    // const Impl = SystemDelegate(ptr);
+    const T = @TypeOf(ptr);
+    const ptr_info = @typeInfo(T);
+    const Impl = struct {
+        // fn setup(impl: *anyopaque, reg: *zecs.Registry) void {
+        fn setup(impl: *anyopaque, world: *f.world_t) void {
+            const self: T = @ptrCast(@alignCast(impl));
+            return ptr_info.pointer.child.setup(self, world);
+        }
+        // fn update(impl: *anyopaque, reg: *zecs.Registry) void {
+        fn update(impl: *anyopaque, world: *f.world_t) void {
+            const self: T = @ptrCast(@alignCast(impl));
+            return ptr_info.pointer.child.update(self, world);
+        }
+        fn deinit(impl: *anyopaque) void {
+            const self: T = @ptrCast(@alignCast(impl));
+            return ptr_info.pointer.child.deinit(self);
+        }
+    };
+
+    return .{
+        .ptr = ptr,
+        .vtable = &.{
+            .setup = Impl.setup,
+            .update = Impl.update,
+            .deinit = Impl.deinit,
+        },
+    };
+}
+
+// (5) Delegate to turn the opaque pointer back to the implementation.
+// inline fn SystemDelegate(ptr: anytype) type {
+//     const T = @TypeOf(ptr);
+//     const ptr_info = @typeInfo(T);
+//     return struct {
+//         fn setup(impl: *anyopaque, reg: *zecs.Registry) void {
+//             const self: T = @ptrCast(@alignCast(impl));
+//             // const self: T = @fieldParentPtr(@ptrCast(@alignCast(impl)), "setup");
+//             return ptr_info.pointer.child.setup(self, reg);
+//         }
+//         fn update(impl: *anyopaque, reg: *zecs.Registry) void {
+//             const self: T = @ptrCast(@alignCast(impl));
+//             return ptr_info.pointer.child.update(self, reg);
+//         }
+//         fn deinit(impl: *anyopaque) void {
+//             const self: T = @ptrCast(@alignCast(impl));
+//             return ptr_info.pointer.child.deinit(self);
+//         }
+//     };
+// }

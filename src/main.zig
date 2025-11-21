@@ -1,5 +1,4 @@
 const std = @import("std");
-const orderbook = @import("orderbook.zig");
 const networking = @import("networking");
 const env = @import("config.zig");
 const game = @import("game/game.zig");
@@ -11,28 +10,28 @@ const sapp = sokol.app;
 const WINDOW_WIDTH = 1920;
 const WINDOW_HEIGHT = 1060;
 
-pub fn seedOrderbook(allocator: std.mem.Allocator) !orderbook.OrderBook {
-    var book = try orderbook.OrderBook.init(allocator, 1);
-
-    var trades = try std.ArrayList(orderbook.Trades).initCapacity(allocator, 10);
-    defer trades.deinit(allocator);
-
-    try trades.append(allocator, try book.addOrder(orderbook.Order.init(1, .GoodTillCancel, .Buy, 10, 1)));
-    try trades.append(allocator, try book.addOrder(orderbook.Order.init(2, .GoodTillCancel, .Buy, 11, 3)));
-    try trades.append(allocator, try book.addOrder(orderbook.Order.init(3, .GoodTillCancel, .Buy, 9, 10)));
-    try trades.append(allocator, try book.addOrder(orderbook.Order.init(4, .GoodTillCancel, .Buy, 13, 10)));
-    try trades.append(allocator, try book.addOrder(orderbook.Order.init(5, .GoodTillCancel, .Sell, 12, 10)));
-    try trades.append(allocator, try book.addOrder(orderbook.Order.init(6, .GoodTillCancel, .Sell, 10, 10)));
-    // try trades.append(allocator, try book.addOrder(orderbook.Order.init(6, .GoodTillCancel, .Sell, 7, 10)));
-    // _ = try book.addOrder(order);
-
-    std.log.debug("[DEBUG][main.seedOrderbook] Trades made: {any}", .{trades});
-    std.log.debug("[DEBUG][main.seedOrderbook] Trades made on the sell: {any}", .{trades.items[4].items});
-    // std.log.debug("[DEBUG][main.seedOrderbook] Trades made on the sell: {any}", .{trades.items[5].items});
-    // std.log.debug("[DEBUG][main.seedOrderbook] Trades made on the sell: {any}", .{trades.items[4].items});
-
-    return book;
-}
+// pub fn seedOrderbook(allocator: std.mem.Allocator) !OrderBook {
+//     var book = try OrderBook.init(allocator, 1);
+//
+//     var trades = try std.ArrayList(OrderBook.Trades).initCapacity(allocator, 10);
+//     defer trades.deinit(allocator);
+//
+//     try trades.append(allocator, try book.addOrder(OrderBook.Order.init(1, .GoodTillCancel, .Buy, 10, 1)));
+//     try trades.append(allocator, try book.addOrder(OrderBook.Order.init(2, .GoodTillCancel, .Buy, 11, 3)));
+//     try trades.append(allocator, try book.addOrder(OrderBook.Order.init(3, .GoodTillCancel, .Buy, 9, 10)));
+//     try trades.append(allocator, try book.addOrder(OrderBook.Order.init(4, .GoodTillCancel, .Buy, 13, 10)));
+//     try trades.append(allocator, try book.addOrder(OrderBook.Order.init(5, .GoodTillCancel, .Sell, 12, 10)));
+//     try trades.append(allocator, try book.addOrder(OrderBook.Order.init(6, .GoodTillCancel, .Sell, 10, 10)));
+//     // try trades.append(allocator, try book.addOrder(orderbook.Order.init(6, .GoodTillCancel, .Sell, 7, 10)));
+//     // _ = try book.addOrder(order);
+//
+//     std.log.debug("[DEBUG][main.seedOrderbook] Trades made: {any}", .{trades});
+//     std.log.debug("[DEBUG][main.seedOrderbook] Trades made on the sell: {any}", .{trades.items[4].items});
+//     // std.log.debug("[DEBUG][main.seedOrderbook] Trades made on the sell: {any}", .{trades.items[5].items});
+//     // std.log.debug("[DEBUG][main.seedOrderbook] Trades made on the sell: {any}", .{trades.items[4].items});
+//
+//     return book;
+// }
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -43,12 +42,12 @@ pub fn main() !void {
 
     const config = env.init();
 
-    var book = try seedOrderbook(allocator);
-    defer book.deinit();
-    const stats = book.snapshot();
-
-    std.log.debug("[DEBUG][main] Orderbook: size {}", .{book.size()});
-    std.log.debug("[DEBUG][main] Stats: {any}", .{stats});
+    // var book = try seedOrderbook(allocator);
+    // defer book.deinit();
+    // const stats = book.snapshot();
+    //
+    // std.log.debug("[DEBUG][main] Orderbook: size {}", .{book.size()});
+    // std.log.debug("[DEBUG][main] Stats: {any}", .{stats});
 
     var tcp_server = try networking.server.TcpServer.init(allocator, .{
         .ip = "127.0.0.1",
@@ -60,7 +59,11 @@ pub fn main() !void {
 
     // try game.start(allocator);
 
-    game.init(allocator);
+    game.init(
+        allocator,
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
+    );
 
     sapp.run(.{
         .init_cb = init,
@@ -89,6 +92,11 @@ pub fn main() !void {
 
 export fn init() void {
     game.setup();
+    // game.setup() catch |err| {
+    //     std.log.err("[ERROR][main] Init: {}", .{err});
+    //     sapp.quit();
+    //     // game.shutdown();
+    // };
 }
 
 export fn frame() void {

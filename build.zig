@@ -11,11 +11,11 @@ const Options = struct {
 
 const Dep = struct {
     name: []const u8,
-    cname: []const u8 = "",
     root_path: []const u8,
-    d: *std.Build.Dependency,
-    is_link: bool = false,
+    module: *std.Build.Module,
     use_emscripten: bool = false,
+    artifact: ?*std.Build.Step.Compile = null,
+    builder: ?*std.Build = null,
 };
 
 pub fn build(b: *std.Build) void {
@@ -28,6 +28,11 @@ pub fn build(b: *std.Build) void {
     });
 
     const protobuf_dep = b.dependency("protobuf", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const tracy = b.dependency("tracy", .{
         .target = target,
         .optimize = optimize,
     });
@@ -54,6 +59,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const zflecs = b.dependency("zflecs", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // inject the cimgui header search path into the sokol C library compile step
     dep_sokol.artifact("sokol_clib").addIncludePath(dep_cimgui.path("src")); // Normal
 
@@ -67,12 +77,12 @@ pub fn build(b: *std.Build) void {
     gen_proto.dependOn(&protoc_step.step);
 
     const mod = b.createModule(.{
-        // .name = "orderbook",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
             .{ .name = "networking", .module = mod_networking },
+            // .{ .name = "ecs", .module = mod_ecs },
             .{ .name = "protobuf", .module = protobuf_dep.module("protobuf") },
             // .{ .name = "dvui", .module = dvui_dep.module("dvui_sdl3") },
             // .{ .name = "sdl-backend", .module = dvui_dep.module("sdl3") },
@@ -88,17 +98,24 @@ pub fn build(b: *std.Build) void {
                 .name = "cimgui",
                 .module = dep_cimgui.module("cimgui"),
             },
+            .{
+                .name = "tracy",
+                .module = tracy.module("tracy"),
+            },
             // .{ .name = "shader", .module = try createShaderModule(b, dep_sokol) },
+            .{
+                .name = "zflecs",
+                .module = zflecs.module("root"),
+            },
         },
     });
 
-    // b.installArtifact(exe);
-
     var deps = [_]Dep{
-        .{ .d = dep_sokol, .name = "sokol", .root_path = "sokol", .use_emscripten = true },
-        .{ .d = dep_cimgui, .name = "cimgui", .root_path = "cimgui" },
-        .{ .d = dep_zecs, .name = "zecs", .root_path = "zig-ecs" },
-        // .{ .d = dep_zecs, .name = "zflecs", .cname = "flecs", .root_path = "root", .is_link = true },
+        .{ .module = dep_sokol.module("sokol"), .name = "sokol", .root_path = "sokol", .use_emscripten = true, .builder = dep_sokol.builder },
+        .{ .module = dep_cimgui.module("cimgui"), .name = "cimgui", .root_path = "cimgui" },
+        // .{ .d = dep_zecs, .name = "zecs", .root_path = "zig-ecs" },
+        .{ .module = tracy.module("tracy"), .name = "tracy", .root_path = "tracy" },
+        .{ .module = zflecs.module("root"), .name = "zflecs", .root_path = "root", .artifact = zflecs.artifact("flecs") },
     };
 
     // special case handling for native vs web build
@@ -108,50 +125,7 @@ pub fn build(b: *std.Build) void {
     } else {
         try buildNative(b, opts, &deps);
     }
-
-    // const run_step = b.step("run", "Run the app");
-    //
-    // const run_cmd = b.addRunArtifact(exe);
-    // run_step.dependOn(&run_cmd.step);
-    //
-    // run_step.dependOn(gen_proto);
-    //
-    // run_cmd.step.dependOn(b.getInstallStep());
-    //
-    // if (b.args) |args| {
-    //     run_cmd.addArgs(args);
-    // }
-    //
-    // const mod_tests = b.addTest(.{
-    //     .root_module = mod_networking,
-    // });
-    //
-    // // A run step that will run the test executable.
-    // const run_mod_tests = b.addRunArtifact(mod_tests);
-    //
-    // const exe_tests = b.addTest(.{
-    //     .root_module = exe.root_module,
-    // });
-    //
-    // const run_exe_tests = b.addRunArtifact(exe_tests);
-    //
-    // const test_step = b.step("test", "Run tests");
-    // test_step.dependOn(&run_mod_tests.step);
-    // test_step.dependOn(&run_exe_tests.step);
 }
-
-// fn generateProtobuf(b: *std.Build, proto_dep: *std.Build.Dependency, target: std.Build.ResolvedTarget) void {
-//     const gen_proto = b.step("gen-proto", "generate zig files from protocol buffer definitions");
-//
-//     const protoc_step = protobuf.RunProtocStep.create(proto_dep.*.builder, target, .{
-//         .destination_directory = b.path("src/proto"),
-//         .source_files = &.{main_proto_entry},
-//         .include_directories = &.{},
-//     });
-//
-//     std.log.info("Hello from build", .{});
-//     gen_proto.dependOn(&protoc_step.step);
-// }
 
 fn buildNative(b: *std.Build, opts: Options, deps: []Dep) !void {
     const exe = b.addExecutable(.{
@@ -159,10 +133,20 @@ fn buildNative(b: *std.Build, opts: Options, deps: []Dep) !void {
         .root_module = opts.mod,
     });
 
+    const mod_ecs = b.createModule(.{
+        .root_source_file = b.path("src/game/ecs/ecs.zig"),
+    });
+
     for (deps) |dep| {
-        exe.root_module.addImport(dep.name, dep.d.module(dep.root_path));
-        if (dep.is_link) {
-            exe.linkLibrary(dep.d.artifact(dep.cname));
+        mod_ecs.addImport(dep.name, dep.module);
+    }
+
+    exe.root_module.addImport("ecs", mod_ecs);
+
+    for (deps) |dep| {
+        exe.root_module.addImport(dep.name, dep.module);
+        if (dep.artifact != null) {
+            exe.root_module.linkLibrary(dep.artifact.?);
         }
     }
 
@@ -178,12 +162,12 @@ fn buildWeb(b: *std.Build, opts: Options, deps: []Dep) !void {
     });
 
     for (deps) |dep| {
-        lib.root_module.addImport(dep.name, dep.d.module(dep.root_path));
-        if (dep.is_link) {
-            lib.linkLibrary(dep.d.artifact(dep.name));
+        lib.root_module.addImport(dep.name, dep.module);
+        if (dep.artifact != null) {
+            lib.root_module.linkLibrary(dep.artifact.?);
         }
         if (dep.use_emscripten) {
-            const emsdk = dep.d.builder.dependency("emsdk", .{});
+            const emsdk = dep.builder.?.dependency("emsdk", .{});
             const link_step = try sokol.emLinkStep(b, .{
                 .lib_main = lib,
                 .target = opts.mod.resolved_target.?,

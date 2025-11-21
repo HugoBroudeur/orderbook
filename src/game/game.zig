@@ -6,18 +6,22 @@ const slog = sokol.log;
 const sapp = sokol.app;
 // const use_docking = @import("build_options").docking;
 const ig = @import("cimgui");
+const tracy = @import("tracy");
 // // const Delil = @import("gfx/delil_imgui.zig");
 // const Delilv2 = @import("gfx/delil_v2.zig");
 // const Delil = @import("gfx/delil.zig");
 // const delil_pass = @import("gfx/render_pass.zig");
-const ui = @import("ui/ui.zig");
-const Ecs = @import("ecs/ecs.zig");
+const Ecs = @import("ecs");
 // const shape = @import("math/shape.zig");
 // const logger = @import("debug/log.zig");
 
 const simgui = sokol.imgui;
 
 const Game = @This();
+
+pub const GameError = error{
+    ErrorInitialisation,
+};
 
 const game_allocator: std.mem.Allocator = undefined;
 var ecs: Ecs = undefined;
@@ -26,6 +30,16 @@ const state = struct {
     var pass_action: sg.PassAction = .{};
     var show_first_window: bool = true;
     var show_second_window: bool = true;
+
+    var window_width: u32 = 0;
+    var window_height: u32 = 0;
+    var is_demo_open = true;
+
+    var progress: f32 = 0;
+    var progress_dir: f32 = 1;
+    var progress_bar_overlay: [32]u8 = undefined;
+
+    var is_buy_button_clicked = false;
 };
 
 const FRAMES_PER_SECOND = 60.0;
@@ -42,11 +56,16 @@ var timing: Timing = .{
     },
 };
 
-pub fn init(allocator: std.mem.Allocator) void {
+pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) void {
+    tracy.frameMarkStart("Main");
     ecs = Ecs.init(allocator) catch |err| {
-        std.log.err("Can't initiate Delil: {}", .{err});
+        std.log.err("[ERROR][game.init] Can't initiate : {}", .{err});
         shutdown();
+        return;
     };
+
+    state.window_width = width;
+    state.window_height = height;
 
     // return .{
     //     .allocator = allocator,
@@ -65,9 +84,21 @@ pub fn setup() void {
     });
     sokol.time.setup();
 
-    simgui.setup(.{
-        .logger = .{ .func = slog.func },
-    });
+    ecs.build_world() catch |err| {
+        std.log.err("[ERROR][game.init] Can't build the world : {}", .{err});
+        return;
+    };
+
+    // simgui.setup(.{
+    //     .logger = .{ .func = slog.func },
+    // });
+
+    // try ecs.build_world();
+    // if (!ecs.reg.singletons().has(data.RenderPass)) {
+    //     std.log.err("[Game] Render Pass not initialised in the ECS", .{});
+    //     return GameError.ErrorInitialisation;
+    // }
+    // var render_pass = ecs.reg.singletons().get(data.RenderPass);
 
     state.pass_action.colors[0] = .{
         .load_action = .CLEAR,
@@ -87,112 +118,34 @@ pub fn frame() void {
     // const width = sapp.width();
     // const height = sapp.height();
 
-    var col = sg.Color{ .a = 1 };
-    col.r = @abs(@cos(timef()));
-    col.g = @abs(@sin(timef()));
-    col.b = @abs(@tan(timef()));
-
     // Get current window size.
     // const ratio: f32 = @divExact(@as(f32, @floatFromInt(width)), @as(f32, @floatFromInt(height)));
+    // tracy.frameMark("yo yo");
 
-    // delil.state.begin(width, height) catch ;
     if (true) {
         ecs.progress();
+        // const render_pass = ecs.reg.singletons().get(data.RenderPass);
 
-        // call simgui.newFrame() before any ImGui calls
-        simgui.newFrame(.{
-            .width = sapp.width(),
-            .height = sapp.height(),
-            .delta_time = sapp.frameDuration(),
-            .dpi_scale = sapp.dpiScale(),
-        });
-
-        const backendName: [*c]const u8 = switch (sg.queryBackend()) {
-            .D3D11 => "Direct3D11",
-            .GLCORE => "OpenGL",
-            .GLES3 => "OpenGLES3",
-            .METAL_IOS => "Metal iOS",
-            .METAL_MACOS => "Metal macOS",
-            .METAL_SIMULATOR => "Metal Simulator",
-            .WGPU => "WebGPU",
-            .DUMMY => "Dummy",
-        };
-
-        //=== UI CODE STARTS HERE
-        ig.igSetNextWindowPos(.{ .x = 10, .y = 10 }, ig.ImGuiCond_Once);
-        ig.igSetNextWindowSize(.{ .x = 400, .y = 100 }, ig.ImGuiCond_Once);
-        if (ig.igBegin("Hello Dear ImGui!", &state.show_first_window, ig.ImGuiWindowFlags_None)) {
-            _ = ig.igColorEdit3("Background", &state.pass_action.colors[0].clear_value.r, ig.ImGuiColorEditFlags_None);
-            _ = ig.igText("Dear ImGui Version: %s", ig.IMGUI_VERSION);
-        }
-        ig.igEnd();
-
-        ig.igSetNextWindowPos(.{ .x = 50, .y = 120 }, ig.ImGuiCond_Once);
-        ig.igSetNextWindowSize(.{ .x = 400, .y = 100 }, ig.ImGuiCond_Once);
-        if (ig.igBegin("Another Window", &state.show_second_window, ig.ImGuiWindowFlags_None)) {
-            _ = ig.igText("Sokol Backend: %s", backendName);
-        }
-        ig.igEnd();
-        //=== UI CODE ENDS HERE
-
-        // call simgui.render() inside a sokol-gfx pass
-        sg.beginPass(.{ .action = state.pass_action, .swapchain = sglue.swapchain() });
+        // sg.beginPass(.{ .action = state.pass_action, .swapchain = sglue.swapchain() });
         // ecs.render(&state.pass_action);
-        simgui.render();
-        sg.endPass();
-        sg.commit();
-
-        // for (&gfx.passes) |*pass| {
-        //     ecs.render(pass);
-        //     // pass.draw(pass);
-        //     if (gfx.begin(width, height)) {} else |err| {
-        //         std.log.err("[DELIL]Can't draw DELIL frame: {}", .{err});
-        //     }
-        //
-        //     // // Set frame buffer drawing region to (0,0,width,height).
-        //     if (gfx.setViewport(.{ .x = 0, .y = 0, .w = width, .h = height })) {} else |err| {
-        //         std.log.err("[DELIL]Can't draw DELIL hexagon: {}", .{err});
-        //     }
-        //     // // Set drawing coordinate space to (left=-ratio, right=ratio, top=1, bottom=-1).
-        //     // gfx2.state.projection(-ratio, ratio, 1.0, -1.0);
-        //     gfx.set_color(col);
-        //     // gfx2.drawHexagon(.{ .x = 0, .y = 0 }) catch unreachable;
-        //
-        //     sg.beginPass(pass.pass);
-        //     // sg.beginPass(.{ .swapchain = sglue.swapchain() });
-        //     if (gfx.flush()) {} else |err| {
-        //         std.log.err("[GAME]Can't flush DELIL: {}", .{err});
-        //     }
-        //
-        //     if (gfx.end()) {} else |err| {
-        //         std.log.err("[GAME]Can't end DELIL: {}", .{err});
-        //     }
-        //
-        //     sg.endPass();
-        //
-        //     // sg.beginPass(.{ .swapchain = sglue.swapchain() });
-        //     // ui.frame(pass.render_texture);
-        //     // sg.endPass();
-        // }
-        // gfx.render(ecs.render_systems);
+        // simgui.render();
+        // sg.endPass();
+        // sg.commit();
     }
-
-    { // Render UI
-    }
-    sg.commit();
 }
 
 pub fn shutdown() void {
     ecs.deinit();
     // gfx.deinit();
-    ui.shutdown();
     sg.shutdown();
+
+    tracy.cleanExit();
 }
 
 pub fn handleEvent(ev: [*c]const sapp.Event) void {
     // var e = ev.*;
 
-    // ecs.collect(ev.*);
+    ecs.collect(ev.*);
     // ecs.collectSokolEvent(e) catch unreachable; // TODO: improve, can fail memory allocation
     //
     // ecs.consumeEvent();
@@ -205,7 +158,7 @@ pub fn handleEvent(ev: [*c]const sapp.Event) void {
     //     }
     // }
 
-    ui.handleEvent(ev);
+    _ = simgui.handleEvent(ev.*);
 }
 
 const Timing = struct {
@@ -233,4 +186,15 @@ const FixedFramerate = struct {
 
 pub fn timef() f32 {
     return @floatCast(sokol.time.sec(sokol.time.now()));
+}
+
+fn makeComboItems(comptime items: anytype) [*c]const u8 {
+    comptime var buffer: []const u8 = "";
+
+    inline for (items) |item| {
+        buffer = buffer ++ item ++ "\x00";
+    }
+
+    buffer = buffer ++ "\x00";
+    return buffer.ptr;
 }

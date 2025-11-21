@@ -3,7 +3,6 @@ const data = @import("../data.zig");
 // const log = @import("../../debug/log.zig").ecs;
 const System = @import("system.zig");
 const ig = @import("cimgui");
-const utils = @import("../utils.zig");
 
 pub const CameraSystem = struct {
     const Self = @This();
@@ -40,7 +39,7 @@ pub const CameraSystem = struct {
         const i = reg.singletons().getConst(data.EnvironmentInfo);
         // log.debug("[ECS.System][DEBUG] World time {}", .{i.world_time});
 
-        self.updatePrimaryCamera(reg);
+        // self.updatePrimaryCamera(reg);
 
         // Reset viewport
         self.camera.resetViewport(i.window_width, i.window_height);
@@ -51,11 +50,11 @@ pub const CameraSystem = struct {
         // self.renderCameraControlUi();
     }
 
-    fn updatePrimaryCamera(self: *Self, reg: *zecs.Registry) void {
-        if (utils.getPrimaryCamera(reg)) |camera| {
-            self.camera = camera;
-        }
-    }
+    // fn updatePrimaryCamera(self: *Self, reg: *zecs.Registry) void {
+    //     // if (utils.getPrimaryCamera(reg)) |camera| {
+    //     self.camera = camera;
+    // }
+    // }
 
     fn handleCameraControl(self: *Self, reg: *zecs.Registry) void {
         const is = reg.singletons().getConst(data.InputsState);
