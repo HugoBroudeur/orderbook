@@ -64,6 +64,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const zcs = b.dependency("zcs", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // inject the cimgui header search path into the sokol C library compile step
     dep_sokol.artifact("sokol_clib").addIncludePath(dep_cimgui.path("src")); // Normal
 
@@ -107,6 +112,10 @@ pub fn build(b: *std.Build) void {
                 .name = "zflecs",
                 .module = zflecs.module("root"),
             },
+            .{
+                .name = "zcs",
+                .module = zcs.module("zcs"),
+            },
         },
     });
 
@@ -116,6 +125,7 @@ pub fn build(b: *std.Build) void {
         // .{ .d = dep_zecs, .name = "zecs", .root_path = "zig-ecs" },
         .{ .module = tracy.module("tracy"), .name = "tracy", .root_path = "tracy" },
         .{ .module = zflecs.module("root"), .name = "zflecs", .root_path = "root", .artifact = zflecs.artifact("flecs") },
+        .{ .module = zcs.module("zcs"), .name = "zcs", .root_path = "zcs" },
     };
 
     // special case handling for native vs web build

@@ -1,8 +1,7 @@
 const std = @import("std");
-const logger = @import("../logger.zig");
 
 // const zecs = @import("zecs");
-const f = @import("zflecs");
+const ecs = @import("../ecs.zig");
 const RenderSystem = @import("render_system.zig");
 const RenderingPipeline = @import("../rendering_pipeline.zig");
 
@@ -23,39 +22,40 @@ pub fn system(self: *SokolRenderSystem) RenderSystem {
     return RenderSystem.init(self);
 }
 
-pub fn render(self: *SokolRenderSystem, world: *f.world_t, pass_action: *sg.PassAction) void {
+pub fn render(self: *SokolRenderSystem, world: *ecs.zflecs.world_t, pass_action: *sg.PassAction) void {
     _ = &world;
     _ = &self;
     _ = &pass_action;
 }
 
-pub fn setup(self: *SokolRenderSystem, world: *f.world_t) void {
-    // _ = world;
+pub fn setup(self: *SokolRenderSystem) void {
     _ = &self;
 
-    _ = f.ADD_SYSTEM(world, "begin_sokol_pass", RenderingPipeline.BeginSokolPass, begin_render_pass);
-    _ = f.ADD_SYSTEM(world, "render_sokol_pass", RenderingPipeline.RenderSokolPass, render_pass);
-    _ = f.ADD_SYSTEM(world, "end_sokol_pass", RenderingPipeline.EndSokolPass, end_render_pass);
-    // _ = f.ADD_SYSTEM(w, "market-trade-view", f.OnStore, renderMarketView);
-    // _ = f.ADD_SYSTEM(w, "render_ui", f.OnStore, renderUi);
+    // _ = ecs.zflecs.ADD_SYSTEM(world, "begin_sokol_pass", RenderingPipeline.BeginSokolPass, begin_render_pass);
+    // _ = ecs.zflecs.ADD_SYSTEM(world, "render_sokol_pass", RenderingPipeline.RenderSokolPass, render_pass);
+    // _ = ecs.zflecs.ADD_SYSTEM(world, "end_sokol_pass", RenderingPipeline.EndSokolPass, end_render_pass);
+    // _ = ecs.zflecs.ADD_SYSTEM(w, "market-trade-view", ecs.zflecs.OnStore, renderMarketView);
+    // _ = ecs.zflecs.ADD_SYSTEM(w, "render_ui", ecs.zflecs.OnStore, renderUi);
 
-    // const env_info = f.singleton_ensure(world, data.SingletonMarketData);
+    // ecs.register_system(world: *world_t, name: [*:0]const u8, callback: *const fn (*iter_t) void, update_ctx: anytype, terms: []const term_t)
+
+    // const env_info = ecs.zflecs.singleton_ensure(world, data.SingletonMarketData);
 }
 
-fn begin_render_pass(it: *f.iter_t) void {
-    logger.ecs().info("[SokolRenderSystem.begin_render_pass]", .{});
-    const pass_action = f.singleton_ensure(it.world, sg.PassAction);
+pub fn begin_render_pass(ctx: struct { cb: *ecs.CmdBuf }, pass_action: *sg.PassAction) void {
+    ecs.logger.info("[SokolRenderSystem.begin_render_pass]", .{});
+
+    _ = ctx;
+
     sg.beginPass(.{ .action = pass_action.*, .swapchain = sglue.swapchain() });
 }
 
-fn render_pass(it: *f.iter_t) void {
-    logger.ecs().info("[SokolRenderSystem.render_pass]", .{});
-    _ = &it;
+pub fn render_pass() void {
+    ecs.logger.info("[SokolRenderSystem.render_pass]", .{});
     sg.endPass();
 }
 
-fn end_render_pass(it: *f.iter_t) void {
-    logger.ecs().info("[SokolRenderSystem.end_render_pass]", .{});
-    _ = &it;
+pub fn end_render_pass() void {
+    ecs.logger.info("[SokolRenderSystem.end_render_pass]", .{});
     sg.commit();
 }

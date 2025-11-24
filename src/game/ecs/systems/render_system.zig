@@ -3,7 +3,7 @@
 const std = @import("std");
 const sokol = @import("sokol");
 const sg = sokol.gfx;
-const f = @import("zflecs");
+const ecs = @import("../ecs.zig");
 
 const RenderSystem = @This();
 
@@ -11,15 +11,15 @@ ptr: *anyopaque,
 vtable: *const VTable,
 
 pub const VTable = struct {
-    setup: *const fn (*anyopaque, world: *f.world_t) void,
-    render: *const fn (*anyopaque, world: *f.world_t, pass_action: *sg.PassAction) void,
+    setup: *const fn (*anyopaque) void,
+    render: *const fn (*anyopaque, world: *ecs.zflecs.world_t, pass_action: *sg.PassAction) void,
     deinit: *const fn (*anyopaque) void,
 };
 
-pub fn setup(self: RenderSystem, world: *f.world_t) void {
-    return self.vtable.setup(self.ptr, world);
+pub fn setup(self: RenderSystem) void {
+    return self.vtable.setup(self.ptr);
 }
-pub fn render(self: RenderSystem, world: *f.world_t, pass_action: *sg.PassAction) void {
+pub fn render(self: RenderSystem, world: *ecs.zflecs.world_t, pass_action: *sg.PassAction) void {
     return self.vtable.render(self.ptr, world, pass_action);
 }
 pub fn deinit(self: RenderSystem) void {
@@ -31,11 +31,11 @@ pub fn init(ptr: anytype) RenderSystem {
     const ptr_info = @typeInfo(T);
 
     const Impl = struct {
-        pub fn setup(impl: *anyopaque, world: *f.world_t) void {
+        pub fn setup(impl: *anyopaque) void {
             const self: T = @ptrCast(@alignCast(impl));
-            return ptr_info.pointer.child.setup(self, world);
+            return ptr_info.pointer.child.setup(self);
         }
-        pub fn render(impl: *anyopaque, world: *f.world_t, pass_action: *sg.PassAction) void {
+        pub fn render(impl: *anyopaque, world: *ecs.zflecs.world_t, pass_action: *sg.PassAction) void {
             const self: T = @ptrCast(@alignCast(impl));
             return ptr_info.pointer.child.render(self, world, pass_action);
         }

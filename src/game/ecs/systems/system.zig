@@ -1,8 +1,7 @@
 // Interface definition for a system, using Vtable
 // const zecs = @import("zecs");
 const std = @import("std");
-const f = @import("zflecs");
-// const ecs = @import("../ecs.zig");
+const ecs = @import("../ecs.zig");
 
 const System = @This();
 
@@ -12,8 +11,8 @@ vtable: *const VTable,
 pub const VTable = struct {
     // setup: *const fn (*anyopaque, reg: *zecs.Registry) void,
     // update: *const fn (*anyopaque, reg: *zecs.Registry) void,
-    setup: *const fn (*anyopaque, world: *f.world_t) void,
-    update: *const fn (*anyopaque, world: *f.world_t) void,
+    setup: *const fn (*anyopaque, world: *ecs.zflecs.world_t) void,
+    update: *const fn (*anyopaque, world: *ecs.zflecs.world_t) void,
     deinit: *const fn (*anyopaque) void,
 };
 
@@ -23,10 +22,10 @@ pub const VTable = struct {
 // pub fn update(self: System, reg: *zecs.Registry) void {
 //     return self.vtable.update(self.ptr, reg);
 // }
-pub fn setup(self: System, world: *f.world_t) void {
+pub fn setup(self: System, world: *ecs.zflecs.world_t) void {
     return self.vtable.setup(self.ptr, world);
 }
-pub fn update(self: System, world: *f.world_t) void {
+pub fn update(self: System, world: *ecs.zflecs.world_t) void {
     return self.vtable.update(self.ptr, world);
 }
 pub fn deinit(self: System) void {
@@ -39,12 +38,12 @@ pub fn init(ptr: anytype) System {
     const ptr_info = @typeInfo(T);
     const Impl = struct {
         // fn setup(impl: *anyopaque, reg: *zecs.Registry) void {
-        fn setup(impl: *anyopaque, world: *f.world_t) void {
+        fn setup(impl: *anyopaque, world: *ecs.zflecs.world_t) void {
             const self: T = @ptrCast(@alignCast(impl));
             return ptr_info.pointer.child.setup(self, world);
         }
         // fn update(impl: *anyopaque, reg: *zecs.Registry) void {
-        fn update(impl: *anyopaque, world: *f.world_t) void {
+        fn update(impl: *anyopaque, world: *ecs.zflecs.world_t) void {
             const self: T = @ptrCast(@alignCast(impl));
             return ptr_info.pointer.child.update(self, world);
         }

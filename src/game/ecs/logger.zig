@@ -5,12 +5,14 @@ const Logger = @This();
 var log_render_system = true;
 var counter: usize = 0;
 
+var max_logs: usize = 100;
+
 pub fn info(
     comptime format: []const u8,
     args: anytype,
 ) void {
     counter += 1;
-    if (counter > 20) {
+    if (counter > max_logs) {
         return;
     }
     if (!log_render_system) {

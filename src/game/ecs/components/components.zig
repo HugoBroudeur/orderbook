@@ -42,7 +42,8 @@ pub const TickRate = struct {
 };
 
 pub const Resource = struct {
-    asset: MetalTypes,
+    name: []const u8,
+    type: ResourceTypes,
     qty_owned: u32 = 0,
     qty_max: u32 = 100,
 
@@ -61,6 +62,10 @@ pub const Resource = struct {
         }
         self.qty_owned -= qty;
     }
+
+    pub fn getName(self: Resource) []const u8 {
+        return self.type.getName();
+    }
 };
 
 pub const Generator = struct {
@@ -75,12 +80,12 @@ pub const Converter = struct {
 };
 
 pub const RecipeInput = struct {
-    asset: MetalTypes,
+    asset: ResourceTypes,
     qty: u32 = 1,
 };
 
 pub const RecipeOutput = struct {
-    asset: MetalTypes,
+    asset: ResourceTypes,
     qty: u32 = 1,
 };
 
@@ -88,17 +93,8 @@ pub const Error = error{
     NotEnoughResource,
 };
 
-pub const UnlockState = struct {
-    resources: std.EnumMap(MetalTypes, bool) = .initFull(false),
-
-    pub fn unlock_resource(self: *UnlockState, res: MetalTypes) void {
-        self.resources.put(res, true);
-    }
-
-    pub fn is_resource_unlocked(self: *UnlockState, res: MetalTypes) bool {
-        return self.resources.get(res) orelse false;
-    }
-};
+pub const Locked = struct {};
+pub const Unlocked = struct {};
 
 // ██╗   ██╗██╗
 // ██║   ██║██║
@@ -122,18 +118,34 @@ pub const UIState = struct {
         &@tagName(Styles.Theme.enemymouse).*,
         &@tagName(Styles.Theme.spectrum_light).*,
     },
-    window_width: u32 = 0,
-    window_height: u32 = 0,
+    window_width: u32 = 600,
+    window_height: u32 = 600,
     is_demo_open: bool = true,
     progress: f32 = 0,
     progress_dir: f32 = 1,
     progress_bar_overlay: [32]u8 = undefined,
     is_buy_button_clicked: bool = false,
 
+    current_tab: MainMenuTab = .HQ,
+
+    pass_action: *sg.PassAction = undefined,
+
     resource_view_ui: struct {
         selected_resource_to_add_id: u8 = 0,
-        selected_resource_to_add: MetalTypes = undefined,
+        selected_resource_to_add: ResourceTypes = .{ .metal = .Iron },
+        // resource_availables: std.EnumMap(MetalTypes, bool) = .initFull(false),
+        // mt_availables: std.EnumMap(MetalTypes, bool) = .initFull(false),
     } = .{},
+};
+
+pub const MainMenuTab = enum {
+    HQ,
+    Market,
+    Resources,
+    Characters,
+    Team,
+    Adventures,
+    Gambits,
 };
 
 //  ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗██╗ ██████╗███████╗
@@ -270,25 +282,30 @@ pub const CircleCollider2D = struct {
 // ╚██████╔╝██║  ██║██████╔╝███████╗██║  ██║    ██████╔╝╚██████╔╝╚██████╔╝██║  ██╗
 //  ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝    ╚═════╝  ╚═════╝  ╚═════╝ ╚═╝  ╚═╝
 
-pub const OrderBook = @import("orderbook.zig");
-
-pub const OrderBookPtr = struct {
-    ptr: *OrderBook,
-};
+pub const OrderBook = @import("game_orderbook.zig");
 
 pub const MarketTrading = struct {
     book: OrderBook,
-    asset: MetalTypes,
+    asset: ResourceTypes,
+    is_available: bool = false,
+
+    pub fn setAvailability(self: *MarketTrading, available: bool) void {
+        self.is_available = available;
+    }
+
+    pub fn isAvailable(self: *MarketTrading) bool {
+        return self.is_available;
+    }
 };
 
 pub const MarketAsset = struct {
     name: []const u8,
 };
 
-pub const SingletonMarketData = struct {
+pub const MarketData = struct {
     last_order_id: u32 = 0,
 
-    pub fn getNextId(self: *SingletonMarketData) u32 {
+    pub fn getNextId(self: *MarketData) u32 {
         self.last_order_id += 1;
         return self.last_order_id;
     }
@@ -519,23 +536,160 @@ fn CameraMaker(comptime T: CameraType) type {
 // ██║  ██║███████║███████║███████╗   ██║   ███████║
 // ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝   ╚═╝   ╚══════╝
 
-pub const MetalTypes = enum {
-    iron,
-    steel,
-    copper,
-    silver,
-    gold,
-    tin,
-    lead,
-    aluminium,
-    nickel,
-    zinc,
-    titanium,
-    tungsten,
-    silicon,
-    cobalt,
-    uranium,
-    chromium,
-    bismuth,
-    manganese,
+pub const Assets = struct {
+    resources: AssetResources,
+    manufactured: AssetManufactured,
+    vehicles: AssetVehicles,
+    equipments: AssetEquiments,
+};
+
+pub const ResourceTypeTag = enum {
+    electronics,
+    metal,
+    ore,
+    wood,
+};
+
+pub const ResourceTypes = union(ResourceTypeTag) {
+    electronics: ElectronicsTypes,
+    metal: MetalTypes,
+    ore: OreTypes,
+    wood: WoodTypes,
+
+    pub fn getName(self: ResourceTypes) []const u8 {
+        switch (self) {
+            ResourceTypeTag.metal => return @tagName(self.metal),
+            ResourceTypeTag.ore => return @tagName(self.ore),
+            ResourceTypeTag.electronics => return @tagName(self.electronics),
+            ResourceTypeTag.wood => return @tagName(self.wood),
+        }
+    }
+
+    pub fn isEqualTo(self: ResourceTypes, res: ResourceTypes) bool {
+        if (std.meta.activeTag(self) != std.meta.activeTag(res)) {
+            return false;
+        }
+
+        switch (res) {
+            ResourceTypeTag.metal => return self.metal == res.metal,
+            ResourceTypeTag.ore => return self.ore == res.ore,
+            ResourceTypeTag.electronics => return self.electronics == res.electronics,
+            ResourceTypeTag.wood => return self.wood == res.wood,
+        }
+    }
+};
+
+pub const AssetManufactured = struct {
+    electronics: []ElectronicsTypes,
+};
+pub const AssetResources = struct {
+    metals: []MetalTypes,
+    ores: []OreTypes,
+    woods: []WoodTypes,
+};
+
+pub const AssetVehicles = struct {
+    parts: VehiclesPartTypes,
+};
+
+pub const AssetEquiments = struct {
+    weapons: []WeaponTypes,
+    body_armors: []BodyArmorTypes,
+};
+
+pub const WeaponTypes = enum(u8) {
+    Sword,
+    Dagger,
+    Knife,
+    Stilleto,
+    Flail,
+    Gloves,
+    Katana,
+    Ninjeto,
+};
+
+pub const BodyArmorTypes = enum(u8) {
+    Leather,
+    Cloth,
+    Heavy,
+};
+
+pub const VehiclesPartTypes = enum(u8) {
+    Wheels,
+    Breaks,
+};
+pub const ElectronicsTypes = enum(u8) {
+    NanoBattery,
+    LogicChip,
+    Microprocessor,
+    PhotogenicSensor,
+    QuantumChip,
+};
+pub const OreTypes = enum(u8) {
+    IronOre,
+    CopperOre,
+    TinOre,
+    ZincOre,
+    LeadOre,
+    NickelOre,
+    CobaltOre,
+    SilverOre,
+    GoldOre,
+    Bauxite,
+    UraniumOre,
+    TitaniumOre,
+    ChromiumOre,
+    TungstenOre,
+    ManganeseOre,
+    PlatinumOres,
+    VanadiumOre,
+    LithiumOre,
+    RareEarthOre,
+    MercuryOre,
+};
+
+pub const WoodTypes = enum(u8) {
+    Oak,
+    Timber,
+    Pine,
+    Cedar,
+    Birch,
+    Maple,
+    Ash,
+    Teak,
+    Walnut,
+    Yew,
+    Mahogany,
+    Ebony,
+};
+
+pub const MetalTypes = enum(u8) {
+    Iron,
+    Steel,
+    Copper,
+    Bronze,
+    Brass,
+    Aluminum,
+    Titanium,
+    Tungsten,
+    Nickel,
+    Cobalt,
+    Chromium,
+    Molybdenum,
+    Vanadium,
+    Magnesium,
+    Silver,
+    Gold,
+    Platinum,
+    Palladium,
+    Lithium,
+    Lead,
+    Tin,
+    Bismuth,
+    Silicon,
+    Zinc,
+    Osmium,
+    Iridium,
+    Uramium,
+    Ruthenium,
 };

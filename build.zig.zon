@@ -34,6 +34,10 @@
             .url = "git+https://github.com/zig-gamedev/zflecs#9c484724d7245f585a1a7d8ac67e91f0d764951d",
             .hash = "zflecs-0.2.0-dev-1PN3ym9mOgCyE8w0DdK_Uf7FAob-nm0Dp_lZKR3QyJaC",
         },
+        .zcs = .{
+            .url = "git+https://github.com/Games-by-Mason/ZCS#7c16a294be9aefe7d6b12298c33aa366a01625a9",
+            .hash = "zcs-0.1.0-WhLQ_BZdAwA09X9wloTd688sDOXm2Pd34SKMGL7ee6Yq",
+        },
     },
     .paths = .{
         "build.zig",

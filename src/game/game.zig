@@ -124,6 +124,7 @@ pub fn frame() void {
 
     if (true) {
         ecs.progress();
+        ecs.render();
         // const render_pass = ecs.reg.singletons().get(data.RenderPass);
 
         // sg.beginPass(.{ .action = state.pass_action, .swapchain = sglue.swapchain() });
@@ -149,14 +150,14 @@ pub fn handleEvent(ev: [*c]const sapp.Event) void {
     // ecs.collectSokolEvent(e) catch unreachable; // TODO: improve, can fail memory allocation
     //
     // ecs.consumeEvent();
-    // if (ev.*.type == .KEY_DOWN) {
-    //     switch (ev.*.key_code) {
-    //         // .ESCAPE => sapp.quit(),
-    //         .D => logger.toggle(),
-    //         .W => logger.toggleEcs(),
-    //         else => {},
-    //     }
-    // }
+    if (ev.*.type == .KEY_DOWN) {
+        switch (ev.*.key_code) {
+            .ESCAPE => sapp.quit(),
+            // .D => logger.toggle(),
+            // .W => logger.toggleEcs(),
+            else => {},
+        }
+    }
 
     _ = simgui.handleEvent(ev.*);
 }
