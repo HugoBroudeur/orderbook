@@ -59,10 +59,9 @@ pub fn main() !void {
 
     // try game.start(allocator);
 
-    game.init(
+    try game.init(
         allocator,
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT,
+        config,
     );
 
     sapp.run(.{

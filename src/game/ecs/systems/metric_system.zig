@@ -17,7 +17,7 @@ pub fn setup(self: *MetricSystem, world: *ecs.zflecs.world_t) void {
     _ = &self;
     _ = &world;
 
-    _ = ecs.zflecs.ADD_SYSTEM(world, "system_update_env_info", ecs.zflecs.OnLoad, system_update_env_info);
+    // _ = ecs.zflecs.ADD_SYSTEM(world, "system_update_env_info", ecs.zflecs.OnLoad, system_update_env_info);
 }
 
 pub fn system(self: *MetricSystem) System {
@@ -29,8 +29,9 @@ pub fn update(self: *MetricSystem, world: *ecs.zflecs.world_t) void {
     _ = &world;
 }
 
-fn system_update_env_info(it: *ecs.zflecs.iter_t) void {
-    var i = ecs.zflecs.singleton_ensure(it.world, ecs.components.EnvironmentInfo);
+pub fn system_update_env_info(ctx: struct {}, i: *ecs.components.EnvironmentInfo) void {
+    ecs.logger.info("[MetricSystem.system_update_env_info]", .{});
+    _ = &ctx;
     i.world_time = @floatCast(sokol.time.sec(sokol.time.now()));
     i.window_width = sapp.width();
     i.window_height = sapp.height();

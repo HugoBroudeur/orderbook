@@ -69,6 +69,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const sqlite = b.dependency("sqlite", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // inject the cimgui header search path into the sokol C library compile step
     dep_sokol.artifact("sokol_clib").addIncludePath(dep_cimgui.path("src")); // Normal
 
@@ -116,6 +121,10 @@ pub fn build(b: *std.Build) void {
                 .name = "zcs",
                 .module = zcs.module("zcs"),
             },
+            .{
+                .name = "sqlite",
+                .module = sqlite.module("sqlite"),
+            },
         },
     });
 
@@ -126,6 +135,7 @@ pub fn build(b: *std.Build) void {
         .{ .module = tracy.module("tracy"), .name = "tracy", .root_path = "tracy" },
         .{ .module = zflecs.module("root"), .name = "zflecs", .root_path = "root", .artifact = zflecs.artifact("flecs") },
         .{ .module = zcs.module("zcs"), .name = "zcs", .root_path = "zcs" },
+        .{ .module = sqlite.module("sqlite"), .name = "sqlite", .root_path = "sqlite" },
     };
 
     // special case handling for native vs web build
@@ -143,15 +153,15 @@ fn buildNative(b: *std.Build, opts: Options, deps: []Dep) !void {
         .root_module = opts.mod,
     });
 
-    const mod_ecs = b.createModule(.{
-        .root_source_file = b.path("src/game/ecs/ecs.zig"),
-    });
+    // const mod_ecs = b.createModule(.{
+    //     .root_source_file = b.path("src/game/ecs/ecs.zig"),
+    // });
 
-    for (deps) |dep| {
-        mod_ecs.addImport(dep.name, dep.module);
-    }
+    // for (deps) |dep| {
+    //     mod_ecs.addImport(dep.name, dep.module);
+    // }
 
-    exe.root_module.addImport("ecs", mod_ecs);
+    // exe.root_module.addImport("ecs", mod_ecs);
 
     for (deps) |dep| {
         exe.root_module.addImport(dep.name, dep.module);

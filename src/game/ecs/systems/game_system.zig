@@ -35,34 +35,34 @@ pub fn update(self: *GameSystem, world: *ecs.zflecs.world_t) void {
     _ = &world;
 }
 
-pub fn system_unlock_resource(
-    ctx: struct { cb: *ecs.CmdBuf, es: *ecs.Entities },
-    ev: *const ecs.components.Event.UnlockResourceEvent,
-    entity: ecs.Entity,
-) void {
-    ecs.logger.print_info("[GameSystem.system_unlock_resource]", .{});
-
-    var iter_mt = ctx.es.iterator(struct { mt: *ecs.components.MarketTrading, locked: *ecs.components.Locked, e: ecs.Entity });
-    while (iter_mt.next(ctx.es)) |view| {
-        if (ev.asset.isEqualTo(view.mt.asset)) {
-            _ = view.e.add(ctx.cb, ecs.components.Unlocked, .{});
-            _ = view.e.remove(ctx.cb, ecs.components.Locked);
-            break;
-        }
-    }
-
-    var iter_res = ctx.es.iterator(struct { res: *ecs.components.Resource, locked: *ecs.components.Locked, e: ecs.Entity });
-    while (iter_res.next(ctx.es)) |view| {
-        if (ev.asset.isEqualTo(view.res.type)) {
-            _ = view.e.add(ctx.cb, ecs.components.Unlocked, .{});
-            _ = view.e.remove(ctx.cb, ecs.components.Locked);
-            break;
-        }
-    }
-    // ecs.create_single_component_entity(ctx.cb, ecs.components.Resource, .{ .asset = ev.asset, .qty_owned = 0 });
-
-    entity.destroy(ctx.cb);
-}
+// pub fn system_unlock_asset(
+//     ctx: struct { cb: *ecs.CmdBuf, es: *ecs.Entities },
+//     ev: *const ecs.components.Event.UnlockAssetEvent,
+//     entity: ecs.Entity,
+// ) void {
+//     ecs.logger.print_info("[GameSystem.system_unlock_asset]", .{});
+//
+//     var iter_mt = ctx.es.iterator(struct { mt: *ecs.components.MarketTrading, locked: *ecs.components.Locked, e: ecs.Entity });
+//     while (iter_mt.next(ctx.es)) |view| {
+//         if (ev.asset.isEqualTo(view.mt.asset)) {
+//             _ = view.e.add(ctx.cb, ecs.components.Unlocked, .{});
+//             _ = view.e.remove(ctx.cb, ecs.components.Locked);
+//             break;
+//         }
+//     }
+//
+//     var iter_res = ctx.es.iterator(struct { res: *ecs.components.Resource, locked: *ecs.components.Locked, e: ecs.Entity });
+//     while (iter_res.next(ctx.es)) |view| {
+//         if (ev.asset.isResource(view.res.type)) {
+//             _ = view.e.add(ctx.cb, ecs.components.Unlocked, .{});
+//             _ = view.e.remove(ctx.cb, ecs.components.Locked);
+//             break;
+//         }
+//     }
+//     // ecs.create_single_component_entity(ctx.cb, ecs.components.Resource, .{ .asset = ev.asset, .qty_owned = 0 });
+//
+//     entity.destroy(ctx.cb);
+// }
 
 // zflecs implementation
 // fn system_unlock_resource(it: *ecs.zflecs.iter_t, events: []ecs.components.Event.UnlockResourceEvent) void {

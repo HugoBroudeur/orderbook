@@ -7,11 +7,13 @@ const sapp = sokol.app;
 // const use_docking = @import("build_options").docking;
 const ig = @import("cimgui");
 const tracy = @import("tracy");
+const Config = @import("../config.zig");
+const DbManager = @import("db_manager.zig");
 // // const Delil = @import("gfx/delil_imgui.zig");
 // const Delilv2 = @import("gfx/delil_v2.zig");
 // const Delil = @import("gfx/delil.zig");
 // const delil_pass = @import("gfx/render_pass.zig");
-const Ecs = @import("ecs");
+const Ecs = @import("ecs/ecs.zig");
 // const shape = @import("math/shape.zig");
 // const logger = @import("debug/log.zig");
 
@@ -25,22 +27,7 @@ pub const GameError = error{
 
 const game_allocator: std.mem.Allocator = undefined;
 var ecs: Ecs = undefined;
-
-const state = struct {
-    var pass_action: sg.PassAction = .{};
-    var show_first_window: bool = true;
-    var show_second_window: bool = true;
-
-    var window_width: u32 = 0;
-    var window_height: u32 = 0;
-    var is_demo_open = true;
-
-    var progress: f32 = 0;
-    var progress_dir: f32 = 1;
-    var progress_bar_overlay: [32]u8 = undefined;
-
-    var is_buy_button_clicked = false;
-};
+var db_manager: DbManager = undefined;
 
 const FRAMES_PER_SECOND = 60.0;
 
@@ -56,16 +43,16 @@ var timing: Timing = .{
     },
 };
 
-pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) void {
+pub fn init(allocator: std.mem.Allocator, config: Config) !void {
     tracy.frameMarkStart("Main");
-    ecs = Ecs.init(allocator) catch |err| {
+
+    db_manager = try DbManager.init(config);
+
+    ecs = Ecs.init(allocator, &db_manager) catch |err| {
         std.log.err("[ERROR][game.init] Can't initiate : {}", .{err});
         shutdown();
         return;
     };
-
-    state.window_width = width;
-    state.window_height = height;
 
     // return .{
     //     .allocator = allocator,
@@ -100,10 +87,10 @@ pub fn setup() void {
     // }
     // var render_pass = ecs.reg.singletons().get(data.RenderPass);
 
-    state.pass_action.colors[0] = .{
-        .load_action = .CLEAR,
-        .clear_value = .{ .r = 0.0, .g = 0.5, .b = 1.0, .a = 1.0 },
-    };
+    // state.pass_action.colors[0] = .{
+    //     .load_action = .CLEAR,
+    //     .clear_value = .{ .r = 0.0, .g = 0.5, .b = 1.0, .a = 1.0 },
+    // };
 
     // if (gfx.init()) {} else |err| {
     //     std.log.err("Can't initiate Delil: {}", .{err});
@@ -137,6 +124,7 @@ pub fn frame() void {
 
 pub fn shutdown() void {
     ecs.deinit();
+    db_manager.deinit();
     // gfx.deinit();
     sg.shutdown();
 

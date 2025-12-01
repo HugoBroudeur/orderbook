@@ -16,7 +16,11 @@ const sglue = sokol.glue;
 const UiSystem = @This();
 
 pub const settings_file_path = "config/cimgui.ini";
-pub const font_path = "assets/fonts/SNPro-Regular.ttf";
+// pub const font_path = "assets/fonts/SNPro-Regular.ttf";
+pub const fonts: [2][]const u8 = .{
+    "assets/fonts/SNPro/SNPro-Regular.ttf",
+    "assets/fonts/ferrum.otf",
+};
 pub const font_size: f32 = 18;
 
 pub var w: *ecs.zflecs.world_t = undefined;
@@ -46,8 +50,10 @@ pub fn setup(self: *UiSystem) void {
 
     ecs.create_single_component_entity(&ecs.cb, ecs.components.UIState, .{});
     // Change Font
-    // const io: *ig.ImGuiIO = ig.igGetIO();
-    // _ = ig.ImFontAtlas_AddFontFromFileTTF(io.Fonts, font_path, font_size, null, null);
+    const io: *ig.ImGuiIO = ig.igGetIO();
+    for (&fonts) |*font| {
+        _ = ig.ImFontAtlas_AddFontFromFileTTF(io.Fonts, font.ptr, font_size, null, null);
+    }
 
     // _ = ecs.zflecs.ADD_SYSTEM(w, "start_imgui_pass", RenderingPipeline.BeginImguiPass, start_imgui_pass);
 
@@ -85,9 +91,14 @@ pub fn render_ui(ctx: struct { cb: *ecs.CmdBuf, es: *ecs.Entities }, state: *ecs
             });
         },
         .Market => {
-            ctx.es.forEach("render_market_view", render_main_market_view, .{
+            ctx.es.forEach("render_main_market_view", render_main_market_view, .{
                 .cb = ctx.cb,
                 .es = ctx.es,
+            });
+            ctx.es.forEach("render_market_view", render_market_view, .{
+                .cb = ctx.cb,
+                .es = ctx.es,
+                .state = state,
             });
         },
         else => {},
@@ -151,6 +162,12 @@ pub fn update_ui_state(ctx: struct { es: *ecs.Entities }, state: *ecs.components
     var iter = ctx.es.iterator(struct { pass_action: *sg.PassAction });
     while (iter.next(ctx.es)) |i| {
         state.pass_action = i.pass_action;
+    }
+
+    var it = ctx.es.iterator(struct { env: *ecs.components.EnvironmentInfo });
+    while (it.next(ctx.es)) |i| {
+        state.window_width = i.env.window_width;
+        state.window_height = i.env.window_height;
     }
 }
 
@@ -252,6 +269,151 @@ pub fn render_main_market_view(
 ) void {
     ecs.logger.info("[UiRenderSystem.render_market_main_view]", .{});
 
+    {
+        const flags: c_int = ig.ImGuiWindowFlags_HorizontalScrollbar;
+        _ = ig.igBeginChild("select_resource", ig.ImVec2{ .x = ig.igGetContentRegionAvail().x * 0.2, .y = ig.igGetContentRegionAvail().y }, ig.ImGuiChildFlags_None, flags);
+
+        var i: usize = 0;
+
+        var iter_asset = ctx.es.iterator(struct {
+            tradable: *ecs.components.Tradable,
+            name: *ecs.components.Name,
+            category: *ecs.components.MarketCategoryTag,
+            sub_category: *ecs.components.SubMarketCategoryTag,
+            mt: *ecs.components.MarketTrading,
+        });
+
+        // var iter_category = ctx.es.iterator(struct {
+        //     category: *ecs.components.MarketCategoryTag,
+        // });
+        // var iter_sub_category = ctx.es.iterator(struct {
+        //     category: *ecs.components.MarketCategoryTag,
+        //     sub_category: *ecs.components.SubMarketCategoryTag,
+        // });
+
+        while (iter_asset.next(ctx.es)) |view| {
+            ecs.logger.info("[UiRenderSystem.render_market_main_view] {}", .{view});
+
+            // for (view) |asset| {
+            if (ig.igCollapsingHeader(view.name.full.ptr, ig.ImGuiTreeNodeFlags_None)) {
+                // inline for (@typeInfo(view.type).@"enum".fields) |f| {
+                //     if (ig.igTreeNode(f.name.ptr)) {
+                //         for (std.enums.values(view.type)) |m| {
+                //             i += 1;
+                //             var selected = state.market_view_ui.asset_selected == i;
+                //             if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+                //                 state.market_view_ui.asset_selected = i;
+                //             }
+                //         }
+                //         ig.igTreePop();
+                //     }
+                // }
+            }
+            // }
+        }
+
+        // inline for (@typeInfo(ecs.components.AssetTypes).@"union".fields) |asset| {
+        //     if (ig.igCollapsingHeader(asset.name.ptr, ig.ImGuiTreeNodeFlags_None)) {
+        //         inline for (@typeInfo(asset.type).@"enum".fields) |f| {
+        //             if (ig.igTreeNode(f.name.ptr)) {
+        //                 for (std.enums.values(asset.type)) |m| {
+        //                     i += 1;
+        //                     var selected = state.market_view_ui.asset_selected == i;
+        //                     if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+        //                         state.market_view_ui.asset_selected = i;
+        //                     }
+        //                 }
+        //                 ig.igTreePop();
+        //             }
+        //         }
+        //     }
+        // }
+        if (ig.igCollapsingHeader("Resources", ig.ImGuiTreeNodeFlags_None)) {
+            if (ig.igTreeNode("Metals")) {
+                for (std.enums.values(ecs.components.MetalTypes)) |m| {
+                    i += 1;
+                    var selected = state.market_view_ui.asset_selected == i;
+                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+                        state.market_view_ui.asset_selected = i;
+                    }
+                }
+                ig.igTreePop();
+            }
+
+            if (ig.igTreeNode("Woods")) {
+                for (std.enums.values(ecs.components.WoodTypes)) |m| {
+                    i += 1;
+                    var selected = state.market_view_ui.asset_selected == i;
+                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+                        state.market_view_ui.asset_selected = i;
+                    }
+                }
+                ig.igTreePop();
+            }
+
+            if (ig.igTreeNode("Ores")) {
+                for (std.enums.values(ecs.components.OreTypes)) |m| {
+                    i += 1;
+                    var selected = state.market_view_ui.asset_selected == i;
+                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+                        state.market_view_ui.asset_selected = i;
+                    }
+                }
+                ig.igTreePop();
+            }
+        }
+        if (ig.igCollapsingHeader("Intermediate", ig.ImGuiTreeNodeFlags_None)) {
+            if (ig.igTreeNode("Electronics")) {
+                for (std.enums.values(ecs.components.ElectronicsTypes)) |m| {
+                    i += 1;
+                    var selected = state.market_view_ui.asset_selected == i;
+                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+                        state.market_view_ui.asset_selected = i;
+                    }
+                }
+                ig.igTreePop();
+            }
+        }
+        if (ig.igCollapsingHeader("Equipment", ig.ImGuiTreeNodeFlags_None)) {
+            if (ig.igTreeNode("Melee Weapon - 1H")) {
+                for (std.enums.values(ecs.components.Weapon1HTypes)) |m| {
+                    i += 1;
+                    var selected = state.market_view_ui.asset_selected == i;
+                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+                        state.market_view_ui.asset_selected = i;
+                    }
+                }
+                ig.igTreePop();
+            }
+            if (ig.igTreeNode("Armor - Body")) {
+                for (std.enums.values(ecs.components.BodyArmorTypes)) |m| {
+                    i += 1;
+                    var selected = state.market_view_ui.asset_selected == i;
+                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+                        state.market_view_ui.asset_selected = i;
+                    }
+                }
+                ig.igTreePop();
+            }
+        }
+        if (ig.igCollapsingHeader("Vehicles", ig.ImGuiTreeNodeFlags_None)) {
+            if (ig.igTreeNode("Parts")) {
+                for (std.enums.values(ecs.components.VehiclesPartTypes)) |m| {
+                    i += 1;
+                    var selected = state.market_view_ui.asset_selected == i;
+                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+                        state.market_view_ui.asset_selected = i;
+                    }
+                }
+                ig.igTreePop();
+            }
+        }
+
+        ig.igEndChild();
+    }
+    ig.igSameLine();
+    {}
+
     ctx.es.forEach("render_market_view", render_market_view, .{
         .cb = ctx.cb,
         .es = ctx.es,
@@ -259,27 +421,26 @@ pub fn render_main_market_view(
     });
 }
 
-pub fn render_market_view(ctx: struct { cb: *ecs.CmdBuf, es: *ecs.Entities, state: *ecs.components.UIState }, mt: *ecs.components.MarketTrading, locked: ?*ecs.components.Locked) void {
+pub fn render_market_view(ctx: struct { cb: *ecs.CmdBuf, es: *ecs.Entities, state: *ecs.components.UIState }, mt: *ecs.components.MarketTrading) void {
     ecs.logger.info("[UiRenderSystem.render_market_view]", .{});
 
-    if (locked != null) {
-        return;
-    }
+    // if (locked != null) {
+    //     return;
+    // }
+
+    const prices: []const f32 = &.{ 100.1, 100.2, 100.3, 100.4, 100.5, 100.6, 100.2, 100.3, 100.9, 100.13, 100.5, 100.7, 100.8 };
+
+    ig.igPlotHistogramEx("Price history##", prices.ptr, prices.len, 0, "", 1, 1, ig.ImVec2{ .x = 800, .y = 500 }, 0);
 
     // const asset = @tagName(mt.asset);
-    _ = ig.igText("Asset: %s", mt.asset.getName().ptr);
     _ = ig.igText("Current size: %i", mt.book.size());
-
-    ig.igPushID(mt.asset.getName().ptr);
 
     if (ig.igButton("Buy")) {
         std.log.info("Buy button clicked", .{});
 
         const entity: ecs.Entity = .reserve(ctx.cb);
-        _ = entity.add(ctx.cb, ecs.components.Event.PlaceOrderEvent, .{ .quantity = 1, .price = 10, .side = ecs.components.OrderBook.Side.Buy, .asset = mt.asset });
+        _ = entity.add(ctx.cb, ecs.components.Event.PlaceOrderEvent, .{ .quantity = 1, .price = 10, .side = ecs.components.OrderBook.Side.Buy, .mt_ptr = mt });
     }
-
-    ig.igPopID();
 }
 
 pub fn system_render_resource_view(ctx: struct { cb: *ecs.CmdBuf, es: *ecs.Entities }, state: *ecs.components.UIState) void {
@@ -314,7 +475,7 @@ pub fn system_render_resource_view(ctx: struct { cb: *ecs.CmdBuf, es: *ecs.Entit
         }
 
         if (ig.igButton("Add Resource")) {
-            ecs.create_single_component_entity(ctx.cb, ecs.components.Event.UnlockResourceEvent, .{ .asset = state.resource_view_ui.selected_resource_to_add });
+            ecs.create_single_component_entity(ctx.cb, ecs.components.Event.UnlockAssetEvent, .{ .asset = state.resource_view_ui.selected_resource_to_add.toAsset() });
         }
     }
 }

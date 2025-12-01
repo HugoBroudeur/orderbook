@@ -91,6 +91,7 @@ pub const RecipeOutput = struct {
 
 pub const Error = error{
     NotEnoughResource,
+    IsNotAResource,
 };
 
 pub const Locked = struct {};
@@ -114,12 +115,13 @@ pub const UIState = struct {
     show_first_window: bool = true,
     show_second_window: bool = true,
     current_theme: usize = 0,
-    themes: [2][]const u8 = .{
+    themes: [3][]const u8 = .{
+        &@tagName(Styles.Theme.custom).*,
         &@tagName(Styles.Theme.enemymouse).*,
         &@tagName(Styles.Theme.spectrum_light).*,
     },
-    window_width: u32 = 600,
-    window_height: u32 = 600,
+    window_width: i32 = 0,
+    window_height: i32 = 0,
     is_demo_open: bool = true,
     progress: f32 = 0,
     progress_dir: f32 = 1,
@@ -129,6 +131,10 @@ pub const UIState = struct {
     current_tab: MainMenuTab = .HQ,
 
     pass_action: *sg.PassAction = undefined,
+
+    market_view_ui: struct {
+        asset_selected: usize = 0,
+    } = .{},
 
     resource_view_ui: struct {
         selected_resource_to_add_id: u8 = 0,
@@ -146,6 +152,11 @@ pub const MainMenuTab = enum {
     Team,
     Adventures,
     Gambits,
+};
+
+pub const CurrentSelected = struct {
+    id: usize,
+    is_selected: bool,
 };
 
 //  ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗██╗ ██████╗███████╗
@@ -286,7 +297,6 @@ pub const OrderBook = @import("game_orderbook.zig");
 
 pub const MarketTrading = struct {
     book: OrderBook,
-    asset: ResourceTypes,
     is_available: bool = false,
 
     pub fn setAvailability(self: *MarketTrading, available: bool) void {
@@ -536,68 +546,169 @@ fn CameraMaker(comptime T: CameraType) type {
 // ██║  ██║███████║███████║███████╗   ██║   ███████║
 // ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝   ╚═╝   ╚══════╝
 
-pub const Assets = struct {
-    resources: AssetResources,
-    manufactured: AssetManufactured,
-    vehicles: AssetVehicles,
-    equipments: AssetEquiments,
+pub const Tradable = struct {};
+
+pub const Name = struct {
+    short: []const u8, // dagger_1h
+    full: []const u8, // Dagger
+};
+
+pub const MarketCategory = struct {
+    tag: MarketCategoryTag,
+};
+
+pub const SubMarketCategory = struct {
+    tag: SubMarketCategoryTag,
+};
+
+pub const BasicResource = struct {
+    tag: ResourceTypes,
+};
+
+pub const MarketCategoryTag = enum {
+    Resources,
+    Intermediates,
+    Equipments,
+    Vehicles,
+
+    pub fn toName(self: MarketCategoryTag) []const u8 {
+        return switch (self) {
+            else => @tagName(self),
+        };
+    }
+};
+
+pub const SubMarketCategoryTag = enum {
+    Metals,
+    Ores,
+    Woods,
+    Electronics,
+    MeleeWeapon1H,
+    ArmorBody,
+    VehiclesPart,
+
+    pub fn toName(self: SubMarketCategoryTag) []const u8 {
+        return switch (self) {
+            .MeleeWeapon1H => "Melee Weapons - 1 Hand",
+            .ArmorBody => "Armors - Body",
+            .VehiclesPart => "Parts",
+            else => @tagName(self),
+        };
+    }
+
+    pub fn getCategoryTag(self: SubMarketCategoryTag) MarketCategoryTag {
+        return switch (self) {
+            .Metals, .Ores, .Woods => .Resources,
+            .Electronics => .Intermediates,
+            .ArmorBody, .MeleeWeapon1H => .Equipments,
+            .VehiclesPart => .Vehicles,
+        };
+    }
 };
 
 pub const ResourceTypeTag = enum {
-    electronics,
     metal,
     ore,
     wood,
 };
 
+pub const AssetTypeTag = enum {
+    res_metal,
+    res_ore,
+    res_wood,
+    manu_electronics,
+    equipement_weapon_1h,
+    equipement_armor_body,
+    vehicles_part,
+
+    pub fn toCategoryName(self: AssetTypeTag) []const u8 {
+        var map: std.EnumMap(AssetTypeTag, []const u8) = .initFull("");
+
+        map.put(AssetTypeTag.res_metal, "Resources");
+        map.put(AssetTypeTag.res_ore, "Resources");
+        map.put(AssetTypeTag.res_wood, "Resources");
+        map.put(AssetTypeTag.manu_electronics, "Intermediates");
+        map.put(AssetTypeTag.equipement_weapon_1h, "Equipments");
+        map.put(AssetTypeTag.equipement_armor_body, "Equipments");
+        map.put(AssetTypeTag.vehicles_part, "Vehicles");
+
+        return map.get(self).?;
+    }
+};
+
+pub const AssetTypes = union(AssetTypeTag) {
+    res_metal: MetalTypes,
+    res_ore: OreTypes,
+    res_wood: WoodTypes,
+    manu_electronics: ElectronicsTypes,
+    equipement_weapon_1h: Weapon1HTypes,
+    equipement_armor_body: BodyArmorTypes,
+    vehicles_part: VehiclesPartTypes,
+
+    pub fn getName(self: AssetTypes) []const u8 {
+        return switch (self) {
+            inline .res_metal => @tagName(self.res_metal),
+            inline .res_ore => @tagName(self.res_ore),
+            inline .res_wood => @tagName(self.res_wood),
+            inline .manu_electronics => @tagName(self.manu_electronics),
+            inline .equipement_weapon_1h => @tagName(self.equipement_weapon_1h),
+            inline .equipement_armor_body => @tagName(self.equipement_armor_body),
+            inline .vehicles_part => @tagName(self.vehicles_part),
+        };
+    }
+
+    pub fn isEqualTo(self: AssetTypes, asset: AssetTypes) bool {
+        return std.meta.eql(self, asset);
+    }
+
+    pub fn isResource(self: AssetTypes, res: ResourceTypes) bool {
+        return self.isEqualTo(res.toAsset());
+    }
+
+    pub fn toResource(self: AssetTypes) Error!ResourceTypes {
+        return switch (self) {
+            AssetTypeTag.res_metal => ResourceTypes{ .metal = self.res_metal },
+            AssetTypeTag.res_wood => ResourceTypes{ .wood = self.res_wood },
+            AssetTypeTag.res_ore => ResourceTypes{ .ore = self.res_ore },
+            else => Error.IsNotAResource,
+        };
+    }
+
+    pub fn toCategoryName(self: AssetTypes) []const u8 {
+        const tag = @as(AssetTypeTag, self);
+        return tag.toCategoryName();
+    }
+};
+
 pub const ResourceTypes = union(ResourceTypeTag) {
-    electronics: ElectronicsTypes,
+    // electronics: ElectronicsTypes,
     metal: MetalTypes,
     ore: OreTypes,
     wood: WoodTypes,
 
     pub fn getName(self: ResourceTypes) []const u8 {
-        switch (self) {
-            ResourceTypeTag.metal => return @tagName(self.metal),
-            ResourceTypeTag.ore => return @tagName(self.ore),
-            ResourceTypeTag.electronics => return @tagName(self.electronics),
-            ResourceTypeTag.wood => return @tagName(self.wood),
-        }
+        return switch (self) {
+            inline .metal => @tagName(self.metal),
+            inline .ore => @tagName(self.ore),
+            inline .wood => @tagName(self.wood),
+        };
+        // return @tagName(std.meta.activeTag(self));
     }
 
     pub fn isEqualTo(self: ResourceTypes, res: ResourceTypes) bool {
-        if (std.meta.activeTag(self) != std.meta.activeTag(res)) {
-            return false;
-        }
+        return std.meta.eql(self, res);
+    }
 
-        switch (res) {
-            ResourceTypeTag.metal => return self.metal == res.metal,
-            ResourceTypeTag.ore => return self.ore == res.ore,
-            ResourceTypeTag.electronics => return self.electronics == res.electronics,
-            ResourceTypeTag.wood => return self.wood == res.wood,
-        }
+    pub fn toAsset(self: ResourceTypes) AssetTypes {
+        return switch (self) {
+            ResourceTypeTag.metal => .{ .res_metal = self.metal },
+            ResourceTypeTag.wood => .{ .res_wood = self.wood },
+            ResourceTypeTag.ore => .{ .res_ore = self.ore },
+        };
     }
 };
 
-pub const AssetManufactured = struct {
-    electronics: []ElectronicsTypes,
-};
-pub const AssetResources = struct {
-    metals: []MetalTypes,
-    ores: []OreTypes,
-    woods: []WoodTypes,
-};
-
-pub const AssetVehicles = struct {
-    parts: VehiclesPartTypes,
-};
-
-pub const AssetEquiments = struct {
-    weapons: []WeaponTypes,
-    body_armors: []BodyArmorTypes,
-};
-
-pub const WeaponTypes = enum(u8) {
+pub const Weapon1HTypes = enum(u8) {
     Sword,
     Dagger,
     Knife,
@@ -606,17 +717,53 @@ pub const WeaponTypes = enum(u8) {
     Gloves,
     Katana,
     Ninjeto,
+
+    pub fn getName(self: Weapon1HTypes) []const u8 {
+        return @tagName(self);
+    }
+
+    pub fn getSubCategoryTag() SubMarketCategoryTag {
+        return .MeleeWeapon1H;
+    }
+
+    pub fn getCategoryTag() MarketCategoryTag {
+        return .Equipements;
+    }
 };
 
 pub const BodyArmorTypes = enum(u8) {
     Leather,
     Cloth,
     Heavy,
+
+    pub fn getName(self: BodyArmorTypes) []const u8 {
+        return @tagName(self);
+    }
+
+    pub fn getSubCategoryTag() SubMarketCategoryTag {
+        return .ArmorBody;
+    }
+
+    pub fn getCategoryTag() MarketCategoryTag {
+        return .Equipements;
+    }
 };
 
 pub const VehiclesPartTypes = enum(u8) {
     Wheels,
     Breaks,
+
+    pub fn getName(self: VehiclesPartTypes) []const u8 {
+        return @tagName(self);
+    }
+
+    pub fn getSubCategoryTag() SubMarketCategoryTag {
+        return .VehiclesPart;
+    }
+
+    pub fn getCategoryTag() MarketCategoryTag {
+        return .Vehicles;
+    }
 };
 pub const ElectronicsTypes = enum(u8) {
     NanoBattery,
@@ -624,6 +771,18 @@ pub const ElectronicsTypes = enum(u8) {
     Microprocessor,
     PhotogenicSensor,
     QuantumChip,
+
+    pub fn getName(self: ElectronicsTypes) []const u8 {
+        return @tagName(self);
+    }
+
+    pub fn getSubCategoryTag() SubMarketCategoryTag {
+        return .Electronics;
+    }
+
+    pub fn getCategoryTag() MarketCategoryTag {
+        return .Intermediates;
+    }
 };
 pub const OreTypes = enum(u8) {
     IronOre,
@@ -646,6 +805,18 @@ pub const OreTypes = enum(u8) {
     LithiumOre,
     RareEarthOre,
     MercuryOre,
+
+    pub fn getName(self: OreTypes) []const u8 {
+        return @tagName(self);
+    }
+
+    pub fn getSubCategoryTag() SubMarketCategoryTag {
+        return .Ores;
+    }
+
+    pub fn getCategoryTag() MarketCategoryTag {
+        return .Resources;
+    }
 };
 
 pub const WoodTypes = enum(u8) {
@@ -661,6 +832,18 @@ pub const WoodTypes = enum(u8) {
     Yew,
     Mahogany,
     Ebony,
+
+    pub fn getName(self: WoodTypes) []const u8 {
+        return @tagName(self);
+    }
+
+    pub fn getSubCategoryTag() SubMarketCategoryTag {
+        return .Woods;
+    }
+
+    pub fn getCategoryTag() MarketCategoryTag {
+        return .Resources;
+    }
 };
 
 pub const MetalTypes = enum(u8) {
@@ -692,4 +875,16 @@ pub const MetalTypes = enum(u8) {
     Iridium,
     Uramium,
     Ruthenium,
+
+    pub fn getName(self: MetalTypes) []const u8 {
+        return @tagName(self);
+    }
+
+    pub fn getSubCategoryTag() SubMarketCategoryTag {
+        return .Metals;
+    }
+
+    pub fn getCategoryTag() MarketCategoryTag {
+        return .Resources;
+    }
 };

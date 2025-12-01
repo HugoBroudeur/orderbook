@@ -1,4 +1,3 @@
-const components = @import("components.zig");
 const ecs = @import("../ecs.zig");
 
 //  ██████╗ ██████╗ ██████╗ ███████╗██████╗     ██████╗  ██████╗  ██████╗ ██╗  ██╗
@@ -10,15 +9,17 @@ const ecs = @import("../ecs.zig");
 
 pub const PlaceOrderEvent = struct {
     // id: ecs.zflecs.entity_t,
-    asset: components.ResourceTypes,
-    quantity: components.OrderBook.Quantity,
-    side: components.OrderBook.Side,
-    price: components.OrderBook.Price,
+    // asset: components.AssetTypes,
+    quantity: ecs.components.OrderBook.Quantity,
+    side: ecs.components.OrderBook.Side,
+    price: ecs.components.OrderBook.Price,
+    // mt_id: ecs.TypeId,
+    mt_ptr: *ecs.components.MarketTrading,
 };
 
-pub const UnlockResourceEvent = struct {
+pub const UnlockAssetEvent = struct {
     // id: ecs.zflecs.entity_t,
-    asset: components.ResourceTypes,
+    asset: ecs.components.AssetTypes,
 };
 
 pub const ErrorEvent = struct {

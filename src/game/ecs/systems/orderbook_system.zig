@@ -26,10 +26,6 @@ pub fn setup(self: *OrderBookSystem, world: *ecs.zflecs.world_t) void {
         ecs.logger.err("[OrderBookSystem] Not initialised, you must run .init() before .setup(). System skipped", .{});
         return;
     }
-
-    // _ = ecs.zflecs.ADD_SYSTEM(world, "system_place_order", ecs.zflecs.OnUpdate, system_place_order);
-
-    // ecs.register_observer(world, ecs.components.Event.UnlockResourceEvent, ecs.zflecs.OnAdd, system_on_resource_unlocked);
 }
 
 pub fn update(self: *OrderBookSystem, world: *ecs.zflecs.world_t) void {
@@ -46,20 +42,12 @@ pub fn system_place_order(ctx: struct { cb: *ecs.CmdBuf, market_data: *ecs.compo
 
     const order = ecs.components.OrderBook.Order.init(ctx.market_data.getNextId(), .GoodTillCancel, o.side, o.price, o.quantity);
 
-    var iter = ctx.es.iterator(struct {
-        mt: *ecs.components.MarketTrading,
-        unlocked: *ecs.components.Unlocked,
-    });
-    while (iter.next(ctx.es)) |view| {
-        if (o.asset.isEqualTo(view.mt.asset)) {
-            const trades = view.mt.book.addOrder(order) catch |err| {
-                std.log.err("[ERROR][OrderBookSystem.system_place_order] {}", .{err});
-                return;
-            };
-            ecs.create_single_component_entity(ctx.cb, ecs.components.OrderBook.Trades, trades);
-            e.destroy(ctx.cb);
-        }
-    }
+    const trades = o.mt_ptr.book.addOrder(order) catch |err| {
+        std.log.err("[ERROR][OrderBookSystem.system_place_order] {}", .{err});
+        return;
+    };
+    ecs.create_single_component_entity(ctx.cb, ecs.components.OrderBook.Trades, trades);
+    e.destroy(ctx.cb);
 }
 
 // zflecs implementation

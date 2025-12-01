@@ -1,12 +1,67 @@
 const std = @import("std");
 const ig = @import("cimgui");
 
-pub const Theme = enum { enemymouse, spectrum_light };
+pub const Theme = enum { custom, enemymouse, spectrum_light };
 
 pub fn setStyle(theme: Theme) void {
     var style: *ig.ImGuiStyle = &ig.igGetStyle().*;
 
     switch (theme) {
+        .custom => {
+            style.Alpha = 0.83;
+            style.WindowBorderSize = 0;
+            // style.Alpha = 1.0;
+            // style.WindowFillAlphaDefault = 0.83;
+            // style.ChildWindowRounding = 3;
+            style.WindowRounding = 3;
+            style.GrabRounding = 1;
+            style.GrabMinSize = 20;
+            style.FrameRounding = 3;
+
+            style.Colors[ig.ImGuiCol_Text] = ig.ImVec4{ .x = 0.0, .y = 1.0, .z = 1.0, .w = 1.0 };
+            style.Colors[ig.ImGuiCol_TextDisabled] = ig.ImVec4{ .x = 0.00, .y = 0.40, .z = 0.41, .w = 1.00 };
+            style.Colors[ig.ImGuiCol_WindowBg] = ig.ImVec4{ .x = 0.00, .y = 0.00, .z = 0.00, .w = 1.00 };
+            // style.Colors[ig.ImGuiCol_ChildWindowBg] = ig.ImVec4{ .x = 0.00, .y = 0.00, .z = 0.00, .w = 0.00 };
+            style.Colors[ig.ImGuiCol_Border] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.65 };
+            style.Colors[ig.ImGuiCol_BorderShadow] = ig.ImVec4{ .x = 0.00, .y = 0.00, .z = 0.00, .w = 0.00 };
+            style.Colors[ig.ImGuiCol_FrameBg] = ig.ImVec4{ .x = 0.44, .y = 0.80, .z = 0.80, .w = 0.18 };
+            style.Colors[ig.ImGuiCol_FrameBgHovered] = ig.ImVec4{ .x = 0.44, .y = 0.80, .z = 0.80, .w = 0.27 };
+            style.Colors[ig.ImGuiCol_FrameBgActive] = ig.ImVec4{ .x = 0.44, .y = 0.81, .z = 0.86, .w = 0.66 };
+            style.Colors[ig.ImGuiCol_TitleBg] = ig.ImVec4{ .x = 0.14, .y = 0.18, .z = 0.21, .w = 0.73 };
+            style.Colors[ig.ImGuiCol_TitleBgCollapsed] = ig.ImVec4{ .x = 0.00, .y = 0.00, .z = 0.00, .w = 0.54 };
+            style.Colors[ig.ImGuiCol_TitleBgActive] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.27 };
+            style.Colors[ig.ImGuiCol_MenuBarBg] = ig.ImVec4{ .x = 0.00, .y = 0.00, .z = 0.00, .w = 0.20 };
+            style.Colors[ig.ImGuiCol_ScrollbarBg] = ig.ImVec4{ .x = 0.22, .y = 0.29, .z = 0.30, .w = 0.71 };
+            style.Colors[ig.ImGuiCol_ScrollbarGrab] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.44 };
+            style.Colors[ig.ImGuiCol_ScrollbarGrabHovered] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.74 };
+            style.Colors[ig.ImGuiCol_ScrollbarGrabActive] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 1.00 };
+            // style.Colors[ig.ImGuiCol_ComboBg] = ig.ImVec4{ .x = 0.16, .y = 0.24, .z = 0.22, .w = 0.60 };
+            style.Colors[ig.ImGuiCol_CheckMark] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.68 };
+            style.Colors[ig.ImGuiCol_SliderGrab] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.36 };
+            style.Colors[ig.ImGuiCol_SliderGrabActive] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.76 };
+            style.Colors[ig.ImGuiCol_Button] = ig.ImVec4{ .x = 0.00, .y = 0.65, .z = 0.65, .w = 0.46 };
+            style.Colors[ig.ImGuiCol_ButtonHovered] = ig.ImVec4{ .x = 0.01, .y = 1.00, .z = 1.00, .w = 0.43 };
+            style.Colors[ig.ImGuiCol_ButtonActive] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.62 };
+            style.Colors[ig.ImGuiCol_Header] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.33 };
+            style.Colors[ig.ImGuiCol_HeaderHovered] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.42 };
+            style.Colors[ig.ImGuiCol_HeaderActive] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.54 };
+            // style.Colors[ig.ImGuiCol_Column] = ig.ImVec4{ .x = 0.00, .y = 0.50, .z = 0.50, .w = 0.33 };
+            // style.Colors[ig.ImGuiCol_ColumnHovered] = ig.ImVec4{ .x = 0.00, .y = 0.50, .z = 0.50, .w = 0.47 };
+            // style.Colors[ig.ImGuiCol_ColumnActive] = ig.ImVec4{ .x = 0.00, .y = 0.70, .z = 0.70, .w = 1.00 };
+            style.Colors[ig.ImGuiCol_ResizeGrip] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.54 };
+            style.Colors[ig.ImGuiCol_ResizeGripHovered] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.74 };
+            style.Colors[ig.ImGuiCol_ResizeGripActive] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 1.00 };
+            // style.Colors[ig.ImGuiCol_CloseButton] = ig.ImVec4{ .x = 0.00, .y = 0.78, .z = 0.78, .w = 0.35 };
+            // style.Colors[ig.ImGuiCol_CloseButtonHovered] = ig.ImVec4{ .x = 0.00, .y = 0.78, .z = 0.78, .w = 0.47 };
+            // style.Colors[ig.ImGuiCol_CloseButtonActive] = ig.ImVec4{ .x = 0.00, .y = 0.78, .z = 0.78, .w = 1.00 };
+            style.Colors[ig.ImGuiCol_PlotLines] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 1.00 };
+            style.Colors[ig.ImGuiCol_PlotLinesHovered] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 1.00 };
+            style.Colors[ig.ImGuiCol_PlotHistogram] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 1.00 };
+            style.Colors[ig.ImGuiCol_PlotHistogramHovered] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 1.00 };
+            style.Colors[ig.ImGuiCol_TextSelectedBg] = ig.ImVec4{ .x = 0.00, .y = 1.00, .z = 1.00, .w = 0.22 };
+            // style.Colors[ig.ImGuiCol_TooltipBg] = ig.ImVec4{ .x = 0.00, .y = 0.13, .z = 0.13, .w = 0.90 };
+            // style.Colors[ig.ImGuiCol_ModalWindowDarkening] = ig.ImVec4{ .x = 0.04, .y = 0.10, .z = 0.09, .w = 0.51 };
+        },
         .enemymouse => {
             style.Alpha = 0.83;
             // style.Alpha = 1.0;

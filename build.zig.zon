@@ -35,8 +35,12 @@
             .hash = "zflecs-0.2.0-dev-1PN3ym9mOgCyE8w0DdK_Uf7FAob-nm0Dp_lZKR3QyJaC",
         },
         .zcs = .{
-            .url = "git+https://github.com/Games-by-Mason/ZCS#7c16a294be9aefe7d6b12298c33aa366a01625a9",
-            .hash = "zcs-0.1.0-WhLQ_BZdAwA09X9wloTd688sDOXm2Pd34SKMGL7ee6Yq",
+            .url = "git+https://github.com/Games-by-Mason/ZCS#ada4854f92f57980afd34ade4026c2ed26563178",
+            .hash = "zcs-0.1.0-WhLQ_EVeAwAPMAypvb-FjEraJaDFTWAHpFGF6NZ8eCK0",
+        },
+        .sqlite = .{
+            .url = "git+https://github.com/vrischmann/zig-sqlite#0b75ba276d34de3141ec1697e3ef7c836d7b38e7",
+            .hash = "sqlite-3.48.0-F2R_a8eODgD9X8XjvWlZ1K7C-tDuHae4FuShM2N-yIT2",
         },
     },
     .paths = .{
