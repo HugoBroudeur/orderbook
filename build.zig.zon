@@ -42,8 +42,8 @@
             .url = "git+https://github.com/vrischmann/zig-sqlite#0b75ba276d34de3141ec1697e3ef7c836d7b38e7",
             .hash = "sqlite-3.48.0-F2R_a8eODgD9X8XjvWlZ1K7C-tDuHae4FuShM2N-yIT2",
         },
-        .dcimgui = .{ .path = "lib/dcimgui_builds/src/libzig/dcimgui" },
-        .implot = .{ .path = "lib/dcimgui_builds/src/libzig/implot" },
+        // .dcimgui = .{ .path = "lib/dcimgui_builds/src/libzig/dcimgui" },
+        // .implot = .{ .path = "lib/dcimgui_builds/src/libzig/implot" },
         // .implot = .{
         //     .url = "https://github.com/epezent/implot/archive/1f7a8c0314d838a76695bccebe0f66864f507bc0.tar.gz",
         //     .hash = "1220781bd0617c107617cc19d446801f519d5a29fc4beee9438c527f74af8caf483f",
