@@ -46,7 +46,7 @@ var timing: Timing = .{
 pub fn init(allocator: std.mem.Allocator, config: Config) !void {
     tracy.frameMarkStart("Main");
 
-    db_manager = try DbManager.init(config);
+    db_manager = try DbManager.init(allocator, config);
 
     ecs = Ecs.init(allocator, &db_manager) catch |err| {
         std.log.err("[ERROR][game.init] Can't initiate : {}", .{err});
@@ -72,7 +72,7 @@ pub fn setup() void {
     sokol.time.setup();
 
     ecs.build_world() catch |err| {
-        std.log.err("[ERROR][game.init] Can't build the world : {}", .{err});
+        std.log.info("[ERROR][game.init] Can't build the world : {}", .{err});
         return;
     };
 

@@ -13,7 +13,9 @@ pub fn setup_game(allocator: std.mem.Allocator, es: *Ecs.Entities, cb: *Ecs.CmdB
     var category_map = create_market_category_entity_map(cb);
     var sub_category_map = create_market_sub_category_entity_map(cb, &category_map);
 
-    try create_tradables(cb, allocator, &sub_category_map);
+    // try create_tradables(cb, allocator, &sub_category_map);
+    _ = allocator;
+    _ = &sub_category_map;
 
     Ecs.create_single_component_entity(cb, sg.PassAction, pass_action);
     Ecs.create_single_component_entity(cb, Ecs.components.EnvironmentInfo, .{ .world_time = 0 });
@@ -39,7 +41,7 @@ fn create_market_category_entity_map(
 
     for (std.enums.values(Ecs.components.MarketCategoryTag)) |tag| {
         const entity: Ecs.Entity = .reserve(cb);
-        _ = entity.add(cb, Ecs.components.MarketCategory, .{ .tag = tag });
+        // _ = entity.add(cb, Ecs.components.MarketCategory, .{ .tag = tag });
         map.put(tag, entity);
     }
 
@@ -54,7 +56,7 @@ fn create_market_sub_category_entity_map(
 
     for (std.enums.values(Ecs.components.SubMarketCategoryTag)) |tag| {
         const entity: Ecs.Entity = .reserve(cb);
-        _ = entity.add(cb, Ecs.components.SubMarketCategory, .{ .tag = tag });
+        // _ = entity.add(cb, Ecs.components.SubMarketCategory, .{ .tag = tag });
         map.put(tag, entity);
 
         _ = Ecs.CmdBuf.ext(cb, Ecs.Node.SetParent, .{

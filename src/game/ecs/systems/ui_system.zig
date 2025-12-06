@@ -13,6 +13,8 @@ const sg = sokol.gfx;
 const slog = sokol.log;
 const sglue = sokol.glue;
 
+const ip = @import("implot");
+
 const UiSystem = @This();
 
 pub const settings_file_path = "config/cimgui.ini";
@@ -24,12 +26,14 @@ pub const fonts: [2][]const u8 = .{
 pub const font_size: f32 = 18;
 
 pub var w: *ecs.zflecs.world_t = undefined;
+var imPlotContext: [*c]ip.struct_ImPlotContext = undefined;
 
 pub fn init() UiSystem {
     return .{};
 }
 pub fn deinit(self: *UiSystem) void {
     _ = self;
+    ip.ImPlot_DestroyContext(imPlotContext);
     simgui.shutdown();
 }
 
@@ -47,6 +51,8 @@ pub fn setup(self: *UiSystem) void {
         .ini_filename = settings_file_path,
         .no_default_font = true,
     });
+
+    imPlotContext = ip.ImPlot_CreateContext();
 
     ecs.create_single_component_entity(&ecs.cb, ecs.components.UIState, .{});
     // Change Font
@@ -73,7 +79,8 @@ pub fn render(self: *UiSystem, world: *ecs.zflecs.world_t, pass_action: *sg.Pass
     // simgui.render();
 }
 
-pub fn render_ui(ctx: struct { cb: *ecs.CmdBuf, es: *ecs.Entities }, state: *ecs.components.UIState) void {
+pub fn render_ui(ctx: struct { cb: *ecs.CmdBuf, es: *ecs.Entities, mm: *ecs.MarketManager }, state: *ecs.components.UIState) void {
+    ecs.logger.info("[UiRenderSystem.render_ui]", .{});
     update_ui_state(.{ .es = ctx.es }, state);
 
     start_imgui_pass(state);
@@ -94,6 +101,7 @@ pub fn render_ui(ctx: struct { cb: *ecs.CmdBuf, es: *ecs.Entities }, state: *ecs
             ctx.es.forEach("render_main_market_view", render_main_market_view, .{
                 .cb = ctx.cb,
                 .es = ctx.es,
+                .mm = ctx.mm,
             });
             ctx.es.forEach("render_market_view", render_market_view, .{
                 .cb = ctx.cb,
@@ -124,6 +132,8 @@ pub fn start_imgui_pass(state: *ecs.components.UIState) void {
     // flags |= ig.ImGuiWindowFlags_NoMove;
 
     ig.igShowDemoWindow(&state.is_demo_open);
+
+    ip.ImPlot_ShowDemoWindow(&state.is_demo_open);
 
     ig.igSetNextWindowPos(.{ .x = 0, .y = 0 }, ig.ImGuiCond_Once);
     ig.igSetNextWindowSize(.{ .x = @floatFromInt(state.window_width), .y = @floatFromInt(state.window_height) }, ig.ImGuiCond_Once);
@@ -173,7 +183,7 @@ pub fn update_ui_state(ctx: struct { es: *ecs.Entities }, state: *ecs.components
 
 pub fn render_ui_test(ctx: struct {}, state: *ecs.components.UIState) void {
     _ = ctx;
-    ecs.logger.info("[UiRenderSystem.render_ui]", .{});
+    ecs.logger.info("[UiRenderSystem.render_ui_test]", .{});
     const io: *ig.ImGuiIO = ig.igGetIO();
 
     const backendName: [*c]const u8 = switch (sg.queryBackend()) {
@@ -264,7 +274,7 @@ pub fn render_ui_test(ctx: struct {}, state: *ecs.components.UIState) void {
 }
 
 pub fn render_main_market_view(
-    ctx: struct { cb: *ecs.CmdBuf, es: *ecs.Entities },
+    ctx: struct { cb: *ecs.CmdBuf, es: *ecs.Entities, mm: *ecs.MarketManager },
     state: *ecs.components.UIState,
 ) void {
     ecs.logger.info("[UiRenderSystem.render_market_main_view]", .{});
@@ -275,13 +285,13 @@ pub fn render_main_market_view(
 
         var i: usize = 0;
 
-        var iter_asset = ctx.es.iterator(struct {
-            tradable: *ecs.components.Tradable,
-            name: *ecs.components.Name,
-            category: *ecs.components.MarketCategoryTag,
-            sub_category: *ecs.components.SubMarketCategoryTag,
-            mt: *ecs.components.MarketTrading,
-        });
+        // var iter_asset = ctx.es.iterator(struct {
+        //     tradable: *ecs.components.Tradable,
+        //     name: *ecs.components.Name,
+        //     category: *ecs.components.MarketCategoryTag,
+        //     sub_category: *ecs.components.SubMarketCategoryTag,
+        //     mt: *ecs.components.MarketTrading,
+        // });
 
         // var iter_category = ctx.es.iterator(struct {
         //     category: *ecs.components.MarketCategoryTag,
@@ -291,123 +301,110 @@ pub fn render_main_market_view(
         //     sub_category: *ecs.components.SubMarketCategoryTag,
         // });
 
-        while (iter_asset.next(ctx.es)) |view| {
-            ecs.logger.info("[UiRenderSystem.render_market_main_view] {}", .{view});
+        for (ctx.mm.market_categories.values()) |mc| {
+            if (ig.igCollapsingHeader(mc.name, ig.ImGuiTreeNodeFlags_None)) {
+                for (ctx.mm.market_sub_categories.values()) |msc| {
+                    if (msc.market_category_id != mc.id) {
+                        continue;
+                    }
+                    if (ig.igTreeNode(msc.name)) {
+                        for (ctx.mm.market_items.values()) |item| {
+                            if (item.market_sub_category_id != msc.id) {
+                                continue;
+                            }
 
-            // for (view) |asset| {
-            if (ig.igCollapsingHeader(view.name.full.ptr, ig.ImGuiTreeNodeFlags_None)) {
-                // inline for (@typeInfo(view.type).@"enum".fields) |f| {
-                //     if (ig.igTreeNode(f.name.ptr)) {
-                //         for (std.enums.values(view.type)) |m| {
-                //             i += 1;
-                //             var selected = state.market_view_ui.asset_selected == i;
-                //             if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
-                //                 state.market_view_ui.asset_selected = i;
-                //             }
-                //         }
-                //         ig.igTreePop();
-                //     }
-                // }
+                            i += 1;
+                            var selected = state.market_view_ui.asset_selected == i;
+                            if (ig.igSelectableBoolPtr(item.full_name, &selected, 0)) {
+                                state.market_view_ui.asset_selected = i;
+                            }
+                        }
+                        ig.igTreePop();
+                    }
+                }
             }
-            // }
         }
 
-        // inline for (@typeInfo(ecs.components.AssetTypes).@"union".fields) |asset| {
-        //     if (ig.igCollapsingHeader(asset.name.ptr, ig.ImGuiTreeNodeFlags_None)) {
-        //         inline for (@typeInfo(asset.type).@"enum".fields) |f| {
-        //             if (ig.igTreeNode(f.name.ptr)) {
-        //                 for (std.enums.values(asset.type)) |m| {
-        //                     i += 1;
-        //                     var selected = state.market_view_ui.asset_selected == i;
-        //                     if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
-        //                         state.market_view_ui.asset_selected = i;
-        //                     }
-        //                 }
-        //                 ig.igTreePop();
+        // if (ig.igCollapsingHeader("Resources", ig.ImGuiTreeNodeFlags_None)) {
+        //     if (ig.igTreeNode("Metals")) {
+        //         for (std.enums.values(ecs.components.MetalTypes)) |m| {
+        //             i += 1;
+        //             var selected = state.market_view_ui.asset_selected == i;
+        //             if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+        //                 state.market_view_ui.asset_selected = i;
         //             }
         //         }
+        //         ig.igTreePop();
+        //     }
+        //
+        //     if (ig.igTreeNode("Woods")) {
+        //         for (std.enums.values(ecs.components.WoodTypes)) |m| {
+        //             i += 1;
+        //             var selected = state.market_view_ui.asset_selected == i;
+        //             if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+        //                 state.market_view_ui.asset_selected = i;
+        //             }
+        //         }
+        //         ig.igTreePop();
+        //     }
+        //
+        //     if (ig.igTreeNode("Ores")) {
+        //         for (std.enums.values(ecs.components.OreTypes)) |m| {
+        //             i += 1;
+        //             var selected = state.market_view_ui.asset_selected == i;
+        //             if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+        //                 state.market_view_ui.asset_selected = i;
+        //             }
+        //         }
+        //         ig.igTreePop();
         //     }
         // }
-        if (ig.igCollapsingHeader("Resources", ig.ImGuiTreeNodeFlags_None)) {
-            if (ig.igTreeNode("Metals")) {
-                for (std.enums.values(ecs.components.MetalTypes)) |m| {
-                    i += 1;
-                    var selected = state.market_view_ui.asset_selected == i;
-                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
-                        state.market_view_ui.asset_selected = i;
-                    }
-                }
-                ig.igTreePop();
-            }
-
-            if (ig.igTreeNode("Woods")) {
-                for (std.enums.values(ecs.components.WoodTypes)) |m| {
-                    i += 1;
-                    var selected = state.market_view_ui.asset_selected == i;
-                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
-                        state.market_view_ui.asset_selected = i;
-                    }
-                }
-                ig.igTreePop();
-            }
-
-            if (ig.igTreeNode("Ores")) {
-                for (std.enums.values(ecs.components.OreTypes)) |m| {
-                    i += 1;
-                    var selected = state.market_view_ui.asset_selected == i;
-                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
-                        state.market_view_ui.asset_selected = i;
-                    }
-                }
-                ig.igTreePop();
-            }
-        }
-        if (ig.igCollapsingHeader("Intermediate", ig.ImGuiTreeNodeFlags_None)) {
-            if (ig.igTreeNode("Electronics")) {
-                for (std.enums.values(ecs.components.ElectronicsTypes)) |m| {
-                    i += 1;
-                    var selected = state.market_view_ui.asset_selected == i;
-                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
-                        state.market_view_ui.asset_selected = i;
-                    }
-                }
-                ig.igTreePop();
-            }
-        }
-        if (ig.igCollapsingHeader("Equipment", ig.ImGuiTreeNodeFlags_None)) {
-            if (ig.igTreeNode("Melee Weapon - 1H")) {
-                for (std.enums.values(ecs.components.Weapon1HTypes)) |m| {
-                    i += 1;
-                    var selected = state.market_view_ui.asset_selected == i;
-                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
-                        state.market_view_ui.asset_selected = i;
-                    }
-                }
-                ig.igTreePop();
-            }
-            if (ig.igTreeNode("Armor - Body")) {
-                for (std.enums.values(ecs.components.BodyArmorTypes)) |m| {
-                    i += 1;
-                    var selected = state.market_view_ui.asset_selected == i;
-                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
-                        state.market_view_ui.asset_selected = i;
-                    }
-                }
-                ig.igTreePop();
-            }
-        }
-        if (ig.igCollapsingHeader("Vehicles", ig.ImGuiTreeNodeFlags_None)) {
-            if (ig.igTreeNode("Parts")) {
-                for (std.enums.values(ecs.components.VehiclesPartTypes)) |m| {
-                    i += 1;
-                    var selected = state.market_view_ui.asset_selected == i;
-                    if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
-                        state.market_view_ui.asset_selected = i;
-                    }
-                }
-                ig.igTreePop();
-            }
-        }
+        // if (ig.igCollapsingHeader("Intermediate", ig.ImGuiTreeNodeFlags_None)) {
+        //     if (ig.igTreeNode("Electronics")) {
+        //         for (std.enums.values(ecs.components.ElectronicsTypes)) |m| {
+        //             i += 1;
+        //             var selected = state.market_view_ui.asset_selected == i;
+        //             if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+        //                 state.market_view_ui.asset_selected = i;
+        //             }
+        //         }
+        //         ig.igTreePop();
+        //     }
+        // }
+        // if (ig.igCollapsingHeader("Equipment", ig.ImGuiTreeNodeFlags_None)) {
+        //     if (ig.igTreeNode("Melee Weapon - 1H")) {
+        //         for (std.enums.values(ecs.components.Weapon1HTypes)) |m| {
+        //             i += 1;
+        //             var selected = state.market_view_ui.asset_selected == i;
+        //             if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+        //                 state.market_view_ui.asset_selected = i;
+        //             }
+        //         }
+        //         ig.igTreePop();
+        //     }
+        //     if (ig.igTreeNode("Armor - Body")) {
+        //         for (std.enums.values(ecs.components.BodyArmorTypes)) |m| {
+        //             i += 1;
+        //             var selected = state.market_view_ui.asset_selected == i;
+        //             if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+        //                 state.market_view_ui.asset_selected = i;
+        //             }
+        //         }
+        //         ig.igTreePop();
+        //     }
+        // }
+        // if (ig.igCollapsingHeader("Vehicles", ig.ImGuiTreeNodeFlags_None)) {
+        //     if (ig.igTreeNode("Parts")) {
+        //         for (std.enums.values(ecs.components.VehiclesPartTypes)) |m| {
+        //             i += 1;
+        //             var selected = state.market_view_ui.asset_selected == i;
+        //             if (ig.igSelectableBoolPtr(@tagName(m).ptr, &selected, 0)) {
+        //                 state.market_view_ui.asset_selected = i;
+        //             }
+        //         }
+        //         ig.igTreePop();
+        //     }
+        // }
 
         ig.igEndChild();
     }

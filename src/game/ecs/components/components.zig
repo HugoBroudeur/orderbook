@@ -549,16 +549,29 @@ fn CameraMaker(comptime T: CameraType) type {
 pub const Tradable = struct {};
 
 pub const Name = struct {
-    short: []const u8, // dagger_1h
-    full: []const u8, // Dagger
+    short: [:0]u8, // dagger_1h
+    full: [:0]u8, // Dagger
 };
 
 pub const MarketCategory = struct {
-    tag: MarketCategoryTag,
+    id: usize,
+    name: [:0]u8,
+    // tag: MarketCategoryTag,
 };
 
 pub const SubMarketCategory = struct {
-    tag: SubMarketCategoryTag,
+    id: usize,
+    name: [:0]u8,
+    market_category_id: usize, // ID MarketCategory
+    // tag: SubMarketCategoryTag,
+};
+
+pub const MarketItem = struct {
+    id: usize,
+    full_name: [:0]u8,
+    short_name: [:0]u8,
+    market_sub_category_id: usize,
+    description: [:0]u8,
 };
 
 pub const BasicResource = struct {

@@ -74,6 +74,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const implot_module = buildImplot(b, target, optimize);
+
     // inject the cimgui header search path into the sokol C library compile step
     dep_sokol.artifact("sokol_clib").addIncludePath(dep_cimgui.path("src")); // Normal
 
@@ -90,6 +92,8 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        // .link_libc = true,
+        // .link_libcpp = true,
         .imports = &.{
             .{ .name = "networking", .module = mod_networking },
             // .{ .name = "ecs", .module = mod_ecs },
@@ -108,6 +112,7 @@ pub fn build(b: *std.Build) void {
                 .name = "cimgui",
                 .module = dep_cimgui.module("cimgui"),
             },
+            .{ .name = "implot", .module = implot_module },
             .{
                 .name = "tracy",
                 .module = tracy.module("tracy"),
@@ -128,80 +133,147 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    var deps = [_]Dep{
-        .{ .module = dep_sokol.module("sokol"), .name = "sokol", .root_path = "sokol", .use_emscripten = true, .builder = dep_sokol.builder },
-        .{ .module = dep_cimgui.module("cimgui"), .name = "cimgui", .root_path = "cimgui" },
-        // .{ .d = dep_zecs, .name = "zecs", .root_path = "zig-ecs" },
-        .{ .module = tracy.module("tracy"), .name = "tracy", .root_path = "tracy" },
-        .{ .module = zflecs.module("root"), .name = "zflecs", .root_path = "root", .artifact = zflecs.artifact("flecs") },
-        .{ .module = zcs.module("zcs"), .name = "zcs", .root_path = "zcs" },
-        .{ .module = sqlite.module("sqlite"), .name = "sqlite", .root_path = "sqlite" },
-    };
+    if (!target.result.cpu.arch.isWasm()) {
+        const exe = b.addExecutable(.{
+            .name = "Price of Power",
+            .root_module = mod,
+        });
+        b.installArtifact(exe);
+
+        // const lib = b.addLibrary(.{
+        //     .linkage = .static,
+        //     .name = "implot",
+        //     .root_module = mod,
+        // });
+        // b.installArtifact(lib);
+
+        b.step("run", "Run Price of Power example").dependOn(&b.addRunArtifact(exe).step);
+
+        const install_resources = b.addInstallDirectory(.{
+            .source_dir = b.path("db"),
+            .install_dir = .bin,
+            .install_subdir = "db",
+        });
+        exe.step.dependOn(&install_resources.step);
+    }
+
+    // var deps = [_]Dep{
+    //     .{ .module = dep_sokol.module("sokol"), .name = "sokol", .root_path = "sokol", .use_emscripten = true, .builder = dep_sokol.builder },
+    //     .{ .module = dep_cimgui.module("cimgui"), .name = "cimgui", .root_path = "cimgui" },
+    //     // .{ .d = dep_zecs, .name = "zecs", .root_path = "zig-ecs" },
+    //     .{ .module = tracy.module("tracy"), .name = "tracy", .root_path = "tracy" },
+    //     .{ .module = zflecs.module("root"), .name = "zflecs", .root_path = "root", .artifact = zflecs.artifact("flecs") },
+    //     .{ .module = zcs.module("zcs"), .name = "zcs", .root_path = "zcs" },
+    //     .{ .module = sqlite.module("sqlite"), .name = "sqlite", .root_path = "sqlite" },
+    // };
 
     // special case handling for native vs web build
-    const opts = Options{ .mod = mod, .dep_sokol = dep_sokol };
+    // const opts = Options{ .mod = mod, .dep_sokol = dep_sokol };
     if (target.result.cpu.arch.isWasm()) {
-        try buildWeb(b, opts, &deps);
+        // try buildWeb(b, opts, deps);
+        try buildWeb(b, mod);
     } else {
-        try buildNative(b, opts, &deps);
+        // try buildNative(b, opts, &deps);
+        // try buildNative(b, mod);
     }
 }
 
-fn buildNative(b: *std.Build, opts: Options, deps: []Dep) !void {
+fn buildNative(
+    b: *std.Build,
+    mod: *std.Build.Module,
+) !void {
     const exe = b.addExecutable(.{
         .name = "Price of Power",
-        .root_module = opts.mod,
+        .root_module = mod,
     });
-
-    // const mod_ecs = b.createModule(.{
-    //     .root_source_file = b.path("src/game/ecs/ecs.zig"),
-    // });
-
-    // for (deps) |dep| {
-    //     mod_ecs.addImport(dep.name, dep.module);
-    // }
-
-    // exe.root_module.addImport("ecs", mod_ecs);
-
-    for (deps) |dep| {
-        exe.root_module.addImport(dep.name, dep.module);
-        if (dep.artifact != null) {
-            exe.root_module.linkLibrary(dep.artifact.?);
-        }
-    }
-
+    // exe.root_module.addImport("skgui", mod);
     b.installArtifact(exe);
-    const run = b.addRunArtifact(exe);
-    b.step("run", "Run Price of Power").dependOn(&run.step);
+    b.step("run", "Run Price of Power example").dependOn(&b.addRunArtifact(exe).step);
 }
 
-fn buildWeb(b: *std.Build, opts: Options, deps: []Dep) !void {
+// fn buildWeb(b: *std.Build, opts: Options, deps: []Dep) !void {
+fn buildWeb(b: *std.Build, mod: *std.Build.Module) !void {
     const lib = b.addLibrary(.{
         .name = "Price of Power",
-        .root_module = opts.mod,
+        .root_module = mod,
     });
 
-    for (deps) |dep| {
-        lib.root_module.addImport(dep.name, dep.module);
-        if (dep.artifact != null) {
-            lib.root_module.linkLibrary(dep.artifact.?);
-        }
-        if (dep.use_emscripten) {
-            const emsdk = dep.builder.?.dependency("emsdk", .{});
-            const link_step = try sokol.emLinkStep(b, .{
-                .lib_main = lib,
-                .target = opts.mod.resolved_target.?,
-                .optimize = opts.mod.optimize.?,
-                .emsdk = emsdk,
-                .use_webgl2 = true,
-                .use_emmalloc = true,
-                .use_filesystem = false,
-                .shell_file_path = opts.dep_sokol.path("src/sokol/web/shell.html"),
-            });
-            b.getInstallStep().dependOn(&link_step.step);
-            const run = sokol.emRunStep(b, .{ .name = "Price of Power", .emsdk = emsdk });
-            run.step.dependOn(&link_step.step);
-            b.step("run", "Run Price of Power").dependOn(&run.step);
-        }
-    }
+    lib.root_module.addImport("mod", mod);
+    // for (deps) |dep| {
+    //     lib.root_module.addImport(dep.name, dep.module);
+    //     if (dep.artifact != null) {
+    //         lib.root_module.linkLibrary(dep.artifact.?);
+    //     }
+    //     if (dep.use_emscripten) {
+    //         const emsdk = dep.builder.?.dependency("emsdk", .{});
+    //         const link_step = try sokol.emLinkStep(b, .{
+    //             .lib_main = lib,
+    //             .target = opts.mod.resolved_target.?,
+    //             .optimize = opts.mod.optimize.?,
+    //             .emsdk = emsdk,
+    //             .use_webgl2 = true,
+    //             .use_emmalloc = true,
+    //             .use_filesystem = false,
+    //             .shell_file_path = opts.dep_sokol.path("src/sokol/web/shell.html"),
+    //         });
+    //         b.getInstallStep().dependOn(&link_step.step);
+    //         const run = sokol.emRunStep(b, .{ .name = "Price of Power", .emsdk = emsdk });
+    //         run.step.dependOn(&link_step.step);
+    //         b.step("run", "Run Price of Power").dependOn(&run.step);
+    //     }
+    // }
+}
+
+fn buildImplot(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) *std.Build.Module {
+    const mod_name = "implot";
+
+    // -------
+    // module
+    // -------
+    const step = b.addTranslateC(.{
+        .root_source_file = b.path("lib/libzig/implot/impl_implot.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // step.addIncludePath(b.path("./lib/libzig"));
+    step.addIncludePath(b.path("./lib/libzig/implot"));
+    step.addIncludePath(b.path("./lib/libc/dcimgui"));
+    step.addIncludePath(b.path("./lib/libc/imgui"));
+    step.addIncludePath(b.path("./lib/libc/cimplot"));
+    step.defineCMacro("CIMGUI_DEFINE_ENUMS_AND_STRUCTS", "");
+    //
+    const mod = step.addModule(mod_name);
+    mod.addImport(mod_name, mod);
+    mod.addIncludePath(b.path("./lib/libc/dcimgui/imgui"));
+    mod.addIncludePath(b.path("./lib/libc/dcimgui"));
+    mod.addIncludePath(b.path("./lib/libc/imgui"));
+    mod.addIncludePath(b.path("./lib/libc/cimplot"));
+    mod.addIncludePath(b.path("./lib/libc/cimplot/implot"));
+    mod.addIncludePath(b.path("./lib/libzig/implot"));
+    // macro
+    mod.addCMacro("ImDrawIdx", "unsigned int");
+    //mod.addCMacro("IMGUI_DISABLE_OBSOLETE_FUNCTIONS", "1");
+
+    mod.addCSourceFiles(.{
+        .files = &.{
+            "lib/libc/cimplot/cimplot.cpp",
+            "lib/libc/cimplot/implot/implot.cpp",
+            "lib/libc/cimplot/implot/implot_demo.cpp",
+            "lib/libc/cimplot/implot/implot_items.cpp",
+        },
+    });
+
+    // const lib = b.addLibrary(.{
+    //     .linkage = .static,
+    //     .name = "implot",
+    //     .root_module = mod,
+    // });
+    // b.installArtifact(lib);
+    //std.debug.print("{s} module\n",.{mod_name});
+    return mod;
 }
