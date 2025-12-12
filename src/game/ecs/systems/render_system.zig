@@ -1,8 +1,5 @@
 // Interface definition for a system, using Vtable
-// const zecs = @import("zecs");
 const std = @import("std");
-const sokol = @import("sokol");
-const sg = sokol.gfx;
 const ecs = @import("../ecs.zig");
 
 const RenderSystem = @This();
@@ -12,15 +9,15 @@ vtable: *const VTable,
 
 pub const VTable = struct {
     setup: *const fn (*anyopaque) void,
-    render: *const fn (*anyopaque, world: *ecs.zflecs.world_t, pass_action: *sg.PassAction) void,
+    render: *const fn (*anyopaque) void,
     deinit: *const fn (*anyopaque) void,
 };
 
 pub fn setup(self: RenderSystem) void {
     return self.vtable.setup(self.ptr);
 }
-pub fn render(self: RenderSystem, world: *ecs.zflecs.world_t, pass_action: *sg.PassAction) void {
-    return self.vtable.render(self.ptr, world, pass_action);
+pub fn render(self: RenderSystem) void {
+    return self.vtable.render(self.ptr);
 }
 pub fn deinit(self: RenderSystem) void {
     return self.vtable.deinit(self.ptr);
@@ -35,9 +32,9 @@ pub fn init(ptr: anytype) RenderSystem {
             const self: T = @ptrCast(@alignCast(impl));
             return ptr_info.pointer.child.setup(self);
         }
-        pub fn render(impl: *anyopaque, world: *ecs.zflecs.world_t, pass_action: *sg.PassAction) void {
+        pub fn render(impl: *anyopaque) void {
             const self: T = @ptrCast(@alignCast(impl));
-            return ptr_info.pointer.child.render(self, world, pass_action);
+            return ptr_info.pointer.child.render(self);
         }
         pub fn deinit(impl: *anyopaque) void {
             const self: T = @ptrCast(@alignCast(impl));

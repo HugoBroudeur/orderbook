@@ -1,19 +1,12 @@
 const std = @import("std");
 
-// const zecs = @import("zecs");
 const ecs = @import("../ecs.zig");
 const RenderSystem = @import("render_system.zig");
-const RenderingPipeline = @import("../rendering_pipeline.zig");
 const ig = @import("cimgui");
 
-const sokol = @import("sokol");
-const sapp = sokol.app;
-const simgui = sokol.imgui;
-const sg = sokol.gfx;
-const slog = sokol.log;
-const sglue = sokol.glue;
-
 const ip = @import("implot");
+const impl_sdl3 = @import("impl_sdl3");
+const impl_sdlgpu3 = @import("impl_sdlgpu3");
 
 const UiSystem = @This();
 
@@ -25,7 +18,6 @@ pub const fonts: [2][]const u8 = .{
 };
 pub const font_size: f32 = 18;
 
-pub var w: *ecs.zflecs.world_t = undefined;
 var imPlotContext: [*c]ip.struct_ImPlotContext = undefined;
 
 pub fn init() UiSystem {
@@ -33,8 +25,10 @@ pub fn init() UiSystem {
 }
 pub fn deinit(self: *UiSystem) void {
     _ = self;
+
     ip.ImPlot_DestroyContext(imPlotContext);
-    simgui.shutdown();
+    ig.igDestroyContext(null);
+    // simgui.shutdown();
 }
 
 pub fn system(self: *UiSystem) RenderSystem {
@@ -46,35 +40,29 @@ pub fn setup(self: *UiSystem) void {
 
     ensureSettingFileExist(settings_file_path);
     // initialize sokol-imgui
-    simgui.setup(.{
-        .logger = .{ .func = slog.func },
-        .ini_filename = settings_file_path,
-        .no_default_font = true,
-    });
+    // simgui.setup(.{
+    //     .logger = .{ .func = slog.func },
+    //     .ini_filename = settings_file_path,
+    //     .no_default_font = true,
+    // });
+
+    if (ig.igCreateContext(null) == null) {
+        ecs.logger.err("[UiSystem][Setup] Error during setup Imgui Context: {}", .{error.ImGuiCreateContextFailure});
+        return;
+    }
 
     imPlotContext = ip.ImPlot_CreateContext();
 
     ecs.create_single_component_entity(&ecs.cb, ecs.components.UIState, .{});
     // Change Font
-    const io: *ig.ImGuiIO = ig.igGetIO();
+    const io: *ig.ImGuiIO = ig.igGetIO_Nil();
     for (&fonts) |*font| {
         _ = ig.ImFontAtlas_AddFontFromFileTTF(io.Fonts, font.ptr, font_size, null, null);
     }
-
-    // _ = ecs.zflecs.ADD_SYSTEM(w, "start_imgui_pass", RenderingPipeline.BeginImguiPass, start_imgui_pass);
-
-    // _ = ecs.zflecs.ADD_SYSTEM(w, "market-trade-view", RenderingPipeline.RenderImguiPass, render_market_view);
-    // _ = ecs.zflecs.ADD_SYSTEM(w, "render_ui", RenderingPipeline.RenderImguiPass, render_ui);
-    // _ = ecs.zflecs.ADD_SYSTEM(w, "render_resource_view", RenderingPipeline.RenderImguiPass, render_resource_view);
-    // ecs.make_system(struct { resource: *ecs.components.Resource }, system_render_resource_view);
-
-    // _ = ecs.zflecs.ADD_SYSTEM(w, "end_imgui_pass", RenderingPipeline.EndImguiPass, end_imgui_pass);
 }
 
-pub fn render(self: *UiSystem, world: *ecs.zflecs.world_t, pass_action: *sg.PassAction) void {
-    _ = &world;
+pub fn render(self: *UiSystem) void {
     _ = &self;
-    _ = &pass_action;
 
     // simgui.render();
 }
@@ -117,12 +105,17 @@ pub fn render_ui(ctx: struct { cb: *ecs.CmdBuf, es: *ecs.Entities, mm: *ecs.Mark
 
 pub fn start_imgui_pass(state: *ecs.components.UIState) void {
     ecs.logger.info("[UiRenderSystem.start_imgui_pass]", .{});
-    simgui.newFrame(.{
-        .width = sapp.width(),
-        .height = sapp.height(),
-        .delta_time = sapp.frameDuration(),
-        .dpi_scale = sapp.dpiScale(),
-    });
+    // simgui.newFrame(.{
+    //     .width = sapp.width(),
+    //     .height = sapp.height(),
+    //     .delta_time = sapp.frameDuration(),
+    //     .dpi_scale = sapp.dpiScale(),
+    // });
+
+    // Start the Dear ImGui frame
+    impl_sdlgpu3.ImGui_ImplSDLGPU3_NewFrame();
+    impl_sdl3.ImGui_ImplSDL3_NewFrame();
+    ig.igNewFrame();
 
     var flags: c_int = 0;
     flags |= ig.ImGuiWindowFlags_NoTitleBar;
@@ -145,7 +138,8 @@ pub fn end_imgui_pass() void {
     ecs.logger.info("[UiRenderSystem.end_imgui_pass]", .{});
 
     ig.igEnd(); // Opened in the start frame
-    simgui.render();
+    // simgui.render();
+    ig.igRender();
 }
 
 fn render_menu_bar(state: *ecs.components.UIState) void {
@@ -169,10 +163,10 @@ pub fn ensureSettingFileExist(path: []const u8) void {
 pub fn update_ui_state(ctx: struct { es: *ecs.Entities }, state: *ecs.components.UIState) void {
     ecs.logger.info("[UiRenderSystem.system_update_ui_state]", .{});
 
-    var iter = ctx.es.iterator(struct { pass_action: *sg.PassAction });
-    while (iter.next(ctx.es)) |i| {
-        state.pass_action = i.pass_action;
-    }
+    // var iter = ctx.es.iterator(struct { pass_action: *sg.PassAction });
+    // while (iter.next(ctx.es)) |i| {
+    //     state.pass_action = i.pass_action;
+    // }
 
     var it = ctx.es.iterator(struct { env: *ecs.components.EnvironmentInfo });
     while (it.next(ctx.es)) |i| {
@@ -184,24 +178,25 @@ pub fn update_ui_state(ctx: struct { es: *ecs.Entities }, state: *ecs.components
 pub fn render_ui_test(ctx: struct {}, state: *ecs.components.UIState) void {
     _ = ctx;
     ecs.logger.info("[UiRenderSystem.render_ui_test]", .{});
-    const io: *ig.ImGuiIO = ig.igGetIO();
+    const io: *ig.ImGuiIO = ig.igGetIO_Nil();
 
-    const backendName: [*c]const u8 = switch (sg.queryBackend()) {
-        .D3D11 => "Direct3D11",
-        .GLCORE => "OpenGL",
-        .GLES3 => "OpenGLES3",
-        .METAL_IOS => "Metal iOS",
-        .METAL_MACOS => "Metal macOS",
-        .METAL_SIMULATOR => "Metal Simulator",
-        .WGPU => "WebGPU",
-        .DUMMY => "Dummy",
-    };
+    const backendName: [*c]const u8 = "Dummy";
+    // const backendName: [*c]const u8 = switch (sg.queryBackend()) {
+    //     .D3D11 => "Direct3D11",
+    //     .GLCORE => "OpenGL",
+    //     .GLES3 => "OpenGLES3",
+    //     .METAL_IOS => "Metal iOS",
+    //     .METAL_MACOS => "Metal macOS",
+    //     .METAL_SIMULATOR => "Metal Simulator",
+    //     .WGPU => "WebGPU",
+    //     .DUMMY => "Dummy",
+    // };
 
     ecs.components.Styles.setStyle(@enumFromInt(state.current_theme));
 
     //=== UI CODE STARTS HERE
     if (ig.igBegin("Hello Dear ImGui!", &state.show_first_window, ig.ImGuiWindowFlags_None)) {
-        _ = ig.igColorEdit3("Background", &state.pass_action.colors[0].clear_value.r, ig.ImGuiColorEditFlags_None);
+        // _ = ig.igColorEdit3("Background", &state.pass_action.colors[0].clear_value.r, ig.ImGuiColorEditFlags_None);
         _ = ig.igText("Dear ImGui Version: %s", ig.IMGUI_VERSION);
     }
     ig.igEnd();

@@ -5,9 +5,6 @@ const hex = @import("../math/hex.zig");
 const color = @import("../math/color.zig");
 // const log = @import("../../debug/log.zig").ecs;
 const shape = @import("../math/shape.zig");
-const sokol = @import("sokol");
-const sg = sokol.gfx;
-const sapp = sokol.app;
 
 const Mat4 = vec.Mat4;
 
@@ -130,7 +127,7 @@ pub const UIState = struct {
 
     current_tab: MainMenuTab = .HQ,
 
-    pass_action: *sg.PassAction = undefined,
+    // pass_action: *sg.PassAction = undefined,
 
     market_view_ui: struct {
         asset_selected: usize = 0,
@@ -167,7 +164,7 @@ pub const CurrentSelected = struct {
 //  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝
 
 pub const RenderPass = struct {
-    pass_action: sg.PassAction = .{},
+    // pass_action: sg.PassAction = .{},
 };
 
 pub const ShapeType = enum {
@@ -381,12 +378,12 @@ pub const Scenario = struct {
 // ╚═╝╚═╝  ╚═══╝╚═╝      ╚═════╝    ╚═╝   ╚══════╝
 
 pub const InputEvent = packed struct {
-    code: sapp.Keycode,
-    status: sapp.EventType,
+    // code: sapp.Keycode,
+    // status: sapp.EventType,
 };
 
 pub const InputsState = struct {
-    keys: std.EnumArray(sapp.Keycode, sapp.EventType),
+    // keys: std.EnumArray(sapp.Keycode, sapp.EventType),
     mouse: MouseState,
 };
 
@@ -394,7 +391,7 @@ pub const MouseState = struct {
     cursor: vec.Vec2,
     speed: vec.Vec2,
     scroll: vec.Vec2,
-    buttons: std.EnumArray(sapp.Mousebutton, sapp.EventType),
+    // buttons: std.EnumArray(sapp.Mousebutton, sapp.EventType),
 };
 
 // pub const InputKey = struct {

@@ -3,9 +3,9 @@ const networking = @import("networking");
 const env = @import("config.zig");
 const game = @import("game/game.zig");
 
-const sokol = @import("sokol");
-const slog = sokol.log;
-const sapp = sokol.app;
+// const sokol = @import("sokol");
+// const slog = sokol.log;
+// const sapp = sokol.app;
 
 const WINDOW_WIDTH = 1920;
 const WINDOW_HEIGHT = 1060;
@@ -64,17 +64,19 @@ pub fn main() !void {
         config,
     );
 
-    sapp.run(.{
-        .init_cb = init,
-        .frame_cb = frame,
-        .cleanup_cb = cleanup,
-        .event_cb = event,
-        .window_title = "Price is Power",
-        .width = WINDOW_WIDTH,
-        .height = WINDOW_HEIGHT,
-        .icon = .{ .sokol_default = true },
-        .logger = .{ .func = slog.func },
-    });
+    game.run();
+
+    // sapp.run(.{
+    //     .init_cb = init,
+    //     .frame_cb = frame,
+    //     .cleanup_cb = cleanup,
+    //     .event_cb = event,
+    //     .window_title = "Price is Power",
+    //     .width = WINDOW_WIDTH,
+    //     .height = WINDOW_HEIGHT,
+    //     .icon = .{ .sokol_default = true },
+    //     .logger = .{ .func = slog.func },
+    // });
     // try tcp_server.start();
     // try tcp_server.listen();
 
@@ -89,23 +91,23 @@ pub fn main() !void {
     // try orderbook.main();
 }
 
-export fn init() void {
-    game.setup();
-    // game.setup() catch |err| {
-    //     std.log.err("[ERROR][main] Init: {}", .{err});
-    //     sapp.quit();
-    //     // game.shutdown();
-    // };
-}
-
-export fn frame() void {
-    game.frame();
-}
-
-export fn cleanup() void {
-    game.shutdown();
-}
-
-export fn event(ev: [*c]const sapp.Event) void {
-    game.handleEvent(ev);
-}
+// export fn init() void {
+//     game.setup();
+//     // game.setup() catch |err| {
+//     //     std.log.err("[ERROR][main] Init: {}", .{err});
+//     //     sapp.quit();
+//     //     // game.shutdown();
+//     // };
+// }
+//
+// export fn frame() void {
+//     game.frame();
+// }
+//
+// export fn cleanup() void {
+//     game.shutdown();
+// }
+//
+// export fn event(ev: [*c]const sapp.Event) void {
+//     game.handleEvent(ev);
+// }

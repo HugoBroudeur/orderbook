@@ -1,12 +1,12 @@
 pub fn setup_game(allocator: std.mem.Allocator, es: *Ecs.Entities, cb: *Ecs.CmdBuf) !void {
-    const pass_action: sg.PassAction = .{ .colors = blk: {
-        var c: [8]sg.ColorAttachmentAction = @splat(std.mem.zeroes(sg.ColorAttachmentAction));
-        c[0] = .{
-            .load_action = .CLEAR,
-            .clear_value = .{ .r = 0.0, .g = 0.5, .b = 1.0, .a = 1.0 },
-        };
-        break :blk c;
-    } };
+    // const pass_action: sg.PassAction = .{ .colors = blk: {
+    //     var c: [8]sg.ColorAttachmentAction = @splat(std.mem.zeroes(sg.ColorAttachmentAction));
+    //     c[0] = .{
+    //         .load_action = .CLEAR,
+    //         .clear_value = .{ .r = 0.0, .g = 0.5, .b = 1.0, .a = 1.0 },
+    //     };
+    //     break :blk c;
+    // } };
 
     // try seed_resources_and_books(allocator, cb);
 
@@ -17,7 +17,7 @@ pub fn setup_game(allocator: std.mem.Allocator, es: *Ecs.Entities, cb: *Ecs.CmdB
     _ = allocator;
     _ = &sub_category_map;
 
-    Ecs.create_single_component_entity(cb, sg.PassAction, pass_action);
+    // Ecs.create_single_component_entity(cb, sg.PassAction, pass_action);
     Ecs.create_single_component_entity(cb, Ecs.components.EnvironmentInfo, .{ .world_time = 0 });
 
     Ecs.create_single_component_entity(cb, Ecs.components.Event.UnlockAssetEvent, .{ .asset = .{ .res_metal = .Iron } });
@@ -207,5 +207,3 @@ pub fn toTitleCase(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
 
 const std = @import("std");
 const Ecs = @import("../ecs.zig");
-const sokol = @import("sokol");
-const sg = sokol.gfx;
