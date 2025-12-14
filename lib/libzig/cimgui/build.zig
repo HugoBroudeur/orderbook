@@ -13,18 +13,27 @@ pub fn build(b: *std.Build) void {
     // -------
     // module
     // -------
+    // const step = b.addTranslateC(.{
+    //     .root_source_file = b.path("../../libc/cimgui/cimgui.h"),
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
     const step = b.addTranslateC(.{
-        .root_source_file = b.path("../../libc/cimgui/cimgui.h"),
+        .root_source_file = b.path("../../libc/cimplot/cimplot.h"),
         .target = target,
         .optimize = optimize,
     });
 
     step.defineCMacro("CIMGUI_DEFINE_ENUMS_AND_STRUCTS", "");
+    step.addIncludePath(b.path("../../libc/cimgui"));
+    step.addIncludePath(b.path("../../libc/cimgui/imgui"));
+    step.addIncludePath(b.path("../../libc/cimgui/imgui/backends"));
+    step.addIncludePath(b.path("../../libc/cimgui/implot"));
     const mod = step.addModule(mod_name);
     mod.addImport(mod_name, mod);
-    mod.addIncludePath(b.path("../../libc/cimgui"));
     mod.addIncludePath(b.path("../../libc/cimgui/imgui"));
-    mod.addIncludePath(b.path("../../libc/cimgui/imgui/backends"));
+    mod.addIncludePath(b.path("../../libc/cimgui"));
+    mod.addIncludePath(b.path("../../libc/cimgui/implot"));
     // mod.addIncludePath(b.path("../utils"));
     // macro
     mod.addCMacro("IMGUI_ENABLE_WIN32_DEFAULT_IME_FUNCTIONS", "");
@@ -50,6 +59,12 @@ pub fn build(b: *std.Build) void {
             "../../libc/cimgui/cimgui_impl.cpp",
             // ImGui GLFW and OpenGL interface
             //"../utils/themeGold.cpp",
+            // ImPlot
+            "../../libc/cimgui/implot/implot.cpp",
+            "../../libc/cimgui/implot/implot_demo.cpp",
+            "../../libc/cimgui/implot/implot_items.cpp",
+            // CImPlot
+            "../../libc/cimgui/cimplot.cpp",
         },
     });
 

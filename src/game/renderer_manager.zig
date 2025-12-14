@@ -10,7 +10,7 @@ window: *sdl.SDL_Window,
 gpu_device: *sdl.SDL_GPUDevice,
 
 pub fn init() !RendererManager {
-    const gpu_device: *sdl.SDL_GPUDevice = null;
+    var gpu_device: *sdl.SDL_GPUDevice = undefined;
     // Create GPU Device
     const flags_gpu = sdl.SDL_GPU_SHADERFORMAT_SPIRV + sdl.SDL_GPU_SHADERFORMAT_DXIL + sdl.SDL_GPU_SHADERFORMAT_METALLIB;
     if (sdl.SDL_CreateGPUDevice(flags_gpu, true, null)) |device| {
@@ -23,6 +23,7 @@ pub fn init() !RendererManager {
     return .{
         .backend = .sdl3,
         .gpu_device = gpu_device,
+        .window = undefined,
     };
 }
 

@@ -4,7 +4,7 @@ const ecs = @import("../ecs.zig");
 const RenderSystem = @import("render_system.zig");
 const ig = @import("cimgui");
 
-const ip = @import("implot");
+// const ig = @import("implot");
 const impl_sdl3 = @import("impl_sdl3");
 const impl_sdlgpu3 = @import("impl_sdlgpu3");
 
@@ -18,7 +18,7 @@ pub const fonts: [2][]const u8 = .{
 };
 pub const font_size: f32 = 18;
 
-var imPlotContext: [*c]ip.struct_ImPlotContext = undefined;
+var imPlotContext: [*c]ig.struct_ImPlotContext = undefined;
 
 pub fn init() UiSystem {
     return .{};
@@ -26,7 +26,7 @@ pub fn init() UiSystem {
 pub fn deinit(self: *UiSystem) void {
     _ = self;
 
-    ip.ImPlot_DestroyContext(imPlotContext);
+    ig.ImPlot_DestroyContext(imPlotContext);
     ig.igDestroyContext(null);
     // simgui.shutdown();
 }
@@ -51,7 +51,7 @@ pub fn setup(self: *UiSystem) void {
         return;
     }
 
-    imPlotContext = ip.ImPlot_CreateContext();
+    // imPlotContext = ig.ImPlot_CreateContext();
 
     ecs.create_single_component_entity(&ecs.cb, ecs.components.UIState, .{});
     // Change Font
@@ -126,7 +126,7 @@ pub fn start_imgui_pass(state: *ecs.components.UIState) void {
 
     ig.igShowDemoWindow(&state.is_demo_open);
 
-    ip.ImPlot_ShowDemoWindow(&state.is_demo_open);
+    ig.ImPlot_ShowDemoWindow(&state.is_demo_open);
 
     ig.igSetNextWindowPos(.{ .x = 0, .y = 0 }, ig.ImGuiCond_Once);
     ig.igSetNextWindowSize(.{ .x = @floatFromInt(state.window_width), .y = @floatFromInt(state.window_height) }, ig.ImGuiCond_Once);

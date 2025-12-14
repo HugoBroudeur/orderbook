@@ -20,7 +20,10 @@ pub fn build(b: *std.Build) void {
     });
 
     step.defineCMacro("CIMGUI_DEFINE_ENUMS_AND_STRUCTS", "");
-    step.addIncludePath(b.path("../../libc/cimgui"));
+    step.addIncludePath(b.path("../../libc/cimplot"));
+    // step.addIncludePath(b.path("../../libc/cimgui"));
+    step.addIncludePath(b.path("../../libc/cimplot/imgui"));
+    step.addIncludePath(b.path("../../libc/cimplot/imgui/backends"));
     step.addIncludePath(b.path("../../libc/cimplot/cimplot"));
     const mod = step.addModule(mod_name);
     mod.addImport(mod_name, mod);
@@ -29,11 +32,28 @@ pub fn build(b: *std.Build) void {
     mod.addIncludePath(b.path("../../libc/cimgui"));
     mod.addIncludePath(b.path("../../libc/cimplot/implot"));
     // macro
+    mod.addCMacro("IMGUI_ENABLE_WIN32_DEFAULT_IME_FUNCTIONS", "");
     mod.addCMacro("ImDrawIdx", "unsigned int");
+    mod.addCMacro("IMGUI_DISABLE_OBSOLETE_FUNCTIONS", "1");
     //mod.addCMacro("IMGUI_DISABLE_OBSOLETE_FUNCTIONS", "1");
+
+    switch (builtin.target.os.tag) {
+        .windows => mod.addCMacro("IMGUI_IMPL_API", "extern \"C\" __declspec(dllexport)"),
+        .linux => mod.addCMacro("IMGUI_IMPL_API", "extern \"C\"  "),
+        else => {},
+    }
 
     mod.addCSourceFiles(.{
         .files = &.{
+            // // ImGui
+            "../../libc/cimplot/imgui/imgui.cpp",
+            "../../libc/cimplot/imgui/imgui_tables.cpp",
+            "../../libc/cimplot/imgui/imgui_demo.cpp",
+            "../../libc/cimplot/imgui/imgui_widgets.cpp",
+            "../../libc/cimplot/imgui/imgui_draw.cpp",
+            // // CImGui
+            "../../libc/cimplot/cimgui.cpp",
+            "../../libc/cimplot/cimgui_impl.cpp",
             // ImPlot
             "../../libc/cimplot/implot/implot.cpp",
             "../../libc/cimplot/implot/implot_demo.cpp",

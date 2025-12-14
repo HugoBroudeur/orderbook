@@ -6,12 +6,13 @@ const builtin = @import("builtin");
 // const slog = sokol.log;
 // const sapp = sokol.app;
 // const use_docking = @import("build_options").docking;
-// const ig = @import("cimgui");
-const ip = @import("implot");
-const ig = ip;
+const ig = @import("cimgui");
+// const ig = @import("implot");
+// const ig = ip;
 const tracy = @import("tracy");
 const Config = @import("../config.zig");
 const DbManager = @import("db_manager.zig");
+const RendererManager = @import("renderer_manager.zig");
 // // const Delil = @import("gfx/delil_imgui.zig");
 // const Delilv2 = @import("gfx/delil_v2.zig");
 // const Delil = @import("gfx/delil.zig");
@@ -43,6 +44,7 @@ pub const GameError = error{
 const game_allocator: std.mem.Allocator = undefined;
 var ecs: Ecs = undefined;
 var db_manager: DbManager = undefined;
+var renderer_manager: RendererManager = undefined;
 
 const FRAMES_PER_SECOND = 60.0;
 
@@ -64,6 +66,7 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
     // tracy.frameMarkStart("Main");
 
     db_manager = try DbManager.init(allocator, config);
+    renderer_manager = try RendererManager.init();
 
     ecs = Ecs.init(allocator, &db_manager) catch |err| {
         std.log.err("[ERROR][game.init] Can't initiate : {}", .{err});
@@ -80,49 +83,6 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
 // delil: delil.Context = undefined,
 pub fn setup() !void {
     errdefer shutdown();
-    // self.delil = delil.state;
-
-    // sg.setup(.{
-    //     .environment = sglue.environment(),
-    //     .logger = .{ .func = slog.func },
-    // });
-    // sokol.time.setup();
-
-    //-------------
-    // For print()
-    //-------------
-    // Setup SDL
-    if (sdl.SDL_Init(sdl.SDL_INIT_VIDEO | sdl.SDL_INIT_GAMEPAD) == false) {
-        std.debug.print("Error: {s}\n", .{sdl.SDL_GetError()});
-        return error.SDL_init;
-    }
-
-    const window_flags = sdl.SDL_WINDOW_RESIZABLE | sdl.SDL_WINDOW_HIDDEN | sdl.SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    const main_scale = sdl.SDL_GetDisplayContentScale(@intCast(sdl.SDL_GetPrimaryDisplay()));
-    if (sdl.SDL_CreateWindow("SDL3GPU example", @intFromFloat(WINDOW_WIDTH * main_scale), @intFromFloat(WINDOW_HEIGHT * main_scale), window_flags)) |pointer| {
-        window = pointer;
-    } else {
-        std.debug.print("Error: SDL_CreateWindow(): {s}\n", .{sdl.SDL_GetError()});
-        return error.SDL_CreatWindow;
-    }
-    // Create GPU Device
-    const flags_gpu = sdl.SDL_GPU_SHADERFORMAT_SPIRV + sdl.SDL_GPU_SHADERFORMAT_DXIL + sdl.SDL_GPU_SHADERFORMAT_METALLIB;
-    if (sdl.SDL_CreateGPUDevice(flags_gpu, true, null)) |device| {
-        gpu_device = device;
-    } else {
-        std.debug.print("Error: SDL_CreateGPUDevice(): {s}\n", .{sdl.SDL_GetError()});
-        return error.SDL_CreateGPUDevice;
-    }
-
-    // Claim window for GPU Device
-    if (!sdl.SDL_ClaimWindowForGPUDevice(gpu_device, window)) {
-        std.debug.print("Error: SDL_ClaimWindowForGPUDevice(): {s}\n", .{sdl.SDL_GetError()});
-        return error.SDL_ClaimWindowForGPUDevice;
-    }
-    _ = sdl.SDL_SetGPUSwapchainParameters(gpu_device, window, sdl.SDL_GPU_SWAPCHAINCOMPOSITION_SDR, sdl.SDL_GPU_PRESENTMODE_VSYNC);
-    //const renderer = sdl.SDL_CreateRenderer(window, null); // TODO for Image load ?
-
-    _ = sdl.SDL_SetWindowPosition(window, sdl.SDL_WINDOWPOS_CENTERED, sdl.SDL_WINDOWPOS_CENTERED);
 
     // Load ECS
     ecs.build_world() catch |err| {
@@ -147,8 +107,8 @@ pub fn run() void {
     var clearColor = [_]f32{ 0.25, 0.55, 0.9, 1.0 };
 
     // Setup Dear ImGui context
-    _ = ip.igCreateContext(null);
-    if (ip.igCreateContext(null) == null) {
+    // _ = ig.igCreateContext(null);
+    if (ig.igCreateContext(null) == null) {
         // return error.ImGuiCreateContextFailure;
     }
 
@@ -169,8 +129,8 @@ pub fn run() void {
         pio.*.ConfigFlags |= ig.ImGuiConfigFlags_ViewportsEnable; // Enable Multi-Viewport / Platform Windows
     }
 
-    const implot_ctx = ip.ImPlot_CreateContext();
-    defer ip.ImPlot_DestroyContext(implot_ctx);
+    const implot_ctx = ig.ImPlot_CreateContext();
+    defer ig.ImPlot_DestroyContext(implot_ctx);
 
     while (!done) {
         var event: sdl.SDL_Event = undefined;
@@ -192,7 +152,7 @@ pub fn run() void {
         //------------------
         if (showDemoWindow) {
             ig.igShowDemoWindow(&showDemoWindow);
-            ip.ImPlot_ShowDemoWindow(&showDemoWindow);
+            ig.ImPlot_ShowDemoWindow(&showDemoWindow);
         }
 
         //------------------

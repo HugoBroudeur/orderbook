@@ -42,7 +42,7 @@
         .fonticon = .{ .path = "./lib/libzig/fonticon" },
         .impl_sdl3 = .{ .path = "./lib/libzig/impl_sdl3" },
         .impl_sdlgpu3 = .{ .path = "./lib/libzig/impl_sdlgpu3" },
-        .implot = .{ .path = "./lib/libzig/implot" },
+        // .implot = .{ .path = "./lib/libzig/implot" },
         .networking = .{ .path = "./lib/libzig/networking" },
         .sdl3 = .{ .path = "./lib/libzig/sdl3" },
         // .sqlite = .{ .path = "./lib/libzig/sqlite" },
