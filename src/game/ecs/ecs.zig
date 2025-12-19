@@ -20,8 +20,8 @@ const GameSystem = @import("systems/game_system.zig");
 const UiSystem = @import("systems/ui_system.zig");
 // const SokolRenderSystem = @import("systems/sokol_render_system.zig");
 
-pub const MarketManager = @import("market_manager.zig");
-const UiManager = @import("ui_manager.zig");
+// pub const MarketManager = @import("market_manager.zig");
+const UiManager = @import("../ui_manager.zig");
 
 pub const Entities = zcs.Entities;
 pub const Entity = zcs.Entity;
@@ -39,8 +39,7 @@ systems: std.ArrayList(System),
 render_systems: std.ArrayList(RenderSystem),
 
 db_manager: *DbManager,
-market_manager: MarketManager,
-ui_manager: UiManager,
+// market_manager: MarketManager,
 
 pub const EcsError = error{
     AllocationError,
@@ -69,8 +68,7 @@ pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager) !Ecs {
     return .{
         .allocator = allocator,
         .db_manager = db_manager,
-        .market_manager = MarketManager.init(allocator, db_manager),
-        .ui_manager = .init(allocator, db_manager),
+        // .market_manager = MarketManager.init(allocator, db_manager),
         .systems = try .initCapacity(allocator, MAX_SYSTEMS_REGISTERED),
         .render_systems = try .initCapacity(allocator, MAX_SYSTEMS_REGISTERED),
     };
@@ -79,8 +77,7 @@ pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager) !Ecs {
 pub fn deinit(self: *Ecs) void {
     cb.deinit(self.allocator, &es);
     es.deinit(self.allocator);
-    self.market_manager.deinit();
-    self.ui_manager.deinit();
+    // self.market_manager.deinit();
     for (self.systems.items) |system| {
         system.deinit();
     }
@@ -96,8 +93,8 @@ pub fn build_world(self: *Ecs) !void {
     // Load Managers
     //
     try self.db_manager.seed_game_db();
-    try self.market_manager.on_load();
-    try self.ui_manager.on_load();
+    // try self.market_manager.on_load();
+    // try self.ui_manager.on_load();
 
     //
     // REGISTER SYSTEMS
@@ -150,7 +147,7 @@ pub fn progress(self: *Ecs) void {
 }
 
 pub fn render(self: *Ecs) void {
-    // _ = self;
+    _ = self;
 
     //
     // ALWAYS START WITH A SOKOL PASS
@@ -161,11 +158,11 @@ pub fn render(self: *Ecs) void {
     //
     // UI SYSTEM PASS
     //
-    es.forEach("render_ui", UiSystem.render_ui, .{
-        .cb = &cb,
-        .es = &es,
-        .mm = &self.market_manager,
-    });
+    // es.forEach("render_ui", UiSystem.render_ui, .{
+    //     .cb = &cb,
+    //     .es = &es,
+    //     .mm = &self.market_manager,
+    // });
 
     //
     // ALWAYS END WITH A SOKOL PASS

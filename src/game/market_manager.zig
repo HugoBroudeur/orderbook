@@ -1,13 +1,15 @@
 const std = @import("std");
-const Components = @import("components/components.zig");
-const DbManager = @import("../db_manager.zig");
+const Ecs = @import("ecs/ecs.zig");
+const DbManager = @import("db_manager.zig");
+const EcsManager = @import("ecs_manager.zig");
+
 const MarketManager = @This();
 
 allocator: std.mem.Allocator,
 db_manager: *DbManager,
-market_categories: std.AutoArrayHashMap(usize, Components.MarketCategory),
-market_sub_categories: std.AutoArrayHashMap(usize, Components.SubMarketCategory),
-market_items: std.AutoArrayHashMap(usize, Components.MarketItem),
+market_categories: std.AutoArrayHashMap(usize, Ecs.components.MarketCategory),
+market_sub_categories: std.AutoArrayHashMap(usize, Ecs.components.SubMarketCategory),
+market_items: std.AutoArrayHashMap(usize, Ecs.components.MarketItem),
 
 pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager) MarketManager {
     return .{
@@ -25,7 +27,7 @@ pub fn deinit(self: *MarketManager) void {
     self.market_items.deinit();
 }
 
-pub fn on_load(self: *MarketManager) !void {
+pub fn setup(self: *MarketManager, ecs_manager: *EcsManager) !void {
     try self.reset_items();
     try self.seed_market_category();
     try self.seed_market_sub_category();
@@ -36,6 +38,13 @@ pub fn on_load(self: *MarketManager) !void {
     try self.fetch_market_categories();
     try self.fetch_market_sub_categories();
     try self.fetch_market_items();
+
+    var it = self.market_items.iterator();
+    while (it.next()) |mi| {
+        const book = try Ecs.components.OrderBook.init(self.allocator, 1);
+        ecs_manager.create_single_component_entity(Ecs.components.MarketTrading, .{ .book = book, .id = @intCast(mi.value_ptr.id), .name = mi.value_ptr.full_name });
+    }
+    ecs_manager.flush_cmd_buf();
 }
 
 fn reset_items(self: *MarketManager) !void {
@@ -46,7 +55,7 @@ fn fetch_market_categories(self: *MarketManager) !void {
     var tx = try self.db_manager.db.prepare("SELECT * FROM market_category");
     defer tx.deinit();
 
-    const market_categories = try tx.all(Components.MarketCategory, self.allocator, .{}, .{});
+    const market_categories = try tx.all(Ecs.components.MarketCategory, self.allocator, .{}, .{});
     for (market_categories) |mc| {
         try self.market_categories.put(mc.id, mc);
     }
@@ -56,7 +65,7 @@ fn fetch_market_sub_categories(self: *MarketManager) !void {
     var tx = try self.db_manager.db.prepare("SELECT * FROM market_sub_category");
     defer tx.deinit();
 
-    const market_sub_categories = try tx.all(Components.SubMarketCategory, self.allocator, .{}, .{});
+    const market_sub_categories = try tx.all(Ecs.components.SubMarketCategory, self.allocator, .{}, .{});
     for (market_sub_categories) |msc| {
         try self.market_sub_categories.put(msc.id, msc);
     }
@@ -66,7 +75,7 @@ fn fetch_market_items(self: *MarketManager) !void {
     var tx = try self.db_manager.db.prepare("SELECT * FROM item");
     defer tx.deinit();
 
-    const market_items = try tx.all(Components.MarketItem, self.allocator, .{}, .{});
+    const market_items = try tx.all(Ecs.components.MarketItem, self.allocator, .{}, .{});
     for (market_items) |im| {
         try self.market_items.put(im.id, im);
     }

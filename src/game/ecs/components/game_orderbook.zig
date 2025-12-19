@@ -9,8 +9,8 @@ bids: PriceLevelMap(Side.Buy),
 asks: PriceLevelMap(Side.Sell),
 orders: Orders,
 
-best_bid_cache: ?Price = null,
-best_ask_cache: ?Price = null,
+best_bid_cache: Price = 0,
+best_ask_cache: Price = 0,
 
 pub fn init(allocator: std.mem.Allocator, shard_count: usize) !OrderBook {
     return .{
@@ -252,7 +252,14 @@ fn PriceLevelMap(comptime side: Side) type {
                 }
             }
 
-            std.mem.sort(Price, self.sorted_prices.items, {}, std.sort.desc(Price));
+            switch (self.side) {
+                Side.Buy => {
+                    std.mem.sort(Price, self.sorted_prices.items, {}, std.sort.desc(Price));
+                },
+                Side.Sell => {
+                    std.mem.sort(Price, self.sorted_prices.items, {}, std.sort.asc(Price));
+                },
+            }
             self.is_sorted = true;
         }
 
@@ -263,14 +270,12 @@ fn PriceLevelMap(comptime side: Side) type {
                 return null;
             }
 
-            switch (self.side) {
-                Side.Buy => {
-                    return self.sorted_prices.items[0];
-                },
-                Side.Sell => {
-                    return self.sorted_prices.items[self.sorted_prices.items.len - 1];
-                },
-            }
+            return self.sorted_prices.items[0];
+        }
+
+        pub fn getPrices(self: *Self) std.ArrayList(Price) {
+            _ = self.sort() catch null;
+            return self.sorted_prices;
         }
 
         pub fn isEmpty(self: *Self) bool {
@@ -289,19 +294,19 @@ const BookSnapshot = struct {
     asks: std.ArrayList(Order),
 };
 
-pub fn getBestBid(self: *OrderBook) ?Price {
-    if (self.best_bid_cache) |price| {
-        return price;
+pub fn getBestBid(self: *OrderBook) Price {
+    if (self.best_bid_cache != 0) {
+        return self.best_bid_cache;
     }
 
-    var best_bid: ?Price = null;
+    var best_bid: Price = 0;
     // for (self.bids) |levels| {
     // var it = levels.iterator();
     var it = self.bids.iterator();
     while (it.next()) |entry| {
         if (entry.value_ptr.order_count == 0) continue;
-        best_bid = if (best_bid) |current_best|
-            @max(current_best, entry.key_ptr.*)
+        best_bid = if (best_bid != 0)
+            @max(best_bid, entry.key_ptr.*)
         else
             entry.key_ptr.*;
     }
@@ -310,20 +315,20 @@ pub fn getBestBid(self: *OrderBook) ?Price {
     return best_bid;
 }
 
-pub fn getBestAsk(self: *OrderBook) ?Price {
-    if (self.best_ask_cache) |price| {
-        return price;
+pub fn getBestAsk(self: *OrderBook) Price {
+    if (self.best_ask_cache != 0) {
+        return self.best_ask_cache;
     }
 
-    var best_ask: ?Price = null;
+    var best_ask: Price = 0;
     // for (self.asks) |levels| {
     //     var it = levels.iterator();
     var it = self.asks.iterator();
     std.log.debug("[DEBUG][Orderbook.getBestAsk] Found {} asks", .{self.asks.len()});
     while (it.next()) |entry| {
         if (entry.value_ptr.order_count == 0) continue;
-        best_ask = if (best_ask) |current_best|
-            @max(current_best, entry.key_ptr.*)
+        best_ask = if (best_ask != 0)
+            @max(best_ask, entry.key_ptr.*)
         else
             entry.key_ptr.*;
     }
@@ -332,7 +337,7 @@ pub fn getBestAsk(self: *OrderBook) ?Price {
     return best_ask;
 }
 
-fn getNextBid(self: *OrderBook, current_price: Price) ?Price {
+fn getNextBid(self: *OrderBook, current_price: Price) Price {
     var next_bid: ?Price = null;
     // for (self.bids) |levels| {
     // var it = levels.iterator();
@@ -348,10 +353,10 @@ fn getNextBid(self: *OrderBook, current_price: Price) ?Price {
         }
     }
     // }
-    return next_bid;
+    return if (next_bid) |bid| bid else 0;
 }
 
-fn getNextAsk(self: *OrderBook, current_price: Price) ?Price {
+fn getNextAsk(self: *OrderBook, current_price: Price) Price {
     var next_ask: ?Price = null;
     // for (self.bids) |levels| {
     // var it = levels.iterator();
@@ -366,7 +371,7 @@ fn getNextAsk(self: *OrderBook, current_price: Price) ?Price {
         }
     }
     // }
-    return next_ask;
+    return if (next_ask) |ask| ask else 0;
 }
 
 fn canMatch(self: *OrderBook, side: Side, price: Price) !bool {
@@ -428,24 +433,24 @@ fn matchOrder(self: *OrderBook, order_to_match: Order) !Trades {
 
     std.log.debug("[DEBUG][Orderbook.matchOrder] Attempt to match {}, best_price: {}", .{
         order_to_match,
-        if (best_price) |p| p else 0,
+        best_price,
     });
 
     // TODO: Add SIMD batch operation (4 * bytes depending on architecture
     // const VECTOR_WIDTH = if (@import("builtin").cpu.arch == .x86_64) @as(usize, 4) else @as(usize, 2);
     //const BATCH_SIZE = VECTOR_WIDTH * 4;
 
-    while (best_price != null and remaining_amount > 0) : (best_price = if (is_buy) self.getNextAsk(best_price.?) else self.getNextBid(best_price.?)) {
-        std.log.debug("[DEBUG][Orderbook.matchOrder] First loop. Next price to match: {?}", .{
+    while (best_price != 0 and remaining_amount > 0) : (best_price = if (is_buy) self.getNextAsk(best_price) else self.getNextBid(best_price)) {
+        std.log.debug("[DEBUG][Orderbook.matchOrder] First loop. Next price to match: {}", .{
             best_price,
         });
-        if ((is_buy and best_price.? > price) or (!is_buy and best_price.? < price)) {
+        if ((is_buy and best_price > price) or (!is_buy and best_price < price)) {
             break;
         }
 
-        var orders = try self.getOrdersAtPrice(side, best_price.?);
+        var orders = try self.getOrdersAtPrice(side, best_price);
         defer orders.deinit(self.allocator);
-        std.log.debug("[DEBUG][Orderbook.matchOrder] First loop. Found {} Orders for the price {?} on the {} side.", .{
+        std.log.debug("[DEBUG][Orderbook.matchOrder] First loop. Found {} Orders for the price {} on the {} side.", .{
             orders.items.len,
             best_price,
             side,
@@ -490,20 +495,20 @@ fn matchOrder(self: *OrderBook, order_to_match: Order) !Trades {
             remaining_amount -= fill_amount;
 
             const order_count: i64 = if (is_fully_filled) -1 else 0;
-            try self.updatePriceLevel(side, best_price.?, fill_amount, order_count);
+            try self.updatePriceLevel(side, best_price, fill_amount, order_count);
 
-            self.onOrderMatched(best_price.?, fill_amount, is_fully_filled);
+            self.onOrderMatched(best_price, fill_amount, is_fully_filled);
 
             try trades.appendBounded(.{
                 .ask_trade = .{
                     .order_id = if (!is_buy) orders.items[j].order.id else order_to_match.id,
                     .quantity = fill_amount,
-                    .price = best_price.?,
+                    .price = best_price,
                 },
                 .bid_trade = .{
                     .order_id = if (is_buy) orders.items[j].order.id else order_to_match.id,
                     .quantity = fill_amount,
-                    .price = best_price.?,
+                    .price = best_price,
                 },
             });
 
@@ -516,7 +521,7 @@ fn matchOrder(self: *OrderBook, order_to_match: Order) !Trades {
                 .GoodTillCancel => {},
             }
 
-            try self.updateMatchedOrder(&orders.items[j], fill_amount, best_price.?);
+            try self.updateMatchedOrder(&orders.items[j], fill_amount, best_price);
             if (is_fully_filled) {
                 _ = self.orders.swapRemove(order_to_match.key());
             }
@@ -603,7 +608,7 @@ fn updatePriceLevel(self: *OrderBook, side: Side, price: Price, volume_delta: i6
         },
     }
 
-    std.log.debug("[DEBUG][Orderbook.updatePriceLevel] New Best bid price: {?}, New Best ask price: {?}", .{
+    std.log.debug("[DEBUG][Orderbook.updatePriceLevel] New Best bid price: {}, New Best ask price: {}", .{
         self.best_bid_cache,
         self.best_ask_cache,
     });
@@ -613,16 +618,16 @@ fn updateBestPrice(self: *OrderBook, price: Price, side: Side, amount_left: usiz
     switch (side) {
         Side.Buy => {
             if (0 == amount_left) {
-                self.best_bid_cache = self.getNextBid(if (self.best_bid_cache) |p| p else 0);
+                self.best_bid_cache = self.getNextBid(self.best_bid_cache);
             }
-            self.best_bid_cache = if (self.best_bid_cache) |current_best| @max(current_best, price) else price;
+            self.best_bid_cache = if (self.best_bid_cache != 0) @max(self.best_bid_cache, price) else price;
         },
 
         Side.Sell => {
             if (0 == amount_left) {
-                self.best_ask_cache = self.getNextAsk(if (self.best_ask_cache) |p| p else 0);
+                self.best_ask_cache = self.getNextAsk(self.best_ask_cache);
             }
-            self.best_ask_cache = if (self.best_ask_cache) |current_best| @max(current_best, price) else price;
+            self.best_ask_cache = if (self.best_ask_cache != 0) @max(self.best_ask_cache, price) else price;
         },
     }
 }

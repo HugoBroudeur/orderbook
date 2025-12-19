@@ -17,9 +17,6 @@ pub fn setup_game(allocator: std.mem.Allocator, es: *Ecs.Entities, cb: *Ecs.CmdB
     _ = allocator;
     _ = &sub_category_map;
 
-    // Ecs.create_single_component_entity(cb, sg.PassAction, pass_action);
-    Ecs.create_single_component_entity(cb, Ecs.components.EnvironmentInfo, .{ .world_time = 0 });
-
     Ecs.create_single_component_entity(cb, Ecs.components.Event.UnlockAssetEvent, .{ .asset = .{ .res_metal = .Iron } });
     Ecs.create_single_component_entity(cb, Ecs.components.Event.UnlockAssetEvent, .{ .asset = .{ .res_ore = .IronOre } });
 
@@ -74,11 +71,11 @@ fn create_tradables(
 ) !void {
     // Ores
     for (std.enums.values(Ecs.components.OreTypes)) |tag| {
-        const book = try Ecs.components.OrderBook.init(allocator, 1);
+        // const book = try Ecs.components.OrderBook.init(allocator, 1);
         const entity: Ecs.Entity = .reserve(cb);
         _ = entity.add(cb, Ecs.components.Tradable, .{});
         _ = entity.add(cb, Ecs.components.Name, .{ .short = tag.getName(), .full = try toTitleCase(allocator, tag.getName()) });
-        _ = entity.add(cb, Ecs.components.MarketTrading, .{ .book = book });
+        // _ = entity.add(cb, Ecs.components.MarketTrading, .{ .book = book });
 
         _ = Ecs.CmdBuf.ext(cb, Ecs.Node.SetParent, .{
             .child = entity,
@@ -88,11 +85,11 @@ fn create_tradables(
 
     // Woods
     for (std.enums.values(Ecs.components.WoodTypes)) |tag| {
-        const book = try Ecs.components.OrderBook.init(allocator, 1);
+        // const book = try Ecs.components.OrderBook.init(allocator, 1);
         const entity: Ecs.Entity = .reserve(cb);
         _ = entity.add(cb, Ecs.components.Tradable, .{});
         _ = entity.add(cb, Ecs.components.Name, .{ .short = tag.getName(), .full = try toTitleCase(allocator, tag.getName()) });
-        _ = entity.add(cb, Ecs.components.MarketTrading, .{ .book = book });
+        // _ = entity.add(cb, Ecs.components.MarketTrading, .{ .book = book });
 
         _ = Ecs.CmdBuf.ext(cb, Ecs.Node.SetParent, .{
             .child = entity,
@@ -102,11 +99,11 @@ fn create_tradables(
 
     // Metals
     for (std.enums.values(Ecs.components.MetalTypes)) |tag| {
-        const book = try Ecs.components.OrderBook.init(allocator, 1);
+        // const book = try Ecs.components.OrderBook.init(allocator, 1);
         const entity: Ecs.Entity = .reserve(cb);
         _ = entity.add(cb, Ecs.components.Tradable, .{});
         _ = entity.add(cb, Ecs.components.Name, .{ .short = tag.getName(), .full = try toTitleCase(allocator, tag.getName()) });
-        _ = entity.add(cb, Ecs.components.MarketTrading, .{ .book = book });
+        // _ = entity.add(cb, Ecs.components.MarketTrading, .{ .book = book });
 
         _ = Ecs.CmdBuf.ext(cb, Ecs.Node.SetParent, .{
             .child = entity,
@@ -206,4 +203,5 @@ pub fn toTitleCase(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
 }
 
 const std = @import("std");
+const sdl = @import("sdl3");
 const Ecs = @import("../ecs.zig");

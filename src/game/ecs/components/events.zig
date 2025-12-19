@@ -9,6 +9,7 @@ const ecs = @import("../ecs.zig");
 
 pub const PlaceOrderEvent = struct {
     // asset: components.AssetTypes,
+    orderbook_id: u32,
     quantity: ecs.components.OrderBook.Quantity,
     side: ecs.components.OrderBook.Side,
     price: ecs.components.OrderBook.Price,
