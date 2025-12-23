@@ -1,207 +1,167 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const protobuf = @import("protobuf");
-const sokol = @import("sokol");
+const blib = @import("./build_lib.zig");
 
 const protobuf_files = &.{ "proto", "proto/all.proto", "proto/orderbook/v1/orderbook.proto" };
-
-const Options = struct {
-    mod: *std.Build.Module,
-    dep_sokol: *std.Build.Dependency,
-};
-
-const Dep = struct {
-    name: []const u8,
-    root_path: []const u8,
-    module: *std.Build.Module,
-    use_emscripten: bool = false,
-    artifact: ?*std.Build.Step.Compile = null,
-    builder: ?*std.Build = null,
-};
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const mod_networking = b.addModule("networking", .{
-        .root_source_file = b.path("src/networking/mod.zig"),
-        .target = target,
-    });
+    // Get executable name from current directory name
+    const allocator = b.allocator;
+    const abs_path = b.build_root.handle.realpathAlloc(allocator, ".") catch unreachable;
+    defer allocator.free(abs_path);
+    const exe_name = "Price is Power";
 
-    const protobuf_dep = b.dependency("protobuf", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const tracy = b.dependency("tracy", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // const dvui_dep = b.dependency("dvui", .{
-    //     .target = target,
-    //     .optimize = optimize,
-    //     .backend = .sdl3,
-    // });
-
-    const dep_sokol = b.dependency("sokol", .{
-        .target = target,
-        .optimize = optimize,
-        .with_sokol_imgui = true,
-    });
-
-    const dep_zecs = b.dependency("zecs", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const dep_cimgui = b.dependency("cimgui", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const zflecs = b.dependency("zflecs", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const zcs = b.dependency("zcs", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const sqlite = b.dependency("sqlite", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // inject the cimgui header search path into the sokol C library compile step
-    dep_sokol.artifact("sokol_clib").addIncludePath(dep_cimgui.path("src")); // Normal
-
-    // Generate Zig code from .proto
-    const gen_proto = b.step("gen-proto", "generate zig files from protocol buffer definitions");
-    const protoc_step = protobuf.RunProtocStep.create(protobuf_dep.*.builder, target, .{
-        .destination_directory = b.path("src/proto"),
-        .source_files = protobuf_files,
-        .include_directories = &.{""},
-    });
-    gen_proto.dependOn(&protoc_step.step);
-
-    const mod = b.createModule(.{
+    const main_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{
-            .{ .name = "networking", .module = mod_networking },
-            // .{ .name = "ecs", .module = mod_ecs },
-            .{ .name = "protobuf", .module = protobuf_dep.module("protobuf") },
-            // .{ .name = "dvui", .module = dvui_dep.module("dvui_sdl3") },
-            // .{ .name = "sdl-backend", .module = dvui_dep.module("sdl3") },
-            .{
-                .name = "sokol",
-                .module = dep_sokol.module("sokol"),
-            },
-            .{
-                .name = "zecs",
-                .module = dep_zecs.module("zig-ecs"),
-            },
-            .{
-                .name = "cimgui",
-                .module = dep_cimgui.module("cimgui"),
-            },
-            .{
-                .name = "tracy",
-                .module = tracy.module("tracy"),
-            },
-            // .{ .name = "shader", .module = try createShaderModule(b, dep_sokol) },
-            .{
-                .name = "zflecs",
-                .module = zflecs.module("root"),
-            },
-            .{
-                .name = "zcs",
-                .module = zcs.module("zcs"),
-            },
-            .{
-                .name = "sqlite",
-                .module = sqlite.module("sqlite"),
-            },
-        },
     });
 
-    var deps = [_]Dep{
-        .{ .module = dep_sokol.module("sokol"), .name = "sokol", .root_path = "sokol", .use_emscripten = true, .builder = dep_sokol.builder },
-        .{ .module = dep_cimgui.module("cimgui"), .name = "cimgui", .root_path = "cimgui" },
-        // .{ .d = dep_zecs, .name = "zecs", .root_path = "zig-ecs" },
-        .{ .module = tracy.module("tracy"), .name = "tracy", .root_path = "tracy" },
-        .{ .module = zflecs.module("root"), .name = "zflecs", .root_path = "root", .artifact = zflecs.artifact("flecs") },
-        .{ .module = zcs.module("zcs"), .name = "zcs", .root_path = "zcs" },
-        .{ .module = sqlite.module("sqlite"), .name = "sqlite", .root_path = "sqlite" },
-    };
+    // Register external module from "./build.zig.zon" file.
+    blib.addExternalModule(b, main_mod);
 
-    // special case handling for native vs web build
-    const opts = Options{ .mod = mod, .dep_sokol = dep_sokol };
-    if (target.result.cpu.arch.isWasm()) {
-        try buildWeb(b, opts, &deps);
-    } else {
-        try buildNative(b, opts, &deps);
-    }
-}
-
-fn buildNative(b: *std.Build, opts: Options, deps: []Dep) !void {
-    const exe = b.addExecutable(.{
-        .name = "Price of Power",
-        .root_module = opts.mod,
+    // Additionnal External Dependencies
+    const dep_sqlite = b.dependency("sqlite", .{
+        .target = target,
+        .optimize = optimize,
     });
-
-    // const mod_ecs = b.createModule(.{
-    //     .root_source_file = b.path("src/game/ecs/ecs.zig"),
+    const dep_zcs = b.dependency("zcs", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const dep_tracy = b.dependency("tracy", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    // Generate Zig code from .proto
+    // const gen_proto = b.step("gen-proto", "generate zig files from protocol buffer definitions");
+    // const protoc_step = protobuf.RunProtocStep.create(dep_protobuf.*.builder, target, .{
+    //     .destination_directory = b.path("src/proto"),
+    //     .source_files = protobuf_files,
+    //     .include_directories = &.{""},
     // });
+    // gen_proto.dependOn(&protoc_step.step);
 
-    // for (deps) |dep| {
-    //     mod_ecs.addImport(dep.name, dep.module);
-    // }
+    const exe = b.addExecutable(.{
+        .name = exe_name,
+        .root_module = main_mod,
+        .use_llvm = true,
+    });
 
-    // exe.root_module.addImport("ecs", mod_ecs);
+    exe.root_module.addImport("sqlite", dep_sqlite.module("sqlite"));
+    exe.root_module.addImport("zcs", dep_zcs.module("zcs"));
+    exe.root_module.addImport("tracy", dep_tracy.module("tracy"));
 
-    for (deps) |dep| {
-        exe.root_module.addImport(dep.name, dep.module);
-        if (dep.artifact != null) {
-            exe.root_module.linkLibrary(dep.artifact.?);
-        }
+    // Load Icon
+    // exe.root_module.addWin32ResourceFile(.{ .file = b.path("src/res/res.rc") });
+
+    // std.Build: Deprecate Step.Compile APIs that mutate the root module #22587
+    // See. https://github.com/ziglang/zig/pull/22587
+    //----------------------------------
+    const sdlPath = "lib/libc/SDL/SDL3-3.2.28/x86_64-w64-mingw32";
+
+    //-------------------
+    // For application
+    //-------------------
+    //------
+    // Libs
+    //------
+    // exe.root_module.linkSystemLibrary("glfw3", .{});
+    if (builtin.target.os.tag == .windows) {
+        exe.root_module.linkSystemLibrary("gdi32", .{});
+        exe.root_module.linkSystemLibrary("imm32", .{});
+        exe.root_module.linkSystemLibrary("advapi32", .{});
+        exe.root_module.linkSystemLibrary("comdlg32", .{});
+        exe.root_module.linkSystemLibrary("dinput8", .{});
+        exe.root_module.linkSystemLibrary("dxerr8", .{});
+        exe.root_module.linkSystemLibrary("dxguid", .{});
+        exe.root_module.linkSystemLibrary("gdi32", .{});
+        exe.root_module.linkSystemLibrary("hid", .{});
+        exe.root_module.linkSystemLibrary("kernel32", .{});
+        exe.root_module.linkSystemLibrary("ole32", .{});
+        exe.root_module.linkSystemLibrary("oleaut32", .{});
+        exe.root_module.linkSystemLibrary("setupapi", .{});
+        exe.root_module.linkSystemLibrary("shell32", .{});
+        exe.root_module.linkSystemLibrary("user32", .{});
+        exe.root_module.linkSystemLibrary("uuid", .{});
+        exe.root_module.linkSystemLibrary("version", .{});
+        exe.root_module.linkSystemLibrary("winmm", .{});
+        exe.root_module.linkSystemLibrary("winspool", .{});
+        exe.root_module.linkSystemLibrary("ws2_32", .{});
+        exe.root_module.linkSystemLibrary("opengl32", .{});
+        exe.root_module.linkSystemLibrary("shell32", .{});
+        exe.root_module.linkSystemLibrary("user32", .{});
+        // Static link
+        exe.addObjectFile(b.path(b.pathJoin(&.{ sdlPath, "lib", "libSDL3.dll.a" })));
+    } else if (builtin.target.os.tag == .linux) {
+        exe.root_module.linkSystemLibrary("GL", .{});
+        exe.root_module.linkSystemLibrary("X11", .{});
+        exe.root_module.linkSystemLibrary("SDL3", .{});
+        // exe.root_module.linkSystemLibrary("sqlite3", .{});
     }
+    // sdl3
+    //exe.addLibraryPath(b.path(b.pathJoin(&.{sdlPath, "lib-mingw-64"})));
+    //exe.linkSystemLibrary("SD32");      // For static link
+    // Dynamic link
+    //exe.addObjectFile(b.path(b.pathJoin(&.{sdlPath, "lib","libSDL3dll.a"})));
+    //exe.linkSystemLibrary("SDL3dll"); // For dynamic link
+
+    // root_module
+    exe.root_module.link_libc = true;
+    exe.root_module.link_libcpp = true;
+    exe.subsystem = .Windows; // Hide console window
 
     b.installArtifact(exe);
-    const run = b.addRunArtifact(exe);
-    b.step("run", "Run Price of Power").dependOn(&run.step);
-}
 
-fn buildWeb(b: *std.Build, opts: Options, deps: []Dep) !void {
-    const lib = b.addLibrary(.{
-        .name = "Price of Power",
-        .root_module = opts.mod,
+    const install_resources = b.addInstallDirectory(.{
+        .source_dir = b.path("assets"), // base: assets folder
+        .install_dir = .bin, // bin folder
+        .install_subdir = "assets", // destination: bin/resources/
     });
+    const db_resources = b.addInstallDirectory(.{
+        .source_dir = b.path("db"), // base: db folder
+        .install_dir = .bin, // bin folder
+        .install_subdir = "db", // destination: bin/db/
+    });
+    exe.step.dependOn(&install_resources.step);
+    exe.step.dependOn(&db_resources.step);
 
-    for (deps) |dep| {
-        lib.root_module.addImport(dep.name, dep.module);
-        if (dep.artifact != null) {
-            lib.root_module.linkLibrary(dep.artifact.?);
-        }
-        if (dep.use_emscripten) {
-            const emsdk = dep.builder.?.dependency("emsdk", .{});
-            const link_step = try sokol.emLinkStep(b, .{
-                .lib_main = lib,
-                .target = opts.mod.resolved_target.?,
-                .optimize = opts.mod.optimize.?,
-                .emsdk = emsdk,
-                .use_webgl2 = true,
-                .use_emmalloc = true,
-                .use_filesystem = false,
-                .shell_file_path = opts.dep_sokol.path("src/sokol/web/shell.html"),
-            });
-            b.getInstallStep().dependOn(&link_step.step);
-            const run = sokol.emRunStep(b, .{ .name = "Price of Power", .emsdk = emsdk });
-            run.step.dependOn(&link_step.step);
-            b.step("run", "Run Price of Power").dependOn(&run.step);
-        }
+    const resBin = [_][]const u8{
+        "imgui.ini",
+    };
+
+    inline for (resBin) |file| {
+        const res = b.addInstallFile(b.path(file), "bin/" ++ file);
+        b.getInstallStep().dependOn(&res.step);
     }
+    // const fonticon_dir = "../../src/libc/fonticon/fa6/";
+    // const res_fonticon = [_][]const u8{ "fa-solid-900.ttf", "LICENSE.txt" };
+    // inline for (res_fonticon) |file| {
+    //     const res = b.addInstallFile(b.path(fonticon_dir ++ file), "bin/resources/fonticon/fa6/" ++ file);
+    //     b.getInstallStep().dependOn(&res.step);
+    // }
+
+    // save [Executable name].ini
+    // const sExeIni = b.fmt("{s}.ini", .{exe_name});
+    // const resExeIni = b.addInstallFile(b.path(sExeIni), b.pathJoin(&.{ "bin", sExeIni }));
+    // b.getInstallStep().dependOn(&resExeIni.step);
+
+    if (true) { // Enable if use SDL3.dll with dynamic linking.
+        const resSdlDll = b.pathJoin(&.{ sdlPath, "bin", "SDL3.dll" });
+        const resSdl = b.addInstallFile(b.path(resSdlDll), "bin/SDL3.dll");
+        b.getInstallStep().dependOn(&resSdl.step);
+    }
+
+    const run_cmd = b.addRunArtifact(exe);
+    run_cmd.step.dependOn(b.getInstallStep());
+
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+    const run_step = b.step("run", "Run the app");
+    run_step.dependOn(&run_cmd.step);
 }

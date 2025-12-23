@@ -10,38 +10,42 @@
             .url = "git+https://github.com/Arwalk/zig-protobuf?ref=master#0c69509ffd2a9ca4448977fcbd94ad5217b3df8e",
             .hash = "protobuf-3.0.0-0e82anPRKADr_h_KCVG8ZMCa5fVi4KRpk_e6RH-SnG-k",
         },
-        .dvui = .{
-            .url = "git+https://github.com/david-vanderson/dvui?ref=main#3d62a0a9bca24496a5d88e37ed0aa20bd69c94e4",
-            .hash = "dvui-0.4.0-dev-AQFJmYez1gB9ful12tmJDbsm6TSkLKA-JUU5H1kFWtiS",
-        },
-        .sokol = .{
-            .url = "git+https://github.com/floooh/sokol-zig.git#1c217971533e3aa634ecbfbe13ff776e05701e0a",
-            .hash = "sokol-0.1.0-pb1HK3TYLgCx8lOxdLVWIVDcAzacxO8YDfyw2Er-_2nN",
-        },
-        .zecs = .{
-            .url = "git+https://github.com/prime31/zig-ecs#dbf3647c2cc4f327fe87067e40f8436c7f87f209",
-            .hash = "entt-1.0.0-qJPtbNLVAgDPXaUbyRSsBTK75Cr1WujUA92kToJugWry",
-        },
-        .cimgui = .{
-            .url = "git+https://github.com/floooh/dcimgui.git#d5fb4e3d27b79062dc5981db3631dadc4f204654",
-            .hash = "cimgui-0.1.0-44Clkd6YlAAYULKHDwsDX9EPmka-VAVEjUl-o6ve307E",
-        },
+        // .sokol = .{
+        //     .url = "git+https://github.com/floooh/sokol-zig.git#1c217971533e3aa634ecbfbe13ff776e05701e0a",
+        //     .hash = "sokol-0.1.0-pb1HK3TYLgCx8lOxdLVWIVDcAzacxO8YDfyw2Er-_2nN",
+        // },
+        // .cimgui = .{
+        //     .url = "git+https://github.com/floooh/dcimgui#a89e0594214cf315de033c7cb6c144c7b54da09b",
+        //     .hash = "cimgui-0.1.0-44Clkd6YlAAYULKHDwsDX9EPmka-VAVEjUl-o6ve307E",
+        // },
         .tracy = .{
             .url = "git+https://github.com/Games-by-Mason/tracy_zig.git#81acd22b8218668ad1215835fb21d63bf04ae6b4",
             .hash = "tracy-0.0.0-R7l8BSJIAQCSQWVPOIr-kFep8eSZzkD60a2h5O0gt3S2",
         },
-        .zflecs = .{
-            .url = "git+https://github.com/zig-gamedev/zflecs#9c484724d7245f585a1a7d8ac67e91f0d764951d",
-            .hash = "zflecs-0.2.0-dev-1PN3ym9mOgCyE8w0DdK_Uf7FAob-nm0Dp_lZKR3QyJaC",
-        },
+        // .zflecs = .{
+        //     .url = "git+https://github.com/zig-gamedev/zflecs#9c484724d7245f585a1a7d8ac67e91f0d764951d",
+        //     .hash = "zflecs-0.2.0-dev-1PN3ym9mOgCyE8w0DdK_Uf7FAob-nm0Dp_lZKR3QyJaC",
+        // },
         .zcs = .{
-            .url = "git+https://github.com/Games-by-Mason/ZCS#ada4854f92f57980afd34ade4026c2ed26563178",
-            .hash = "zcs-0.1.0-WhLQ_EVeAwAPMAypvb-FjEraJaDFTWAHpFGF6NZ8eCK0",
+            .url = "git+https://github.com/Games-by-Mason/ZCS#1b7ab86df0a21342ccd2bc2b05e1eb0c52507569",
+            .hash = "zcs-0.1.1-WhLQ_EVeAwAvYUhbrAM5iqkZ4WLsjRqbANW6vkLao_tf",
         },
         .sqlite = .{
             .url = "git+https://github.com/vrischmann/zig-sqlite#0b75ba276d34de3141ec1697e3ef7c836d7b38e7",
             .hash = "sqlite-3.48.0-F2R_a8eODgD9X8XjvWlZ1K7C-tDuHae4FuShM2N-yIT2",
         },
+        // .implot = .{
+        //     .url = "https://github.com/epezent/implot/archive/1f7a8c0314d838a76695bccebe0f66864f507bc0.tar.gz",
+        //     .hash = "1220781bd0617c107617cc19d446801f519d5a29fc4beee9438c527f74af8caf483f",
+        // },
+        .cimgui = .{ .path = "./lib/libzig/cimgui" },
+        .fonticon = .{ .path = "./lib/libzig/fonticon" },
+        .impl_sdl3 = .{ .path = "./lib/libzig/impl_sdl3" },
+        .impl_sdlgpu3 = .{ .path = "./lib/libzig/impl_sdlgpu3" },
+        // .implot = .{ .path = "./lib/libzig/implot" },
+        .networking = .{ .path = "./lib/libzig/networking" },
+        .sdl3 = .{ .path = "./lib/libzig/sdl3" },
+        // .sqlite = .{ .path = "./lib/libzig/sqlite" },
     },
     .paths = .{
         "build.zig",

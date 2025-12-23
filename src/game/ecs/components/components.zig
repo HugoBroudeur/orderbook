@@ -2,14 +2,11 @@ const std = @import("std");
 const uuid = @import("../math/uuid.zig");
 const vec = @import("../math/vec.zig");
 const hex = @import("../math/hex.zig");
-const color = @import("../math/color.zig");
-// const log = @import("../../debug/log.zig").ecs;
 const shape = @import("../math/shape.zig");
-const sokol = @import("sokol");
-const sg = sokol.gfx;
-const sapp = sokol.app;
 
 const Mat4 = vec.Mat4;
+
+pub const Graphics = @import("graphics.zig");
 
 // ACSII Generator: https://patorjk.com/software/taag/#p=display&f=ANSI%20Shadow&t=Graphics
 
@@ -130,10 +127,17 @@ pub const UIState = struct {
 
     current_tab: MainMenuTab = .HQ,
 
-    pass_action: *sg.PassAction = undefined,
+    // pass_action: *sg.PassAction = undefined,
 
     market_view_ui: struct {
-        asset_selected: usize = 0,
+        // Current Market ID selected for the trading view
+        market_selected_id: usize = 0,
+        // State to recorded if a market has been selected
+        is_market_selected: bool = false,
+        bid_selected: usize = 0,
+        ask_selected: usize = 0,
+        current_bidding_price: i32 = 0,
+        current_asking_price: i32 = 0,
     } = .{},
 
     resource_view_ui: struct {
@@ -159,133 +163,6 @@ pub const CurrentSelected = struct {
     is_selected: bool,
 };
 
-//  ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗██╗ ██████╗███████╗
-// ██╔════╝ ██╔══██╗██╔══██╗██╔══██╗██║  ██║██║██╔════╝██╔════╝
-// ██║  ███╗██████╔╝███████║██████╔╝███████║██║██║     ███████╗
-// ██║   ██║██╔══██╗██╔══██║██╔═══╝ ██╔══██║██║██║     ╚════██║
-// ╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║██║╚██████╗███████║
-//  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝
-
-pub const RenderPass = struct {
-    pass_action: sg.PassAction = .{},
-};
-
-pub const ShapeType = enum {
-    hexagon,
-    rect,
-    triangle,
-    circle,
-    quad,
-    pyramid,
-    cube,
-    none,
-};
-
-pub const Shape = union(enum) {
-    hexagon: HexagonShape,
-};
-
-pub const HexagonShape = shapeMaker(.hexagon).make();
-// pub const Shape = struct {
-//
-//     const Self = @This();
-//     type: ShapeType = .none,
-//     vertices: []vec.Vec3 = undefined,
-//     tex_coords: []vec.Vec2 = undefined,
-//     indices: []u32 = undefined,
-//     vertex_colors: []color.ColorUB4 = undefined,
-//
-//     pub fn make(t: ShapeType) Shape {
-//         var s: Shape = .{};
-//         s.type = t;
-//         s.vertices = &[1]vec.Vec3{vec.Vec3.zero()};
-//         s.tex_coords = &[1]vec.Vec3{vec.Vec2.zero()};
-//         s.indices = &[1]u32{0};
-//         s.vertex_colors = &[1]color.ColorUB4{.{}};
-//         return s;
-//     }
-// };
-
-fn shapeMaker(comptime T: ShapeType) type {
-    const vertices = switch (T) {
-        .hexagon => 6,
-        else => 0,
-    };
-    const indices = switch (T) {
-        .hexagon => 6,
-        else => 0,
-    };
-    const tex_coords = switch (T) {
-        .hexagon => 0,
-        else => 0,
-    };
-    const vertex_colors = switch (T) {
-        .hexagon => 6,
-        else => 0,
-    };
-
-    return struct {
-        const Self = @This();
-        type: ShapeType = T,
-        vertices: [vertices]vec.Vec3 = @splat(vec.Vec3.zero()),
-        tex_coords: [tex_coords]vec.Vec2 = @splat(vec.Vec2.zero()),
-        indices: [indices]u32 = @splat(0),
-        vertex_colors: [vertex_colors]color.ColorUB4 = @splat(.{}),
-
-        // struct ShapeComponent
-        // {
-        // Rendering::ShapeTypes CurrentShape = Rendering::ShapeTypes::None;
-        // Ref<std::vector<Math::vec3>> Vertices {};
-        // Ref<std::vector<Math::vec2>> TextureCoordinates {};
-        // Ref<std::vector<uint32_t>> Indices {};
-        // Ref<std::vector<Math::vec4>> VertexColors {};
-        // Ref<Rendering::Shader> Shader;
-        // Rendering::ShaderSpecification ShaderSpecification {Rendering::ColorInputType::None, Rendering::TextureInputType::None, false, true, true, Rendering::RenderingType::DrawIndex, false};
-        // Assets::AssetHandle ShaderHandle{ Assets::EmptyHandle };
-        // Ref<Rendering::Texture2D> Texture;
-        // Assets::AssetHandle TextureHandle{ Assets::EmptyHandle };
-        // Buffer ShaderData;
-        //         }
-
-        pub fn make() type {
-            return shapeMaker(T);
-            // const s = Self{};
-            // switch (T) {
-            //     .hexagon => {
-            //         // shape.vertices = hex.
-            //     },
-            //     else => {},
-            // }
-            //
-            // return s;
-        }
-    };
-}
-
-pub const CircleCollider2D = struct {
-    offset: vec.Vec2 = vec.Vec2.zero(),
-    radius: f32 = 0.5,
-
-    // struct CircleCollider2DComponent
-    // {
-    // Math::vec2 Offset = { 0.0f, 0.0f };
-    // float Radius =  0.5f;
-    //
-    // // TODO: move into physics material maybe
-    // float Density = 1.0f;
-    // float Friction = 0.5f;
-    // float Restitution = 0.0f;
-    // float RestitutionThreshold = 0.5f;
-    // bool IsSensor = false;
-    //
-    // // Storage for runtime
-    // void* RuntimeFixture = nullptr;
-    //
-    // CircleCollider2DComponent() = default;
-    // CircleCollider2DComponent(const CircleCollider2DComponent&) = default;
-    // };
-};
-
 //  ██████╗ ██████╗ ██████╗ ███████╗██████╗     ██████╗  ██████╗  ██████╗ ██╗  ██╗
 // ██╔═══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗    ██╔══██╗██╔═══██╗██╔═══██╗██║ ██╔╝
 // ██║   ██║██████╔╝██║  ██║█████╗  ██████╔╝    ██████╔╝██║   ██║██║   ██║█████╔╝
@@ -295,8 +172,61 @@ pub const CircleCollider2D = struct {
 
 pub const OrderBook = @import("game_orderbook.zig");
 
+pub const Money = struct {
+    pub const Sign = enum { positive, negative };
+
+    value: u32 = 0,
+    sign: Sign = .positive,
+
+    pub fn init(value: u32) Money {
+        return .{ .value = value };
+    }
+
+    pub fn fromI32(value: i32) Money {
+        return .{ .value = @abs(value), .sign = Money.getSign(value) };
+    }
+
+    pub fn fromFloat(value: f32) Money {
+        const v: u32 = @intFromFloat(value * 100);
+
+        return .{ .value = v };
+    }
+
+    pub fn toFloat(money: Money) f32 {
+        return @divTrunc(money.value, 100);
+    }
+
+    pub fn add(money: Money, a: Money) Money {
+        const sum: i32 = if (money.sign == .positive) 1 else -1 * money.value + if (a.sign == .positive) 1 else -1 * a.value;
+        const sign: Money.Sign = Money.getSign(sum);
+
+        return .{ .value = @intCast(@abs(sum)), .sign = sign };
+    }
+
+    pub fn sub(money: Money, a: Money) Money {
+        const diff: i32 = if (money.sign == .positive) 1 else -1 * money.value - if (a.sign == .positive) 1 else -1 * a.value;
+        const sign: Money.Sign = Money.getSign(diff);
+
+        return .{ .value = @intCast(@abs(diff)), .sign = sign };
+    }
+
+    pub fn isPositive(money: Money) bool {
+        return money.sign == .positive;
+    }
+
+    pub fn isNegative(money: Money) bool {
+        return money.sign == .negative;
+    }
+
+    fn getSign(x: i32) Sign {
+        return if (x >> 31 == 0) .positive else .negative;
+    }
+};
+
 pub const MarketTrading = struct {
+    id: u32,
     book: OrderBook,
+    name: []const u8,
     is_available: bool = false,
 
     pub fn setAvailability(self: *MarketTrading, available: bool) void {
@@ -381,12 +311,12 @@ pub const Scenario = struct {
 // ╚═╝╚═╝  ╚═══╝╚═╝      ╚═════╝    ╚═╝   ╚══════╝
 
 pub const InputEvent = packed struct {
-    code: sapp.Keycode,
-    status: sapp.EventType,
+    // code: sapp.Keycode,
+    // status: sapp.EventType,
 };
 
 pub const InputsState = struct {
-    keys: std.EnumArray(sapp.Keycode, sapp.EventType),
+    // keys: std.EnumArray(sapp.Keycode, sapp.EventType),
     mouse: MouseState,
 };
 
@@ -394,7 +324,7 @@ pub const MouseState = struct {
     cursor: vec.Vec2,
     speed: vec.Vec2,
     scroll: vec.Vec2,
-    buttons: std.EnumArray(sapp.Mousebutton, sapp.EventType),
+    // buttons: std.EnumArray(sapp.Mousebutton, sapp.EventType),
 };
 
 // pub const InputKey = struct {
@@ -549,16 +479,29 @@ fn CameraMaker(comptime T: CameraType) type {
 pub const Tradable = struct {};
 
 pub const Name = struct {
-    short: []const u8, // dagger_1h
-    full: []const u8, // Dagger
+    short: [:0]u8, // dagger_1h
+    full: [:0]u8, // Dagger
 };
 
 pub const MarketCategory = struct {
-    tag: MarketCategoryTag,
+    id: usize,
+    name: [:0]u8,
+    // tag: MarketCategoryTag,
 };
 
 pub const SubMarketCategory = struct {
-    tag: SubMarketCategoryTag,
+    id: usize,
+    name: [:0]u8,
+    market_category_id: usize, // ID MarketCategory
+    // tag: SubMarketCategoryTag,
+};
+
+pub const MarketItem = struct {
+    id: usize,
+    full_name: [:0]u8,
+    short_name: [:0]u8,
+    market_sub_category_id: usize,
+    description: [:0]u8,
 };
 
 pub const BasicResource = struct {

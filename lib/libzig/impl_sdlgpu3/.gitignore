@@ -1,0 +1,15 @@
+#--------------------------------------------------#
+# The following was generated with gitignore.nvim: #
+#--------------------------------------------------#
+# Gitignore for the following technologies: zig
+
+# Zig programming language
+
+zig-cache/
+.zig-cache/
+zig-out/
+build/
+build-*/
+docgen_tmp/
+
+src/proto/

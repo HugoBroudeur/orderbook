@@ -120,46 +120,46 @@ pub fn setStyle(theme: Theme) void {
             style.GrabRounding = 4.0;
 
             var colors = &style.Colors;
-            colors[ig.ImGuiCol_Text] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY800); // text on hovered controls is gray900
-            colors[ig.ImGuiCol_TextDisabled] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY500);
-            colors[ig.ImGuiCol_WindowBg] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY100);
+            colors[ig.ImGuiCol_Text] = colorConvertU32ToFloat4(Spectrum.Light.GRAY800); // text on hovered controls is gray900
+            colors[ig.ImGuiCol_TextDisabled] = colorConvertU32ToFloat4(Spectrum.Light.GRAY500);
+            colors[ig.ImGuiCol_WindowBg] = colorConvertU32ToFloat4(Spectrum.Light.GRAY100);
             colors[ig.ImGuiCol_ChildBg] = ig.ImVec4{ .x = 0.00, .y = 0.00, .z = 0.00, .w = 0.00 };
-            colors[ig.ImGuiCol_PopupBg] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY50); // not sure about this. Note: applies to tooltips too.
-            colors[ig.ImGuiCol_Border] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY300);
-            colors[ig.ImGuiCol_BorderShadow] = ig.igColorConvertU32ToFloat4(Spectrum.Static.NONE); // We don't want shadows. Ever.
-            colors[ig.ImGuiCol_FrameBg] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY75); // this isnt right, spectrum does not do this, but it's a good fallback
-            colors[ig.ImGuiCol_FrameBgHovered] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY50);
-            colors[ig.ImGuiCol_FrameBgActive] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY200);
-            colors[ig.ImGuiCol_TitleBg] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY300); // those titlebar values are totally made up, spectrum does not have this.
-            colors[ig.ImGuiCol_TitleBgActive] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY200);
-            colors[ig.ImGuiCol_TitleBgCollapsed] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY400);
-            colors[ig.ImGuiCol_MenuBarBg] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY100);
-            colors[ig.ImGuiCol_ScrollbarBg] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY100); // same as regular background
-            colors[ig.ImGuiCol_ScrollbarGrab] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY400);
-            colors[ig.ImGuiCol_ScrollbarGrabHovered] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY600);
-            colors[ig.ImGuiCol_ScrollbarGrabActive] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY700);
-            colors[ig.ImGuiCol_CheckMark] = ig.igColorConvertU32ToFloat4(Spectrum.Light.BLUE500);
-            colors[ig.ImGuiCol_SliderGrab] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY700);
-            colors[ig.ImGuiCol_SliderGrabActive] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY800);
-            colors[ig.ImGuiCol_Button] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY75); // match default button to Spectrum's 'Action Button'.
-            colors[ig.ImGuiCol_ButtonHovered] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY50);
-            colors[ig.ImGuiCol_ButtonActive] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY200);
-            colors[ig.ImGuiCol_Header] = ig.igColorConvertU32ToFloat4(Spectrum.Light.BLUE400);
-            colors[ig.ImGuiCol_HeaderHovered] = ig.igColorConvertU32ToFloat4(Spectrum.Light.BLUE500);
-            colors[ig.ImGuiCol_HeaderActive] = ig.igColorConvertU32ToFloat4(Spectrum.Light.BLUE600);
-            colors[ig.ImGuiCol_Separator] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY400);
-            colors[ig.ImGuiCol_SeparatorHovered] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY600);
-            colors[ig.ImGuiCol_SeparatorActive] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY700);
-            colors[ig.ImGuiCol_ResizeGrip] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY400);
-            colors[ig.ImGuiCol_ResizeGripHovered] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY600);
-            colors[ig.ImGuiCol_ResizeGripActive] = ig.igColorConvertU32ToFloat4(Spectrum.Light.GRAY700);
-            colors[ig.ImGuiCol_PlotLines] = ig.igColorConvertU32ToFloat4(Spectrum.Light.BLUE400);
-            colors[ig.ImGuiCol_PlotLinesHovered] = ig.igColorConvertU32ToFloat4(Spectrum.Light.BLUE600);
-            colors[ig.ImGuiCol_PlotHistogram] = ig.igColorConvertU32ToFloat4(Spectrum.Light.BLUE400);
-            colors[ig.ImGuiCol_PlotHistogramHovered] = ig.igColorConvertU32ToFloat4(Spectrum.Light.BLUE600);
-            colors[ig.ImGuiCol_TextSelectedBg] = ig.igColorConvertU32ToFloat4((Spectrum.Light.BLUE400 & 0x00FFFFFF) | 0x33000000);
+            colors[ig.ImGuiCol_PopupBg] = colorConvertU32ToFloat4(Spectrum.Light.GRAY50); // not sure about this. Note: applies to tooltips too.
+            colors[ig.ImGuiCol_Border] = colorConvertU32ToFloat4(Spectrum.Light.GRAY300);
+            colors[ig.ImGuiCol_BorderShadow] = colorConvertU32ToFloat4(Spectrum.Static.NONE); // We don't want shadows. Ever.
+            colors[ig.ImGuiCol_FrameBg] = colorConvertU32ToFloat4(Spectrum.Light.GRAY75); // this isnt right, spectrum does not do this, but it's a good fallback
+            colors[ig.ImGuiCol_FrameBgHovered] = colorConvertU32ToFloat4(Spectrum.Light.GRAY50);
+            colors[ig.ImGuiCol_FrameBgActive] = colorConvertU32ToFloat4(Spectrum.Light.GRAY200);
+            colors[ig.ImGuiCol_TitleBg] = colorConvertU32ToFloat4(Spectrum.Light.GRAY300); // those titlebar values are totally made up, spectrum does not have this.
+            colors[ig.ImGuiCol_TitleBgActive] = colorConvertU32ToFloat4(Spectrum.Light.GRAY200);
+            colors[ig.ImGuiCol_TitleBgCollapsed] = colorConvertU32ToFloat4(Spectrum.Light.GRAY400);
+            colors[ig.ImGuiCol_MenuBarBg] = colorConvertU32ToFloat4(Spectrum.Light.GRAY100);
+            colors[ig.ImGuiCol_ScrollbarBg] = colorConvertU32ToFloat4(Spectrum.Light.GRAY100); // same as regular background
+            colors[ig.ImGuiCol_ScrollbarGrab] = colorConvertU32ToFloat4(Spectrum.Light.GRAY400);
+            colors[ig.ImGuiCol_ScrollbarGrabHovered] = colorConvertU32ToFloat4(Spectrum.Light.GRAY600);
+            colors[ig.ImGuiCol_ScrollbarGrabActive] = colorConvertU32ToFloat4(Spectrum.Light.GRAY700);
+            colors[ig.ImGuiCol_CheckMark] = colorConvertU32ToFloat4(Spectrum.Light.BLUE500);
+            colors[ig.ImGuiCol_SliderGrab] = colorConvertU32ToFloat4(Spectrum.Light.GRAY700);
+            colors[ig.ImGuiCol_SliderGrabActive] = colorConvertU32ToFloat4(Spectrum.Light.GRAY800);
+            colors[ig.ImGuiCol_Button] = colorConvertU32ToFloat4(Spectrum.Light.GRAY75); // match default button to Spectrum's 'Action Button'.
+            colors[ig.ImGuiCol_ButtonHovered] = colorConvertU32ToFloat4(Spectrum.Light.GRAY50);
+            colors[ig.ImGuiCol_ButtonActive] = colorConvertU32ToFloat4(Spectrum.Light.GRAY200);
+            colors[ig.ImGuiCol_Header] = colorConvertU32ToFloat4(Spectrum.Light.BLUE400);
+            colors[ig.ImGuiCol_HeaderHovered] = colorConvertU32ToFloat4(Spectrum.Light.BLUE500);
+            colors[ig.ImGuiCol_HeaderActive] = colorConvertU32ToFloat4(Spectrum.Light.BLUE600);
+            colors[ig.ImGuiCol_Separator] = colorConvertU32ToFloat4(Spectrum.Light.GRAY400);
+            colors[ig.ImGuiCol_SeparatorHovered] = colorConvertU32ToFloat4(Spectrum.Light.GRAY600);
+            colors[ig.ImGuiCol_SeparatorActive] = colorConvertU32ToFloat4(Spectrum.Light.GRAY700);
+            colors[ig.ImGuiCol_ResizeGrip] = colorConvertU32ToFloat4(Spectrum.Light.GRAY400);
+            colors[ig.ImGuiCol_ResizeGripHovered] = colorConvertU32ToFloat4(Spectrum.Light.GRAY600);
+            colors[ig.ImGuiCol_ResizeGripActive] = colorConvertU32ToFloat4(Spectrum.Light.GRAY700);
+            colors[ig.ImGuiCol_PlotLines] = colorConvertU32ToFloat4(Spectrum.Light.BLUE400);
+            colors[ig.ImGuiCol_PlotLinesHovered] = colorConvertU32ToFloat4(Spectrum.Light.BLUE600);
+            colors[ig.ImGuiCol_PlotHistogram] = colorConvertU32ToFloat4(Spectrum.Light.BLUE400);
+            colors[ig.ImGuiCol_PlotHistogramHovered] = colorConvertU32ToFloat4(Spectrum.Light.BLUE600);
+            colors[ig.ImGuiCol_TextSelectedBg] = colorConvertU32ToFloat4((Spectrum.Light.BLUE400 & 0x00FFFFFF) | 0x33000000);
             colors[ig.ImGuiCol_DragDropTarget] = ig.ImVec4{ .x = 1.00, .y = 1.00, .z = 0.00, .w = 0.90 };
-            colors[ig.ImGuiCol_NavHighlight] = ig.igColorConvertU32ToFloat4((Spectrum.Light.GRAY900 & 0x00FFFFFF) | 0x0A000000);
+            // colors[ig.ImGuiCol_NavHighlight] = colorConvertU32ToFloat4((Spectrum.Light.GRAY900 & 0x00FFFFFF) | 0x0A000000);
             colors[ig.ImGuiCol_NavWindowingHighlight] = ig.ImVec4{ .x = 1.00, .y = 1.00, .z = 1.00, .w = 0.70 };
             colors[ig.ImGuiCol_NavWindowingDimBg] = ig.ImVec4{ .x = 0.80, .y = 0.80, .z = 0.80, .w = 0.20 };
             colors[ig.ImGuiCol_ModalWindowDimBg] = ig.ImVec4{ .x = 0.20, .y = 0.20, .z = 0.20, .w = 0.35 };
@@ -378,3 +378,9 @@ pub const Spectrum = struct {
         pub const PURPLE700: u32 = Spectrum.color(0xB483F0);
     };
 };
+
+fn colorConvertU32ToFloat4(color: u32) ig.ImVec4 {
+    var f4: ig.ImVec4 = .{ .x = 0, .y = 0, .w = 0, .z = 0 };
+    ig.igColorConvertU32ToFloat4(&f4, color);
+    return f4;
+}

@@ -1,0 +1,12 @@
+.{
+    .name = .impl_sdlgpu3,
+    .version = "1.0.0",
+    .fingerprint = 0x98c90b7215d249e5,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
