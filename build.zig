@@ -37,6 +37,12 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    const zclay_dep = b.dependency("zclay", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Generate Zig code from .proto
     // const gen_proto = b.step("gen-proto", "generate zig files from protocol buffer definitions");
     // const protoc_step = protobuf.RunProtocStep.create(dep_protobuf.*.builder, target, .{
@@ -55,6 +61,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("sqlite", dep_sqlite.module("sqlite"));
     exe.root_module.addImport("zcs", dep_zcs.module("zcs"));
     exe.root_module.addImport("tracy", dep_tracy.module("tracy"));
+    exe.root_module.addImport("zclay", zclay_dep.module("zclay"));
 
     // Load Icon
     // exe.root_module.addWin32ResourceFile(.{ .file = b.path("src/res/res.rc") });
@@ -101,6 +108,7 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary("GL", .{});
         exe.root_module.linkSystemLibrary("X11", .{});
         exe.root_module.linkSystemLibrary("SDL3", .{});
+        // exe.root_module.linkSystemLibrary("SDL3_ttf", .{});
         // exe.root_module.linkSystemLibrary("sqlite3", .{});
     }
     // sdl3
@@ -109,6 +117,9 @@ pub fn build(b: *std.Build) void {
     // Dynamic link
     //exe.addObjectFile(b.path(b.pathJoin(&.{sdlPath, "lib","libSDL3dll.a"})));
     //exe.linkSystemLibrary("SDL3dll"); // For dynamic link
+
+    // SDL3_ttf
+    // exe.root_module.linkLibrary(dep_sdl_ttf.artifact("SDL3_ttf"));
 
     // root_module
     exe.root_module.link_libc = true;

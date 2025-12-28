@@ -38,6 +38,14 @@
         //     .url = "https://github.com/epezent/implot/archive/1f7a8c0314d838a76695bccebe0f66864f507bc0.tar.gz",
         //     .hash = "1220781bd0617c107617cc19d446801f519d5a29fc4beee9438c527f74af8caf483f",
         // },
+        .zclay = .{
+            .url = "git+https://github.com/johan0A/clay-zig-bindings#d594f9c8c745bec64394f7f6e5ff061134d7af9b",
+            .hash = "zclay-0.2.2-Ej1rkOzRAADy3oyFJ0I3aIJp38Kwsv9DMa0XWt84dRVW",
+        },
+        // .sdl_ttf = .{
+        //     .url = "git+https://github.com/allyourcodebase/SDL_ttf#e33b92c9baecb75c049e0fddab6d9490d205de53",
+        //     .hash = "SDL_ttf-3.2.2-PNW5xNQRAACwGb9zG5YefJSVjR6HfyYhdVN2DSQShMFp",
+        // },
         .cimgui = .{ .path = "./lib/libzig/cimgui" },
         .fonticon = .{ .path = "./lib/libzig/fonticon" },
         .impl_sdl3 = .{ .path = "./lib/libzig/impl_sdl3" },
@@ -45,6 +53,7 @@
         // .implot = .{ .path = "./lib/libzig/implot" },
         .networking = .{ .path = "./lib/libzig/networking" },
         .sdl3 = .{ .path = "./lib/libzig/sdl3" },
+        // .sdl3_ttf = .{ .path = "./lib/libzig/sdl3_ttf" },
         // .sqlite = .{ .path = "./lib/libzig/sqlite" },
     },
     .paths = .{

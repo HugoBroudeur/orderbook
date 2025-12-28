@@ -84,9 +84,9 @@ pub fn render(self: *EcsManager) void {
     // UI SYSTEM PASS
     //
 
-    self.ui_manager.begin_frame(self.get_singleton(Ecs.components.UIState));
-    self.ui_manager.render_frame(self);
-    const ui_draw_data = self.ui_manager.get_draw_data();
+    self.ui_manager.beginFrame(self.get_singleton(Ecs.components.UIState));
+    self.ui_manager.renderFrame(self);
+    const ui_draw_data = self.ui_manager.getDrawData();
 
     //
     // RENDER FRAME

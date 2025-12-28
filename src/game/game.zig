@@ -7,6 +7,7 @@ const RendererManager = @import("renderer_manager.zig");
 const UiManager = @import("ui_manager.zig");
 const EcsManager = @import("ecs_manager.zig");
 const MarketManager = @import("market_manager.zig");
+const FontManager = @import("font_manager.zig");
 const UiSystem = @import("ecs/systems/ui_system.zig");
 
 const sdl = @import("sdl3");
@@ -34,6 +35,7 @@ var db_manager: DbManager = undefined;
 var renderer_manager: RendererManager = undefined;
 var ui_manager: UiManager = undefined;
 var market_manager: MarketManager = undefined;
+var font_manager: FontManager = undefined;
 var ui_system: UiSystem = undefined;
 
 const FRAMES_PER_SECOND = 60.0;
@@ -64,7 +66,8 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
     };
 
     ui_system = UiSystem.init();
-    ui_manager = UiManager.init(allocator, &db_manager, &ui_system);
+    font_manager = FontManager.init(allocator);
+    ui_manager = UiManager.init(allocator, &db_manager, &ui_system, &font_manager);
     market_manager = MarketManager.init(allocator, &db_manager);
     ecs_manager = EcsManager.init(allocator, &db_manager, &renderer_manager, &ui_manager, &market_manager) catch |err| {
         std.log.err("[Game][init] Can't initiate EcsManager: {}", .{err});
@@ -77,6 +80,7 @@ pub fn setup() !void {
 
     try renderer_manager.create_window(WINDOW_TITLE);
     renderer_manager.setup(&ecs_manager);
+    try font_manager.setup();
     var render_pass = RendererManager.create_render_pass();
     render_pass.clear_color = .{ .r = 0, .g = 0.5, .b = 1, .a = 1 };
     ecs_manager.setup(render_pass) catch |err| {
@@ -134,6 +138,7 @@ pub fn shutdown() void {
     ecs_manager.deinit();
     renderer_manager.deinit();
     ui_manager.deinit();
+    font_manager.deinit();
 
     tracy.cleanExit();
 }

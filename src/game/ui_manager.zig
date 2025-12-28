@@ -1,23 +1,39 @@
 const std = @import("std");
 const ig = @import("cimgui");
+const clay = @import("zclay");
+const sdl = @import("sdl3");
+// const ttf = @import("sdl_ttf");
 const Components = @import("ecs/components/components.zig");
 const DbManager = @import("db_manager.zig");
 const Ecs = @import("ecs/ecs.zig");
 const EcsManager = @import("ecs_manager.zig");
 const MarketManager = @import("market_manager.zig");
+const FontManager = @import("font_manager.zig");
+const ClayManager = @import("clay_manager.zig");
 const UiSystem = @import("ecs/systems/ui_system.zig");
 const UiManager = @This();
 
 var IMGUI_HAS_DOCK = false;
 
+const light_grey: clay.Color = .{ 224, 215, 210, 255 };
+const red: clay.Color = .{ 168, 66, 28, 255 };
+const orange: clay.Color = .{ 225, 138, 50, 255 };
+const white: clay.Color = .{ 250, 250, 255, 255 };
+
+const sidebar_item_layout: clay.LayoutConfig = .{ .sizing = .{ .w = .grow, .h = .fixed(50) } };
+
 allocator: std.mem.Allocator,
 db_manager: *DbManager,
+font_manager: *FontManager,
 
 ui_system: *UiSystem,
 io: *ig.ImGuiIO,
 
 ig_ctx: *ig.ImGuiContext = undefined,
 implot_ctx: *ig.struct_ImPlotContext = undefined,
+
+clay_memory: []u8 = undefined,
+clay_renderer_data: ClayManager.RendererData = undefined,
 
 is_in_draw_frame: bool = false,
 
@@ -29,7 +45,9 @@ pub const fonts: [2][]const u8 = .{
 };
 pub const font_size: f32 = 18;
 
-pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, ui_system: *UiSystem) UiManager {
+var main_font = "assets/fonts/SNPro/SNPro-Regular.ttf";
+
+pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, ui_system: *UiSystem, font_manager: *FontManager) UiManager {
     // Setup Dear ImGui context
     const ig_ctx = ig.igCreateContext(null);
     const implot_ctx = ig.ImPlot_CreateContext();
@@ -37,6 +55,7 @@ pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, ui_system: *Ui
     return .{
         .allocator = allocator,
         .db_manager = db_manager,
+        .font_manager = font_manager,
         // .cimgui_render_system = cimgui_render_system,
         .ui_system = ui_system,
         .io = ig.igGetIO_Nil(),
@@ -48,6 +67,7 @@ pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, ui_system: *Ui
 pub fn deinit(self: *UiManager) void {
     // _ = self;
     // self.ui_system.deinit();
+    self.allocator.free(self.clay_memory);
     ig.ImPlot_DestroyContext(self.implot_ctx);
     ig.igDestroyContext(self.ig_ctx);
 }
@@ -79,12 +99,21 @@ pub fn setup(self: *UiManager, ecs_manager: *EcsManager) !void {
 
     // Change Font
     const io: *ig.ImGuiIO = ig.igGetIO_Nil();
-    for (&fonts) |*font| {
-        _ = ig.ImFontAtlas_AddFontFromFileTTF(io.Fonts, font.ptr, font_size, null, null);
+    for (&fonts) |*f| {
+        _ = ig.ImFontAtlas_AddFontFromFileTTF(io.Fonts, f.ptr, font_size, null, null);
     }
+
+    _ = FontManager.addFont(main_font, font_size);
+
+    // Setup Clay
+    const min_memory_size: u32 = clay.minMemorySize();
+    self.clay_memory = try self.allocator.alloc(u8, min_memory_size);
+    const arena: clay.Arena = clay.createArenaWithCapacityAndMemory(self.clay_memory);
+    _ = clay.initialize(arena, .{ .h = 1000, .w = 1000 }, .{});
+    clay.setMeasureTextFunction(void, {}, FontManager.measureText);
 }
 
-pub fn begin_frame(self: *UiManager, ui_state: *Ecs.components.UIState) void {
+pub fn beginFrame(self: *UiManager, ui_state: *Ecs.components.UIState) void {
     if (self.is_in_draw_frame) {
         Ecs.logger.err("[UiManager][begin_frame] Calling begin_frame but you forgot to render the previous frame, you need to call render_frame first", .{});
         return;
@@ -93,24 +122,52 @@ pub fn begin_frame(self: *UiManager, ui_state: *Ecs.components.UIState) void {
     start_cimgui_pass(ui_state);
 }
 
-pub fn render_frame(self: *UiManager, ecs_manager: *EcsManager) void {
+pub fn renderFrame(self: *UiManager, ecs_manager: *EcsManager) void {
     if (!self.is_in_draw_frame) {
         Ecs.logger.err("[UiManager][render_frame] Calling render_frame but you forgot to call begin_frame first", .{});
         return;
     }
 
-    ecs_manager.entities.forEach("render_ui", render_ui, .{
+    // self.render_font();
+    // createLayout();
+    ecs_manager.entities.forEach("render_ui", renderUi, .{
         .cb = &ecs_manager.cmd_buf,
         .es = &ecs_manager.entities,
         .mm = ecs_manager.market_manager,
     });
 
     end_cimgui_pass();
+    // ClayManager.renderCommands(renderer_data: *RendererData, cmds: []RenderCommand)
 
     self.is_in_draw_frame = false;
 }
 
-pub fn get_draw_data(self: *UiManager) ?*ig.ImDrawData {
+// pub fn render_font(self: *UiManager, renderer: *sdl.SDL_Renderer) !void {
+//     _ = self;
+//     const text = "Hello SDL Font";
+//
+//     // TODO dont create new surface if unchanged
+//     const text_surface: [*c]sdl.SDL_Surface = sdl.TTF_RenderText_Solid(font, @ptrCast(text), text.len, .{ .r = 255, .g = 255, .b = 255, .a = 255 }) orelse {
+//         sdl.SDL_Log("Error loading text surface: %s\n", sdl.SDL_GetError());
+//         return error.FailedToRenderSurface;
+//     };
+//     defer sdl.SDL_DestroySurface(text_surface);
+//
+//     // TODO dont create new texture if unchanged
+//     const text_texture = sdl.SDL_CreateTextureFromSurface(renderer, text_surface) orelse {
+//         sdl.SDL_Log("Error loading text texture: %s\n", sdl.SDL_GetError());
+//         return error.FailedToRenderTexture;
+//     };
+//     defer sdl.SDL_DestroyTexture(text_texture);
+//
+//     const w: c_int = @intCast(text_surface.*.w);
+//     const h: c_int = @intCast(text_surface.*.h);
+//     const srcr = sdl.SDL_Rect{ .x = 0, .y = 0, .w = w, .h = h };
+//     const destr = sdl.SDL_Rect{ .x = @intCast(text.offset.x), .y = @intCast(text.offset.y), .w = w, .h = h };
+//     _ = sdl.SDL_RenderTexture(renderer, text_texture, &srcr, &destr);
+// }
+
+pub fn getDrawData(self: *UiManager) ?*ig.ImDrawData {
     if (self.is_in_draw_frame) {
         Ecs.logger.err("[UiManager][get_draw_data] Calling get_draw_data but you forgot to call render_frame first", .{});
         return null;
@@ -132,8 +189,11 @@ pub fn impl_update_plateform(self: *UiManager) void {
     }
 }
 
-fn render_ui(ctx: struct { cb: *Ecs.CmdBuf, es: *Ecs.Entities, mm: *MarketManager }, state: *Ecs.components.UIState) void {
+fn renderUi(ctx: struct { cb: *Ecs.CmdBuf, es: *Ecs.Entities, mm: *MarketManager }, state: *Ecs.components.UIState) void {
     Ecs.logger.info("[UiManager.render_ui]", .{});
+
+    const cmd = createLayout();
+    _ = cmd;
 
     UiSystem.system_update_ui_state(.{ .es = ctx.es }, state);
 
@@ -207,4 +267,61 @@ fn end_cimgui_pass() void {
 fn ensureSettingFileExist(path: []const u8) void {
     const cwd = std.fs.cwd();
     _ = cwd.createFile(path, .{ .truncate = false, .exclusive = true }) catch true;
+}
+
+// Re-useable components are just normal functions
+fn sidebarItemComponent(index: u32) void {
+    clay.UI()(.{
+        .id = .IDI("SidebarBlob", index),
+        .layout = sidebar_item_layout,
+        .background_color = orange,
+    })({});
+}
+
+// An example function to begin the "root" of your layout tree
+// fn createLayout(profile_picture: *const rl.Texture2D) clay.ClayArray(clay.RenderCommand) {
+fn createLayout() []clay.RenderCommand {
+    clay.beginLayout();
+    clay.UI()(.{
+        .id = .ID("OuterContainer"),
+        .layout = .{ .direction = .left_to_right, .sizing = .grow, .padding = .all(16), .child_gap = 16 },
+        .background_color = white,
+    })({
+        clay.UI()(.{
+            .id = .ID("SideBar"),
+            .layout = .{
+                .direction = .top_to_bottom,
+                .sizing = .{ .h = .grow, .w = .fixed(300) },
+                .padding = .all(16),
+                .child_alignment = .{ .x = .center, .y = .top },
+                .child_gap = 16,
+            },
+            .background_color = light_grey,
+        })({
+            clay.UI()(.{
+                .id = .ID("ProfilePictureOuter"),
+                .layout = .{ .sizing = .{ .w = .grow }, .padding = .all(16), .child_alignment = .{ .x = .left, .y = .center }, .child_gap = 16 },
+                .background_color = red,
+            })({
+                clay.UI()(.{
+                    .id = .ID("ProfilePicture"),
+                    .layout = .{ .sizing = .{ .h = .fixed(60), .w = .fixed(60) } },
+                    .background_color = white,
+                    // .image = .{ .source_dimensions = .{ .h = 60, .w = 60 }, .image_data = @ptrCast(profile_picture) },
+                })({});
+                clay.text("Clay - UI Library", .{ .font_size = 24, .color = light_grey });
+            });
+
+            for (0..5) |i| sidebarItemComponent(@intCast(i));
+        });
+
+        clay.UI()(.{
+            .id = .ID("MainContent"),
+            .layout = .{ .sizing = .grow },
+            .background_color = light_grey,
+        })({
+            //...
+        });
+    });
+    return clay.endLayout();
 }

@@ -1,5 +1,6 @@
 const std = @import("std");
 const sdl = @import("sdl3");
+
 const impl_sdl3 = @import("impl_sdl3");
 const impl_sdlgpu3 = @import("impl_sdlgpu3");
 const ig = @import("cimgui");
@@ -13,12 +14,22 @@ const RendererManager = @This();
 const Backend = enum { sdl3, sokol };
 
 backend: Backend,
-gpu_device: *sdl.SDL_GPUDevice,
+gpu_device: *sdl.SDL_GPUDevice = undefined,
 
 swapchain_texture: ?*sdl.SDL_GPUTexture = undefined,
 command_buffer: ?*sdl.SDL_GPUCommandBuffer = undefined,
 
 window: Window,
+
+pub const fonts: [2][]const u8 = .{
+    "assets/fonts/SNPro/SNPro-Regular.ttf",
+    "assets/fonts/ferrum.otf",
+};
+pub const font_size: f32 = 18;
+
+var font: ?*sdl.TTF_Font = undefined;
+
+var tiny_ttf = "assets/fonts/SNPro/SNPro-Regular.ttf";
 
 pub const Window = struct {
     backend: *sdl.SDL_Window,
@@ -30,25 +41,17 @@ pub const Window = struct {
 
 pub fn init(width: i32, height: i32) !RendererManager {
     Ecs.logger.info("[RendererManager.init]", .{});
-    var gpu_device: *sdl.SDL_GPUDevice = undefined;
 
     if (sdl.SDL_Init(sdl.SDL_INIT_VIDEO | sdl.SDL_INIT_GAMEPAD) == false) {
         std.debug.print("Error: {s}\n", .{sdl.SDL_GetError()});
         return error.SDL_init;
     }
 
-    // Create GPU Device
-    const flags_gpu = sdl.SDL_GPU_SHADERFORMAT_SPIRV + sdl.SDL_GPU_SHADERFORMAT_DXIL + sdl.SDL_GPU_SHADERFORMAT_METALLIB;
-    if (sdl.SDL_CreateGPUDevice(flags_gpu, true, null)) |device| {
-        gpu_device = device;
-    } else {
-        std.debug.print("Error: SDL_CreateGPUDevice(): {s}\n", .{sdl.SDL_GetError()});
-        return error.SDL_CreateGPUDevice;
-    }
+    sdl.SDL_SetLogPriorities(sdl.SDL_LOG_PRIORITY_DEBUG);
+    sdl.SDL_SetLogOutputFunction(log_sdl, null);
 
     return .{
         .backend = .sdl3,
-        .gpu_device = gpu_device,
         .window = .{ .backend = undefined, .width = width, .height = height },
     };
 }
@@ -73,7 +76,16 @@ pub fn create_window(self: *RendererManager, title: []const u8) !void {
         self.window.backend = pointer;
     } else {
         std.debug.print("Error: SDL_CreateWindow(): {s}\n", .{sdl.SDL_GetError()});
-        return error.SDL_CreatWindow;
+        return error.SDL_CreateWindow;
+    }
+
+    // Create GPU Device
+    const flags_gpu = sdl.SDL_GPU_SHADERFORMAT_SPIRV + sdl.SDL_GPU_SHADERFORMAT_DXIL + sdl.SDL_GPU_SHADERFORMAT_METALLIB;
+    if (sdl.SDL_CreateGPUDevice(flags_gpu, true, null)) |device| {
+        self.gpu_device = device;
+    } else {
+        std.debug.print("Error: SDL_CreateGPUDevice(): {s}\n", .{sdl.SDL_GetError()});
+        return error.SDL_CreateGPUDevice;
     }
 
     // Claim window for GPU Device
@@ -177,4 +189,9 @@ pub fn end_pass(self: *RendererManager) void {
 
 fn colorToSdlColor(color: Ecs.components.Graphics.Color) sdl.SDL_FColor {
     return .{ .a = color.a, .b = color.b, .g = color.g, .r = color.r };
+}
+
+fn log_sdl(userdata: ?*anyopaque, category: c_int, priority: sdl.SDL_LogPriority, message: [*c]const u8) callconv(.c) void {
+    _ = userdata;
+    std.log.debug("[SDL] {} [{}]: {s}", .{ category, priority, message });
 }

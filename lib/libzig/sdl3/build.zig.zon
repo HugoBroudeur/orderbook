@@ -3,7 +3,24 @@
     .version = "1.0.0",
     .fingerprint = 0x6188f62fe708a14e,
     .minimum_zig_version = "0.15.2",
-    .dependencies = .{},
+    .dependencies = .{
+        .freetype = .{
+            .url = "git+https://github.com/allyourcodebase/freetype#1082522e99fcc2554ca849cf5042878a371b5bd2",
+            .hash = "freetype-2.14.1-C3-WdWqKAADJcxSH2bo9uMDiBAoDcIhOSl1-DADGIIM2",
+        },
+        .harfbuzz = .{
+            .url = "git+https://github.com/allyourcodebase/harfbuzz#ad51d895b69c262d3a497e1c3b54116dd8090f04",
+            .hash = "harfbuzz-12.2.0-Ip1VAuGZAACtg3OS6D_eeeoVX5-8Er8x-JzZejxOI8Zp",
+        },
+        // .sdl_ttf = .{
+        //     .url = "git+https://github.com/allyourcodebase/SDL_ttf#e33b92c9baecb75c049e0fddab6d9490d205de53",
+        //     .hash = "SDL_ttf-3.2.2-PNW5xNQRAACwGb9zG5YefJSVjR6HfyYhdVN2DSQShMFp",
+        // },
+        .SDL_ttf = .{
+            .url = "git+https://github.com/allyourcodebase/SDL_ttf#e33b92c9baecb75c049e0fddab6d9490d205de53",
+            .hash = "SDL_ttf-3.2.2-PNW5xNQRAACwGb9zG5YefJSVjR6HfyYhdVN2DSQShMFp",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
