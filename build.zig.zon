@@ -52,9 +52,17 @@
         .impl_sdlgpu3 = .{ .path = "./lib/libzig/impl_sdlgpu3" },
         // .implot = .{ .path = "./lib/libzig/implot" },
         .networking = .{ .path = "./lib/libzig/networking" },
-        .sdl3 = .{ .path = "./lib/libzig/sdl3" },
+        // .sdl3 = .{ .path = "./lib/libzig/sdl3" },
         // .sdl3_ttf = .{ .path = "./lib/libzig/sdl3_ttf" },
         // .sqlite = .{ .path = "./lib/libzig/sqlite" },
+        .zmath = .{
+            .url = "git+https://github.com/zig-gamedev/zmath.git#3a5955b2b72cd081563fbb084eff05bffd1e3fbb",
+            .hash = "zmath-0.11.0-dev-wjwivdMsAwD-xaLj76YHUq3t9JDH-X16xuMTmnDzqbu2",
+        },
+        .sdl3 = .{
+            .url = "git+https://github.com/Gota7/zig-sdl3?ref=master#79b0d1f1ef10a424037025f6af44fe06bf7e062c",
+            .hash = "sdl3-0.1.5-NmT1Q3ARJgDmFWtbbK3KBb7vufbQD0EjD4Me4Fbdq0p3",
+        },
     },
     .paths = .{
         "build.zig",

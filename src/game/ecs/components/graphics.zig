@@ -17,8 +17,8 @@ pub const Color = struct {
 };
 
 pub const RenderPass = struct {
-    gpu_target_info: sdl.SDL_GPUColorTargetInfo,
-    gpu_pass: *sdl.SDL_GPURenderPass,
+    gpu_target_info: sdl.gpu.ColorTargetInfo,
+    gpu_pass: ?sdl.gpu.RenderPass,
     clear_color: Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
     // pass_action: sg.PassAction = .{},
 };

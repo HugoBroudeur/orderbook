@@ -5,6 +5,14 @@ const blib = @import("./build_lib.zig");
 
 const protobuf_files = &.{ "proto", "proto/all.proto", "proto/orderbook/v1/orderbook.proto" };
 
+// Shaders
+const shaders = .{
+    // "src/shaders/2d.vert.zig",
+    // "src/shaders/quad.frag.zig",
+    "src/shaders/triangle.frag.zig",
+    "src/shaders/triangle.vert.zig",
+};
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -29,6 +37,42 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const dep_sdl3 = b.dependency("sdl3", .{
+        .target = target,
+        .optimize = optimize,
+
+        // Lib options.
+        // .callbacks = false,
+        .ext_image = true,
+        // .ext_net = false,
+        .ext_ttf = true,
+        // .log_message_stack_size = 1024,
+        // .main = false,
+        // .renderer_debug_text_stack_size = 1024,
+
+        // Options passed directly to https://github.com/castholm/SDL (SDL3 C Bindings):
+        // .c_sdl_preferred_linkage = .static,
+        // .c_sdl_strip = false,
+        // .c_sdl_sanitize_c = .off,
+        // .c_sdl_lto = .none,
+        // .c_sdl_emscripten_pthreads = false,
+        // .c_sdl_install_build_config_h = false,
+
+        // Options if `ext_image` is enabled:
+        .image_enable_bmp = true,
+        // .image_enable_gif = true,
+        .image_enable_jpg = true,
+        // .image_enable_lbm = true,
+        // .image_enable_pcx = true,
+        .image_enable_png = true,
+        // .image_enable_pnm = true,
+        // .image_enable_qoi = true,
+        // .image_enable_svg = true,
+        // .image_enable_tga = true,
+        // .image_enable_xcf = true,
+        // .image_enable_xpm = true,
+        // .image_enable_xv = true,
+    });
     const dep_zcs = b.dependency("zcs", .{
         .target = target,
         .optimize = optimize,
@@ -37,8 +81,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-
-    const zclay_dep = b.dependency("zclay", .{
+    const dep_zclay = b.dependency("zclay", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const dep_zmath = b.dependency("zmath", .{
         .target = target,
         .optimize = optimize,
     });
@@ -58,10 +105,12 @@ pub fn build(b: *std.Build) void {
         .use_llvm = true,
     });
 
+    exe.root_module.addImport("sdl3", dep_sdl3.module("sdl3"));
     exe.root_module.addImport("sqlite", dep_sqlite.module("sqlite"));
     exe.root_module.addImport("zcs", dep_zcs.module("zcs"));
     exe.root_module.addImport("tracy", dep_tracy.module("tracy"));
-    exe.root_module.addImport("zclay", zclay_dep.module("zclay"));
+    exe.root_module.addImport("zclay", dep_zclay.module("zclay"));
+    exe.root_module.addImport("zmath", dep_zmath.module("root"));
 
     // Load Icon
     // exe.root_module.addWin32ResourceFile(.{ .file = b.path("src/res/res.rc") });
@@ -149,6 +198,11 @@ pub fn build(b: *std.Build) void {
         const res = b.addInstallFile(b.path(file), "bin/" ++ file);
         b.getInstallStep().dependOn(&res.step);
     }
+
+    inline for (shaders) |shader| {
+        compileShader(b, shader);
+    }
+
     // const fonticon_dir = "../../src/libc/fonticon/fa6/";
     // const res_fonticon = [_][]const u8{ "fa-solid-900.ttf", "LICENSE.txt" };
     // inline for (res_fonticon) |file| {
@@ -175,4 +229,41 @@ pub fn build(b: *std.Build) void {
     }
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+}
+
+fn compileShader(b: *std.Build, shader_file_path: []const u8) void {
+    const vulkan12_target = b.resolveTargetQuery(.{
+        .cpu_arch = .spirv32,
+        .cpu_model = .{ .explicit = &std.Target.spirv.cpu.vulkan_v1_2 },
+        .os_tag = .vulkan,
+        .ofmt = .spirv,
+    });
+
+    const shader_name = getFileName(shader_file_path);
+
+    std.log.info("[Build][Compile Shader] path {s}, name {s}", .{ shader_file_path, shader_name });
+
+    const shader = b.addObject(.{
+        .name = shader_name,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(shader_file_path),
+            // .target = target,
+            .optimize = .ReleaseFast,
+            .target = vulkan12_target,
+            // .optimize = optimize,
+        }),
+        .use_llvm = false,
+        .use_lld = false,
+    });
+
+    const file = b.addInstallFile(shader.getEmittedBin(), b.fmt("shaders/{s}.spv", .{shader_name}));
+
+    // const res = b.addInstallArtifact(shader, .{ .dest_sub_path = "shaders" });
+    b.getInstallStep().dependOn(&file.step);
+}
+
+fn getFileName(path: []const u8) []const u8 {
+    const basename = std.fs.path.basename(path);
+    const stem = std.fs.path.stem(basename);
+    return stem;
 }

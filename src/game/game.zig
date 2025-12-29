@@ -22,9 +22,6 @@ const WINDOW_HEIGHT = 1060;
 const WINDOW_TITLE = "Price is Power";
 const IMGUI_HAS_DOCK = false;
 
-var window: *sdl.SDL_Window = undefined;
-var gpu_device: *sdl.SDL_GPUDevice = undefined;
-
 pub const GameError = error{
     ErrorInitialisation,
 };
@@ -51,8 +48,6 @@ var timing: Timing = .{
 
 pub fn init(allocator: std.mem.Allocator, config: Config) !void {
     errdefer shutdown();
-    // _ = allocator;
-    // _ = config;
     // tracy.frameMarkStart("Main");
 
     db_manager = DbManager.init(allocator, config) catch |err| {
@@ -60,7 +55,7 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
         return err;
     };
 
-    renderer_manager = RendererManager.init(WINDOW_WIDTH, WINDOW_HEIGHT) catch |err| {
+    renderer_manager = RendererManager.init(allocator) catch |err| {
         std.log.err("[Game][init] Can't initiate RendererManager: {}", .{err});
         return err;
     };
@@ -78,12 +73,13 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
 pub fn setup() !void {
     errdefer shutdown();
 
-    try renderer_manager.create_window(WINDOW_TITLE);
-    renderer_manager.setup(&ecs_manager);
+    try renderer_manager.setup(&ecs_manager, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
     try font_manager.setup();
-    var render_pass = RendererManager.create_render_pass();
-    render_pass.clear_color = .{ .r = 0, .g = 0.5, .b = 1, .a = 1 };
-    ecs_manager.setup(render_pass) catch |err| {
+    ecs_manager.setup(.{
+        .gpu_target_info = RendererManager.createColorTargetInfo(),
+        .gpu_pass = null,
+        .clear_color = .{ .r = 0, .g = 0.5, .b = 1, .a = 1 },
+    }) catch |err| {
         std.log.err("[Game][setup] Can't setup the EcsManager : {}", .{err});
         return err;
     };
@@ -104,20 +100,23 @@ pub fn run() void {
 
     var done = false;
     while (!done) {
-        var event: sdl.SDL_Event = undefined;
-        while (sdl.SDL_PollEvent(&event)) {
-            _ = impl_sdl3.ImGui_ImplSDL3_ProcessEvent(@ptrCast(&event));
+        while (sdl.events.poll()) |event| {
+            _ = impl_sdl3.ImGui_ImplSDL3_ProcessEvent(@ptrCast(&event.toSdl()));
 
-            switch (event.type) {
-                sdl.SDL_EVENT_QUIT => {
+            switch (event) {
+                .quit => {
                     done = true;
                 },
-                sdl.SDL_EVENT_WINDOW_CLOSE_REQUESTED => {
-                    if (event.window.windowID == sdl.SDL_GetWindowID(renderer_manager.window.backend)) done = true;
+                .window_close_requested => {
+                    if (event.getWindow()) |window| {
+                        if (window.getId() catch 0 == renderer_manager.window.getId() catch 0) {
+                            done = true;
+                        }
+                    }
                 },
-                sdl.SDL_EVENT_KEY_DOWN => {
-                    switch (event.key.key) {
-                        sdl.SDLK_ESCAPE => {
+                .key_down => {
+                    switch (event.key_down.key.?) {
+                        .escape => {
                             done = true;
                         },
                         else => {},
@@ -184,18 +183,3 @@ const FixedFramerate = struct {
         }
     }
 };
-
-// pub fn timef() f32 {
-//     return @floatCast(sokol.time.sec(sokol.time.now()));
-// }
-
-fn makeComboItems(comptime items: anytype) [*c]const u8 {
-    comptime var buffer: []const u8 = "";
-
-    inline for (items) |item| {
-        buffer = buffer ++ item ++ "\x00";
-    }
-
-    buffer = buffer ++ "\x00";
-    return buffer.ptr;
-}

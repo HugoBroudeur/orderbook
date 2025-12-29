@@ -14,12 +14,24 @@ const RendererManager = @This();
 const Backend = enum { sdl3, sokol };
 
 backend: Backend,
-gpu_device: *sdl.SDL_GPUDevice = undefined,
+allocator: std.mem.Allocator,
 
-swapchain_texture: ?*sdl.SDL_GPUTexture = undefined,
-command_buffer: ?*sdl.SDL_GPUCommandBuffer = undefined,
+init_flags: sdl.InitFlags,
+device: sdl.gpu.Device = undefined,
+window: sdl.video.Window = undefined,
 
-window: Window,
+pipelines: std.ArrayList(sdl.gpu.GraphicsPipeline),
+shaders: std.ArrayList(sdl.gpu.Shader),
+
+swapchain_texture: ?sdl.gpu.Texture = undefined,
+command_buffer: sdl.gpu.CommandBuffer = undefined,
+
+is_minimised: bool = false,
+
+// const vert_shader_code = @embedFile("shaders/triangle.vert.spv");
+// const frag_shader_code = @embedFile("shaders/triangle.frag.spv");
+const vert_shader_code = "test";
+const frag_shader_code = "test";
 
 pub const fonts: [2][]const u8 = .{
     "assets/fonts/SNPro/SNPro-Regular.ttf",
@@ -27,121 +39,187 @@ pub const fonts: [2][]const u8 = .{
 };
 pub const font_size: f32 = 18;
 
-var font: ?*sdl.TTF_Font = undefined;
+var font: ?*sdl.ttf.Font = undefined;
 
 var tiny_ttf = "assets/fonts/SNPro/SNPro-Regular.ttf";
 
 pub const Window = struct {
-    backend: *sdl.SDL_Window,
-    is_minimised: bool = false,
+    // ptr: *sdl.video.Window,
+    // window: sdl.video.Window,
     show_delay: i32 = 2, // TODO: Avoid flickering of window at startup.
     width: i32,
     height: i32,
 };
 
-pub fn init(width: i32, height: i32) !RendererManager {
+pub fn init(allocator: std.mem.Allocator) !RendererManager {
     Ecs.logger.info("[RendererManager.init]", .{});
 
-    if (sdl.SDL_Init(sdl.SDL_INIT_VIDEO | sdl.SDL_INIT_GAMEPAD) == false) {
-        std.debug.print("Error: {s}\n", .{sdl.SDL_GetError()});
-        return error.SDL_init;
-    }
+    const init_flags: sdl.InitFlags = .{ .video = true, .gamepad = true, .audio = true };
+    sdl.init(init_flags) catch |err| {
+        std.log.err("Error: {?s}", .{sdl.errors.get()});
+        return err;
+    };
 
-    sdl.SDL_SetLogPriorities(sdl.SDL_LOG_PRIORITY_DEBUG);
-    sdl.SDL_SetLogOutputFunction(log_sdl, null);
+    sdl.log.setAllPriorities(.debug);
 
     return .{
+        .allocator = allocator,
         .backend = .sdl3,
-        .window = .{ .backend = undefined, .width = width, .height = height },
+        .init_flags = init_flags,
+        .pipelines = try .initCapacity(allocator, 1),
+        .shaders = try .initCapacity(allocator, 1),
     };
 }
 
 pub fn deinit(self: *RendererManager) void {
-    _ = sdl.SDL_WaitForGPUIdle(self.gpu_device);
+    self.device.waitForIdle() catch unreachable;
     // img_load.DestroyTexture(@ptrCast(gpu_device), @ptrCast(pTextureId));
     impl_sdl3.ImGui_ImplSDL3_Shutdown();
     impl_sdlgpu3.ImGui_ImplSDLGPU3_Shutdown();
 
-    sdl.SDL_ReleaseWindowFromGPUDevice(self.gpu_device, self.window.backend);
-    sdl.SDL_DestroyGPUDevice(self.gpu_device);
-    sdl.SDL_DestroyWindow(self.window.backend);
-    sdl.SDL_Quit();
+    for (self.pipelines.items) |pipeline| {
+        self.device.releaseGraphicsPipeline(pipeline);
+    }
+    self.pipelines.deinit(self.allocator);
+
+    for (self.shaders.items) |shader| {
+        self.device.releaseShader(shader);
+    }
+    self.shaders.deinit(self.allocator);
+
+    self.device.releaseWindow(self.window);
+    self.device.deinit();
+
+    sdl.quit(self.init_flags);
 }
 
-pub fn create_window(self: *RendererManager, title: []const u8) !void {
-    Ecs.logger.info("[RendererManager.create_window]", .{});
-    const window_flags = sdl.SDL_WINDOW_RESIZABLE | sdl.SDL_WINDOW_HIDDEN | sdl.SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    const main_scale = sdl.SDL_GetDisplayContentScale(@intCast(sdl.SDL_GetPrimaryDisplay()));
-    if (sdl.SDL_CreateWindow(title.ptr, @intFromFloat(@as(f32, @floatFromInt(self.window.width)) * main_scale), @intFromFloat(@as(f32, @floatFromInt(self.window.height)) * main_scale), window_flags)) |pointer| {
-        self.window.backend = pointer;
-    } else {
-        std.debug.print("Error: SDL_CreateWindow(): {s}\n", .{sdl.SDL_GetError()});
-        return error.SDL_CreateWindow;
-    }
+pub fn setup(self: *RendererManager, ecs_manager: *EcsManager, title: []const u8, width: i32, height: i32) !void {
+    const t = try self.allocator.dupeZ(u8, title);
+    defer self.allocator.free(t);
 
-    // Create GPU Device
-    const flags_gpu = sdl.SDL_GPU_SHADERFORMAT_SPIRV + sdl.SDL_GPU_SHADERFORMAT_DXIL + sdl.SDL_GPU_SHADERFORMAT_METALLIB;
-    if (sdl.SDL_CreateGPUDevice(flags_gpu, true, null)) |device| {
-        self.gpu_device = device;
-    } else {
-        std.debug.print("Error: SDL_CreateGPUDevice(): {s}\n", .{sdl.SDL_GetError()});
-        return error.SDL_CreateGPUDevice;
-    }
+    try self.createDevice();
+    try self.createWindow(t, width, height);
+    try self.claimWindow();
+    self.initImgui();
 
+    const aspect_ratio = try self.window.getAspectRatio();
+
+    ecs_manager.create_single_component_entity(Ecs.components.EnvironmentInfo, .{
+        .world_time = 0,
+        .window_width = @intFromFloat(aspect_ratio.@"0"),
+        .window_height = @intFromFloat(aspect_ratio.@"1"),
+    });
+    ecs_manager.flush_cmd_buf();
+
+    try self.createPipeline(.triangle_list);
+}
+
+fn createDevice(self: *RendererManager) !void {
+    self.device = sdl.gpu.Device.init(.{ .spirv = true, .dxil = true, .metal_lib = true }, true, null) catch |err| {
+        std.log.err("[RendererManager] SDL_CreateGPUDevice(): {?s}", .{sdl.errors.get()});
+        return err;
+    };
+}
+
+fn createWindow(self: *RendererManager, title: [:0]const u8, width: i32, height: i32) !void {
+    const window_flags: sdl.video.Window.Flags = .{ .resizable = true, .hidden = true, .high_pixel_density = true };
+    const main_scale = try sdl.video.Display.getContentScale(try sdl.video.Display.getPrimaryDisplay());
+
+    self.window = sdl.video.Window.init(title, @intFromFloat(@as(f32, @floatFromInt(width)) * main_scale), @intFromFloat(@as(f32, @floatFromInt(height)) * main_scale), window_flags) catch |err| {
+        std.log.err("Error: SDL_CreateWindow(): {?s}", .{sdl.errors.get()});
+        return err;
+    };
+}
+
+fn claimWindow(self: *RendererManager) !void {
     // Claim window for GPU Device
-    if (!sdl.SDL_ClaimWindowForGPUDevice(self.gpu_device, self.window.backend)) {
-        std.debug.print("Error: SDL_ClaimWindowForGPUDevice(): {s}\n", .{sdl.SDL_GetError()});
-        return error.SDL_ClaimWindowForGPUDevice;
-    }
-    _ = sdl.SDL_SetGPUSwapchainParameters(self.gpu_device, self.window.backend, sdl.SDL_GPU_SWAPCHAINCOMPOSITION_SDR, sdl.SDL_GPU_PRESENTMODE_VSYNC);
-    //const renderer = sdl.SDL_CreateRenderer(window, null); // TODO for Image load ?
+    self.device.claimWindow(self.window) catch |err| {
+        std.log.err("Error: SDL_ClaimWindowForGPUDevice(): {?s}", .{sdl.errors.get()});
+        return err;
+    };
 
-    _ = sdl.SDL_SetWindowPosition(self.window.backend, sdl.SDL_WINDOWPOS_CENTERED, sdl.SDL_WINDOWPOS_CENTERED);
+    try self.device.setSwapchainParameters(self.window, .sdr, .vsync);
+    try self.window.setPosition(
+        .{ .centered = try self.window.getDisplayForWindow() },
+        .{ .centered = try self.window.getDisplayForWindow() },
+    );
+}
 
-    // Setup Platform/Renderer backends
-    _ = impl_sdl3.ImGui_ImplSDL3_InitForSDLGPU(@ptrCast(self.window.backend));
-    var init_info: impl_sdlgpu3.ImGui_ImplSDLGPU3_InitInfo = undefined; //= {};
-    init_info.Device = @ptrCast(self.gpu_device);
-    init_info.ColorTargetFormat = sdl.SDL_GetGPUSwapchainTextureFormat(self.gpu_device, self.window.backend);
-    init_info.MSAASamples = sdl.SDL_GPU_SAMPLECOUNT_1;
+fn initImgui(self: *RendererManager) void {
+    _ = impl_sdl3.ImGui_ImplSDL3_InitForSDLGPU(@ptrCast(self.window.value));
+    var init_info: impl_sdlgpu3.ImGui_ImplSDLGPU3_InitInfo = undefined;
+    init_info.Device = @ptrCast(self.device.value);
+    const texture_format = self.device.getSwapchainTextureFormat(self.window) catch unreachable;
+    init_info.ColorTargetFormat = @intFromEnum(texture_format);
+    init_info.MSAASamples = @intFromEnum(sdl.gpu.SampleCount.no_multisampling);
     _ = impl_sdlgpu3.ImGui_ImplSDLGPU3_Init(&init_info);
 }
 
-pub fn setup(self: *RendererManager, ecs_manager: *EcsManager) void {
-    ecs_manager.create_single_component_entity(Ecs.components.EnvironmentInfo, .{
-        .world_time = 0,
-        .window_width = self.window.width,
-        .window_height = self.window.height,
-    });
-    ecs_manager.flush_cmd_buf();
+fn createPipeline(self: *RendererManager, primitive_type: sdl.gpu.PrimitiveType) !void {
+    const vertex_shader = try self.createShader(vert_shader_code, .vertex);
+    const frag_shader = try self.createShader(frag_shader_code, .fragment);
+
+    const pipeline_create_info: sdl.gpu.GraphicsPipelineCreateInfo = .{
+        .vertex_shader = vertex_shader,
+        .fragment_shader = frag_shader,
+        .primitive_type = primitive_type,
+    };
+
+    try self.pipelines.append(self.allocator, try self.device.createGraphicsPipeline(pipeline_create_info));
 }
 
-pub fn create_render_pass() Ecs.components.Graphics.RenderPass {
-    Ecs.logger.info("[RendererManager.create_render_pass]", .{});
-    var target_info: sdl.SDL_GPUColorTargetInfo = std.mem.zeroes(sdl.SDL_GPUColorTargetInfo);
-    target_info.load_op = sdl.SDL_GPU_LOADOP_CLEAR;
-    target_info.store_op = sdl.SDL_GPU_STOREOP_STORE;
+pub fn createShader(self: *RendererManager, shader_byte_code: []const u8, stage: sdl.gpu.ShaderStage) !sdl.gpu.Shader {
+    const shader_create_info: sdl.gpu.ShaderCreateInfo = .{
+        .code = shader_byte_code,
+        .entry_point = "main",
+        .format = .{ .spirv = true },
+        .stage = stage,
+    };
+
+    const shader = try self.device.createShader(shader_create_info);
+    try self.shaders.append(self.allocator, shader);
+
+    return shader;
+}
+
+pub fn createColorTargetInfo() sdl.gpu.ColorTargetInfo {
+    Ecs.logger.info("[RendererManager.createColorTargetInfo]", .{});
+
+    var target_info: sdl.gpu.ColorTargetInfo = .{ .texture = .{ .value = null } };
+    target_info.load = .clear;
+    target_info.store = .store;
     target_info.mip_level = 0;
     target_info.layer_or_depth_plane = 0;
     target_info.cycle = false;
 
-    return .{ .gpu_pass = undefined, .gpu_target_info = target_info };
+    return target_info;
 }
 
 pub fn begin_pass(self: *RendererManager, render_pass: *Ecs.components.Graphics.RenderPass) void {
     Ecs.logger.info("[RendererManager.begin_pass]", .{});
-    self.command_buffer = sdl.SDL_AcquireGPUCommandBuffer(self.gpu_device); // Acquire a GPU command buffer
 
-    _ = sdl.SDL_AcquireGPUSwapchainTexture(self.command_buffer, self.window.backend, @ptrCast(&self.swapchain_texture), null, null); // Acquire a swapchain texture
-
-    render_pass.gpu_target_info = std.mem.zeroes(sdl.SDL_GPUColorTargetInfo);
-    // render_pass.sdl_pass_action.texture = swapchain_texture_val;
+    self.swapchain_texture = null;
+    render_pass.gpu_target_info = createColorTargetInfo();
     render_pass.gpu_target_info.clear_color = colorToSdlColor(render_pass.clear_color);
-    render_pass.gpu_target_info.load_op = sdl.SDL_GPU_LOADOP_CLEAR;
-    render_pass.gpu_target_info.store_op = sdl.SDL_GPU_STOREOP_STORE;
-    render_pass.gpu_target_info.mip_level = 0;
-    render_pass.gpu_target_info.layer_or_depth_plane = 0;
-    render_pass.gpu_target_info.cycle = false;
+
+    // self.command_buffer = sdl.SDL_AcquireGPUCommandBuffer(self.gpu_device.ptr); // Acquire a GPU command buffer
+    self.command_buffer = self.device.acquireCommandBuffer() catch {
+        std.log.err("[RendererManager.begin_pass] {?s}", .{sdl.errors.get()});
+        return;
+    };
+
+    const swapchain_texture = self.command_buffer.waitAndAcquireSwapchainTexture(self.window) catch {
+        std.log.err("[RendererManager.begin_pass] {?s}", .{sdl.errors.get()});
+        return;
+    };
+
+    if (swapchain_texture.@"0") |texture| {
+        self.swapchain_texture = texture;
+
+        // Setup and start a render pass
+        render_pass.gpu_target_info.texture = texture;
+        render_pass.gpu_pass = self.command_buffer.beginRenderPass(&.{render_pass.gpu_target_info}, null);
+    }
 
     // Mandatory start a Imgui frame binding
     impl_sdlgpu3.ImGui_ImplSDLGPU3_NewFrame();
@@ -150,48 +228,69 @@ pub fn begin_pass(self: *RendererManager, render_pass: *Ecs.components.Graphics.
 
 pub fn render_frame(self: *RendererManager, render_pass: *Ecs.components.Graphics.RenderPass, ui_draw_data: *ig.ImDrawData) void {
     Ecs.logger.info("[RendererManager.render_frame]", .{});
-    self.window.is_minimised = (ui_draw_data.*.DisplaySize.x <= 0.0) or (ui_draw_data.*.DisplaySize.y <= 0.0);
+    self.is_minimised = (ui_draw_data.*.DisplaySize.x <= 0.0) or (ui_draw_data.*.DisplaySize.y <= 0.0);
 
-    if (self.swapchain_texture) |swapchain_texture_val| {
-        if (!self.window.is_minimised) {
+    if (render_pass.gpu_pass) |gpu_pass| {
+        if (!self.is_minimised) {
             // This is mandatory: call ImGui_ImplSDLGPU3_PrepareDrawData() to upload the vertex/index buffer!
-            impl_sdlgpu3.ImGui_ImplSDLGPU3_PrepareDrawData(@ptrCast(ui_draw_data), @ptrCast(self.command_buffer));
+            impl_sdlgpu3.ImGui_ImplSDLGPU3_PrepareDrawData(@ptrCast(ui_draw_data), @ptrCast(self.command_buffer.value));
 
-            // Setup and start a render pass
-            render_pass.gpu_target_info.texture = swapchain_texture_val;
-
-            if (sdl.SDL_BeginGPURenderPass(self.command_buffer, &render_pass.gpu_target_info, 1, null)) |gpu_pass| {
-                render_pass.gpu_pass = gpu_pass;
-
-                // Render ImGui
-                impl_sdlgpu3.ImGui_ImplSDLGPU3_RenderDrawData(@ptrCast(ui_draw_data), @ptrCast(self.command_buffer), @ptrCast(render_pass.gpu_pass), null);
-
-                sdl.SDL_EndGPURenderPass(render_pass.gpu_pass);
-            }
+            // Render ImGui
+            impl_sdlgpu3.ImGui_ImplSDLGPU3_RenderDrawData(@ptrCast(ui_draw_data), @ptrCast(self.command_buffer.value), @ptrCast(gpu_pass.value), null);
         }
+
+        gpu_pass.end();
     }
 }
 
-pub fn end_pass(self: *RendererManager) void {
-    Ecs.logger.info("[RendererManager.end_pass]", .{});
+pub fn endFrame(self: *RendererManager) void {
+    Ecs.logger.info("[RendererManager.endFrame]", .{});
 
     // Submit the command buffer
-    _ = sdl.SDL_SubmitGPUCommandBuffer(self.command_buffer);
+    self.command_buffer.submit() catch {
+        std.log.err("[RendererManager.endFrame] Command Buffer error: {?s}", .{sdl.errors.get()});
+    };
 
-    //
-    if (self.window.show_delay >= 0) {
-        self.window.show_delay -= 1;
-    }
-    if (self.window.show_delay == 0) { // Visible main window here at start up
-        _ = sdl.SDL_ShowWindow(self.window.backend);
-    }
+    // //
+    // if (self.gpu_device.window.show_delay >= 0) {
+    //     self.gpu_device.window.show_delay -= 1;
+    // }
+    // if (self.gpu_device.window.show_delay == 0) { // Visible main window here at start up
+    //     _ = sdl.SDL_ShowWindow(self.gpu_device.window.window);
+    // }
 }
 
-fn colorToSdlColor(color: Ecs.components.Graphics.Color) sdl.SDL_FColor {
+fn colorToSdlColor(color: Ecs.components.Graphics.Color) sdl.pixels.FColor {
     return .{ .a = color.a, .b = color.b, .g = color.g, .r = color.r };
 }
 
 fn log_sdl(userdata: ?*anyopaque, category: c_int, priority: sdl.SDL_LogPriority, message: [*c]const u8) callconv(.c) void {
     _ = userdata;
-    std.log.debug("[SDL] {} [{}]: {s}", .{ category, priority, message });
+    const category_str: []const u8 = switch (category) {
+        0 => "Application",
+        1 => "Errors",
+        2 => "Assert",
+        3 => "System",
+        4 => "Audio",
+        5 => "Video",
+        6 => "Render",
+        7 => "Input",
+        8 => "Testing",
+        9 => "Gpu",
+        else => "Unknown",
+    };
+    const priority_str: [:0]const u8 = switch (priority) {
+        0 => "Invalid",
+        1 => "Trace",
+        2 => "Verbose",
+        3 => "Debug",
+        4 => "Info",
+        5 => "Warn",
+        6 => "Error",
+        7 => "Critical",
+        8 => "Count",
+        else => "Unknown",
+    };
+    std.log.debug("[SDL] {s} [{s}]: {s}", .{ category_str, priority_str, message });
+    // std.log.debug("[SDL] {} [{}]: {s}", .{ category, priority, message });
 }

@@ -106,7 +106,7 @@ pub fn render(self: *EcsManager) void {
     // SokolRenderSystem.render_pass();
     // SokolRenderSystem.end_render_pass();
 
-    self.renderer_manager.end_pass();
+    self.renderer_manager.endFrame();
 
     // for (self.render_systems.items) |*render_system| {
     //     // previous_pass = sys.onRender(&self.reg, previous_pass);
