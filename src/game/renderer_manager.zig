@@ -30,8 +30,14 @@ is_minimised: bool = false,
 
 // const vert_shader_code = @embedFile("shaders/triangle.vert.spv");
 // const frag_shader_code = @embedFile("shaders/triangle.frag.spv");
-const vert_shader_code = "test";
-const frag_shader_code = "test";
+// const vert_shader_code = "test";
+// const frag_shader_code = "test";
+// const vert_shader_name = "textured_quad.vert";
+// const frag_shader_name = "textured_quad.frag";
+const vert_shader_name = "triangle.vert";
+const frag_shader_name = "triangle.frag";
+const vert_shader_bin = @embedFile(vert_shader_name ++ ".spv");
+const frag_shader_bin = @embedFile(frag_shader_name ++ ".spv");
 
 pub const fonts: [2][]const u8 = .{
     "assets/fonts/SNPro/SNPro-Regular.ttf",
@@ -103,6 +109,7 @@ pub fn setup(self: *RendererManager, ecs_manager: *EcsManager, title: []const u8
     self.initImgui();
 
     const aspect_ratio = try self.window.getAspectRatio();
+    std.log.debug("[RendererManager.setup] Aspect Ratio: {}", .{aspect_ratio});
 
     ecs_manager.create_single_component_entity(Ecs.components.EnvironmentInfo, .{
         .world_time = 0,
@@ -111,7 +118,7 @@ pub fn setup(self: *RendererManager, ecs_manager: *EcsManager, title: []const u8
     });
     ecs_manager.flush_cmd_buf();
 
-    try self.createPipeline(.triangle_list);
+    // try self.createPipeline(.triangle_list);
 }
 
 fn createDevice(self: *RendererManager) !void {
@@ -122,7 +129,7 @@ fn createDevice(self: *RendererManager) !void {
 }
 
 fn createWindow(self: *RendererManager, title: [:0]const u8, width: i32, height: i32) !void {
-    const window_flags: sdl.video.Window.Flags = .{ .resizable = true, .hidden = true, .high_pixel_density = true };
+    const window_flags: sdl.video.Window.Flags = .{ .resizable = true, .hidden = false, .high_pixel_density = true };
     const main_scale = try sdl.video.Display.getContentScale(try sdl.video.Display.getPrimaryDisplay());
 
     self.window = sdl.video.Window.init(title, @intFromFloat(@as(f32, @floatFromInt(width)) * main_scale), @intFromFloat(@as(f32, @floatFromInt(height)) * main_scale), window_flags) catch |err| {
@@ -156,8 +163,9 @@ fn initImgui(self: *RendererManager) void {
 }
 
 fn createPipeline(self: *RendererManager, primitive_type: sdl.gpu.PrimitiveType) !void {
-    const vertex_shader = try self.createShader(vert_shader_code, .vertex);
-    const frag_shader = try self.createShader(frag_shader_code, .fragment);
+    std.log.info("[RendererManager.createPipeline] Vert Shader: {s} | Frag Shader: {s} | Primitive: {}", .{ vert_shader_name, frag_shader_name, primitive_type });
+    const vertex_shader = try self.createShader(vert_shader_bin, .vertex);
+    const frag_shader = try self.createShader(frag_shader_bin, .fragment);
 
     const pipeline_create_info: sdl.gpu.GraphicsPipelineCreateInfo = .{
         .vertex_shader = vertex_shader,
@@ -233,12 +241,15 @@ pub fn render_frame(self: *RendererManager, render_pass: *Ecs.components.Graphic
     if (render_pass.gpu_pass) |gpu_pass| {
         if (!self.is_minimised) {
             // This is mandatory: call ImGui_ImplSDLGPU3_PrepareDrawData() to upload the vertex/index buffer!
+            Ecs.logger.info("[RendererManager.render_frame] Prepare Draw", .{});
             impl_sdlgpu3.ImGui_ImplSDLGPU3_PrepareDrawData(@ptrCast(ui_draw_data), @ptrCast(self.command_buffer.value));
 
             // Render ImGui
+            Ecs.logger.info("[RendererManager.render_frame] Render Draw", .{});
             impl_sdlgpu3.ImGui_ImplSDLGPU3_RenderDrawData(@ptrCast(ui_draw_data), @ptrCast(self.command_buffer.value), @ptrCast(gpu_pass.value), null);
         }
 
+        Ecs.logger.info("[RendererManager.render_frame] End GPU Pass", .{});
         gpu_pass.end();
     }
 }

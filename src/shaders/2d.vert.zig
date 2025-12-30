@@ -1,6 +1,6 @@
 const std = @import("std");
 const gpu = std.gpu;
-const zm = @import("zmath");
+// const zm = @import("zmath");
 
 const Vec2f = @Vector(2, f32);
 const Vec4f = @Vector(4, f32);
@@ -12,7 +12,7 @@ extern var out_color: Vec4f addrspace(.output);
 extern var out_uv: Vec2f addrspace(.output);
 
 const UniformBuffer = extern struct {
-    mat: zm.Mat,
+    // mat: zm.Mat,
     color: Vec4f,
 };
 
@@ -30,6 +30,6 @@ export fn main() callconv(.spirv_vertex) void {
     out_color = ubo.color;
     out_uv = Vec2f{ -in_uv[0], in_uv[1] };
 
-    const position = Vec4f{ in_position[0], in_position[1], 0.0, 1.0 };
-    gpu.position_out.* = zm.mul(ubo.mat, position);
+    // const position = Vec4f{ in_position[0], in_position[1], 0.0, 1.0 };
+    // gpu.position_out.* = zm.mul(ubo.mat, position);
 }

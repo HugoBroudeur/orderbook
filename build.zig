@@ -6,14 +6,14 @@ const blib = @import("./build_lib.zig");
 const protobuf_files = &.{ "proto", "proto/all.proto", "proto/orderbook/v1/orderbook.proto" };
 
 // Shaders
-const shaders = .{
-    // "src/shaders/2d.vert.zig",
-    // "src/shaders/quad.frag.zig",
-    "src/shaders/triangle.frag.zig",
-    "src/shaders/triangle.vert.zig",
-};
+// const shaders = .{
+//     // "src/shaders/2d.vert.zig",
+//     // "src/shaders/quad.frag.zig",
+//     "src/shaders/triangle.frag.zig",
+//     "src/shaders/triangle.vert.zig",
+// };
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -199,9 +199,22 @@ pub fn build(b: *std.Build) void {
         b.getInstallStep().dependOn(&res.step);
     }
 
-    inline for (shaders) |shader| {
-        compileShader(b, shader);
+    // SHADERS
+    // Compile shaders.
+    var shader_dir = try std.fs.cwd().openDir("src/shaders", .{ .iterate = true });
+    defer shader_dir.close();
+    var shader_dir_walker = try shader_dir.walk(b.allocator);
+    defer shader_dir_walker.deinit();
+    while (try shader_dir_walker.next()) |shader| {
+        if (shader.kind != .file or !(std.mem.endsWith(u8, shader.basename, ".vert.zig") or std.mem.endsWith(u8, shader.basename, ".frag.zig")))
+            continue;
+        const spv_name = try std.mem.replaceOwned(u8, b.allocator, shader.basename, ".zig", ".spv");
+        defer b.allocator.free(spv_name);
+        const shader_path = try std.fmt.allocPrint(b.allocator, "src/shaders/{s}", .{shader.path});
+        defer b.allocator.free(shader_path);
+        compileShader(b, exe.root_module, shader_path, spv_name);
     }
+    // END SHADERS
 
     // const fonticon_dir = "../../src/libc/fonticon/fa6/";
     // const res_fonticon = [_][]const u8{ "fa-solid-900.ttf", "LICENSE.txt" };
@@ -231,35 +244,33 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 }
 
-fn compileShader(b: *std.Build, shader_file_path: []const u8) void {
+fn compileShader(
+    b: *std.Build,
+    module: *std.Build.Module,
+    path: []const u8,
+    out_name: []const u8,
+) void {
     const vulkan12_target = b.resolveTargetQuery(.{
-        .cpu_arch = .spirv32,
+        .cpu_arch = .spirv64,
         .cpu_model = .{ .explicit = &std.Target.spirv.cpu.vulkan_v1_2 },
+        .cpu_features_add = std.Target.spirv.featureSet(&.{.int64}),
         .os_tag = .vulkan,
         .ofmt = .spirv,
     });
 
-    const shader_name = getFileName(shader_file_path);
-
-    std.log.info("[Build][Compile Shader] path {s}, name {s}", .{ shader_file_path, shader_name });
-
     const shader = b.addObject(.{
-        .name = shader_name,
+        .name = out_name,
         .root_module = b.createModule(.{
-            .root_source_file = b.path(shader_file_path),
-            // .target = target,
+            .root_source_file = b.path(path),
             .optimize = .ReleaseFast,
             .target = vulkan12_target,
-            // .optimize = optimize,
         }),
         .use_llvm = false,
         .use_lld = false,
     });
-
-    const file = b.addInstallFile(shader.getEmittedBin(), b.fmt("shaders/{s}.spv", .{shader_name}));
-
-    // const res = b.addInstallArtifact(shader, .{ .dest_sub_path = "shaders" });
-    b.getInstallStep().dependOn(&file.step);
+    module.addAnonymousImport(out_name, .{
+        .root_source_file = shader.getEmittedBin(),
+    });
 }
 
 fn getFileName(path: []const u8) []const u8 {
