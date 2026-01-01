@@ -1,21 +1,17 @@
 const std = @import("std");
-const sdl = @cImport({
-    @cInclude("SDL3/SDL.h");
-    @cInclude("SDL3_ttf/SDL_ttf.h");
-    // @cInclude("SDL3_image/SDL_image.h");
-});
+const sdl = @import("sdl3");
 const clay = @import("zclay");
 const FontManager = @import("font_manager.zig");
 
 pub const RendererData = struct {
-    renderer: *sdl.SDL_Renderer,
-    text_engine: *sdl.TTF_TextEngine,
+    // renderer: *sdl.SDL_Renderer,
+    text_engine: *sdl.ttf.GpuTextEngine,
     font: FontManager.Font,
 };
 
 // Global for convenience. Even in 4K this is enough for smooth curves
 var NUM_CIRCLE_SEGMENTS: i32 = 16;
-var current_clipping_rectangle: sdl.SDL_Rect = undefined;
+var current_clipping_rectangle: sdl.rect.IRect = undefined;
 
 // All rendering is performed by a single SDL call
 pub fn renderFillRoundedRect(

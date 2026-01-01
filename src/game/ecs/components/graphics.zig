@@ -1,6 +1,8 @@
 const sdl = @import("sdl3");
 const vec = @import("../math/vec.zig");
-const color = @import("../math/color.zig");
+const ig = @import("cimgui");
+const clay = @import("zclay");
+const Color = @import("../../colors.zig");
 
 //  ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗██╗ ██████╗███████╗
 // ██╔════╝ ██╔══██╗██╔══██╗██╔══██╗██║  ██║██║██╔════╝██╔════╝
@@ -9,17 +11,12 @@ const color = @import("../math/color.zig");
 // ╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║██║╚██████╗███████║
 //  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝
 
-pub const Color = struct {
-    r: f32,
-    g: f32,
-    b: f32,
-    a: f32,
-};
-
-pub const RenderPass = struct {
-    gpu_target_info: sdl.gpu.ColorTargetInfo,
-    gpu_pass: ?sdl.gpu.RenderPass,
-    clear_color: Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+pub const DrawData = struct {
+    // gpu_target_info: sdl.gpu.ColorTargetInfo,
+    // render_pass: ?sdl.gpu.RenderPass,
+    clear_color: Color = Color.Transparent,
+    ui: *ig.ImDrawData = undefined,
+    clay_render_cmds: []clay.RenderCommand = &.{},
     // pass_action: sg.PassAction = .{},
 };
 
@@ -83,7 +80,7 @@ fn shapeMaker(comptime T: ShapeType) type {
         vertices: [vertices]vec.Vec3 = @splat(vec.Vec3.zero()),
         tex_coords: [tex_coords]vec.Vec2 = @splat(vec.Vec2.zero()),
         indices: [indices]u32 = @splat(0),
-        vertex_colors: [vertex_colors]color.ColorUB4 = @splat(.{}),
+        vertex_colors: [vertex_colors]Color = @splat(.{}),
 
         // struct ShapeComponent
         // {

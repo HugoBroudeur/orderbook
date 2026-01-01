@@ -35,8 +35,6 @@ implot_ctx: *ig.struct_ImPlotContext = undefined,
 clay_memory: []u8 = undefined,
 clay_renderer_data: ClayManager.RendererData = undefined,
 
-is_in_draw_frame: bool = false,
-
 pub const settings_file_path = "config/cimgui.ini";
 // pub const font_path = "assets/fonts/SNPro-Regular.ttf";
 pub const fonts: [2][]const u8 = .{
@@ -113,33 +111,37 @@ pub fn setup(self: *UiManager, ecs_manager: *EcsManager) !void {
     clay.setMeasureTextFunction(void, {}, FontManager.measureText);
 }
 
-pub fn beginFrame(self: *UiManager, ui_state: *Ecs.components.UIState) void {
-    if (self.is_in_draw_frame) {
-        Ecs.logger.err("[UiManager][begin_frame] Calling begin_frame but you forgot to render the previous frame, you need to call render_frame first", .{});
-        return;
-    }
-    self.is_in_draw_frame = true;
-    start_cimgui_pass(ui_state);
-}
-
 pub fn renderFrame(self: *UiManager, ecs_manager: *EcsManager) void {
-    if (!self.is_in_draw_frame) {
-        Ecs.logger.err("[UiManager][render_frame] Calling render_frame but you forgot to call begin_frame first", .{});
-        return;
-    }
+    Ecs.logger.info("[UiManager][renderFrame]", .{});
+
+    const state = ecs_manager.get_singleton(Ecs.components.UIState);
+
+    // Start the Dear ImGui frame
+    ig.igNewFrame();
+
+    ig.igShowDemoWindow(&state.is_demo_open);
+
+    ig.ImPlot_ShowDemoWindow(&state.is_demo_open);
 
     // self.render_font();
-    // createLayout();
+    const clay_cmds = createLayout();
     ecs_manager.entities.forEach("render_ui", renderUi, .{
         .cb = &ecs_manager.cmd_buf,
         .es = &ecs_manager.entities,
         .mm = ecs_manager.market_manager,
     });
 
-    end_cimgui_pass();
+    ig.igEnd(); // Opened in the start frame
+    ig.igRender();
+    self.impl_update_plateform();
+
+    // Put the pointer to draw data in ECS
+    const draw_data = ecs_manager.get_singleton(Ecs.components.Graphics.DrawData);
+    draw_data.ui = ig.igGetDrawData();
+    draw_data.clay_render_cmds = clay_cmds;
+
     // ClayManager.renderCommands(renderer_data: *RendererData, cmds: []RenderCommand)
 
-    self.is_in_draw_frame = false;
 }
 
 // pub fn render_font(self: *UiManager, renderer: *sdl.SDL_Renderer) !void {
@@ -167,15 +169,8 @@ pub fn renderFrame(self: *UiManager, ecs_manager: *EcsManager) void {
 //     _ = sdl.SDL_RenderTexture(renderer, text_texture, &srcr, &destr);
 // }
 
-pub fn getDrawData(self: *UiManager) ?*ig.ImDrawData {
-    if (self.is_in_draw_frame) {
-        Ecs.logger.err("[UiManager][get_draw_data] Calling get_draw_data but you forgot to call render_frame first", .{});
-        return null;
-    }
-
-    const draw_data: *ig.ImDrawData = ig.igGetDrawData();
-
-    return draw_data;
+pub fn getDrawData() *ig.ImDrawData {
+    return ig.igGetDrawData();
 }
 
 // Update and Render additional Platform Windows
@@ -238,30 +233,6 @@ fn renderUi(ctx: struct { cb: *Ecs.CmdBuf, es: *Ecs.Entities, mm: *MarketManager
         },
         else => {},
     }
-}
-
-fn start_cimgui_pass(state: *Ecs.components.UIState) void {
-    Ecs.logger.info("[UiManager.start_cimgui_pass]", .{});
-    // simgui.newFrame(.{
-    //     .width = sapp.width(),
-    //     .height = sapp.height(),
-    //     .delta_time = sapp.frameDuration(),
-    //     .dpi_scale = sapp.dpiScale(),
-    // });
-
-    // Start the Dear ImGui frame
-    ig.igNewFrame();
-
-    ig.igShowDemoWindow(&state.is_demo_open);
-
-    ig.ImPlot_ShowDemoWindow(&state.is_demo_open);
-}
-
-fn end_cimgui_pass() void {
-    Ecs.logger.info("[UiManager.end_imgui_pass]", .{});
-
-    ig.igEnd(); // Opened in the start frame
-    ig.igRender();
 }
 
 fn ensureSettingFileExist(path: []const u8) void {

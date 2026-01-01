@@ -45,9 +45,9 @@ pub fn deinit(self: *EcsManager) void {
     self.entities.deinit(self.allocator);
 }
 
-pub fn setup(self: *EcsManager, render_pass: Ecs.components.Graphics.RenderPass) !void {
+pub fn setup(self: *EcsManager, draw_data: Ecs.components.Graphics.DrawData) !void {
     try Prefab.setup_game(self.allocator, &self.entities, &self.cmd_buf);
-    self.create_single_component_entity(Ecs.components.Graphics.RenderPass, render_pass);
+    self.create_single_component_entity(Ecs.components.Graphics.DrawData, draw_data);
     self.create_single_component_entity(Ecs.components.MarketData, .{});
 
     self.flush_cmd_buf();
@@ -71,8 +71,8 @@ pub fn render(self: *EcsManager) void {
     //
     // ALWAYS START WITH A BEGIN PASS
     //
-    const render_pass = self.get_singleton(Ecs.components.Graphics.RenderPass);
-    self.renderer_manager.begin_pass(render_pass);
+    const draw_data = self.get_singleton(Ecs.components.Graphics.DrawData);
+    self.renderer_manager.startFrame();
 
     //
     // ALWAYS START WITH A SOKOL PASS
@@ -83,22 +83,12 @@ pub fn render(self: *EcsManager) void {
     //
     // UI SYSTEM PASS
     //
-
-    self.ui_manager.beginFrame(self.get_singleton(Ecs.components.UIState));
     self.ui_manager.renderFrame(self);
-    const ui_draw_data = self.ui_manager.getDrawData();
 
     //
     // RENDER FRAME
     //
-    if (ui_draw_data) |draw_data| {
-        self.renderer_manager.render_frame(render_pass, draw_data);
-    }
-
-    //
-    // PLATFORM SPECIFIC TO AVOID BUG
-    //
-    self.ui_manager.impl_update_plateform();
+    self.renderer_manager.renderFrame(draw_data);
 
     //
     // ALWAYS END WITH END PASS
@@ -106,7 +96,7 @@ pub fn render(self: *EcsManager) void {
     // SokolRenderSystem.render_pass();
     // SokolRenderSystem.end_render_pass();
 
-    self.renderer_manager.endFrame();
+    // self.renderer_manager.endFrame();
 
     // for (self.render_systems.items) |*render_system| {
     //     // previous_pass = sys.onRender(&self.reg, previous_pass);

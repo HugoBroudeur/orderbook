@@ -29,6 +29,15 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
+    const compile_shader = b.addExecutable(.{
+        .name = "compile_shader",
+        .root_module = b.createModule(.{
+            .optimize = optimize,
+            .target = target,
+            .root_source_file = b.path("tools/compile_shader.zig"),
+        }),
+    });
+
     // Register external module from "./build.zig.zon" file.
     blib.addExternalModule(b, main_mod);
 
@@ -201,19 +210,26 @@ pub fn build(b: *std.Build) !void {
 
     // SHADERS
     // Compile shaders.
-    var shader_dir = try std.fs.cwd().openDir("src/shaders", .{ .iterate = true });
-    defer shader_dir.close();
-    var shader_dir_walker = try shader_dir.walk(b.allocator);
-    defer shader_dir_walker.deinit();
-    while (try shader_dir_walker.next()) |shader| {
-        if (shader.kind != .file or !(std.mem.endsWith(u8, shader.basename, ".vert.zig") or std.mem.endsWith(u8, shader.basename, ".frag.zig")))
-            continue;
-        const spv_name = try std.mem.replaceOwned(u8, b.allocator, shader.basename, ".zig", ".spv");
-        defer b.allocator.free(spv_name);
-        const shader_path = try std.fmt.allocPrint(b.allocator, "src/shaders/{s}", .{shader.path});
-        defer b.allocator.free(shader_path);
-        compileShader(b, exe.root_module, shader_path, spv_name);
-    }
+    const run_compile_shader = b.addRunArtifact(compile_shader);
+    b.getInstallStep().dependOn(&run_compile_shader.step);
+
+    // var shader_dir = try std.fs.cwd().openDir("src/shaders", .{ .iterate = true });
+    // defer shader_dir.close();
+    // var shader_dir_walker = try shader_dir.walk(b.allocator);
+    // defer shader_dir_walker.deinit();
+    // while (try shader_dir_walker.next()) |shader| {
+    //     if (shader.kind != .file or !(std.mem.endsWith(u8, shader.basename, ".slang")))
+    //         // if (shader.kind != .file or !(std.mem.endsWith(u8, shader.basename, ".vert.zig") or std.mem.endsWith(u8, shader.basename, ".frag.zig")))
+    //         continue;
+    //     // const spv_name = try std.mem.replaceOwned(u8, b.allocator, shader.basename, ".zig", ".spv");
+    //     const spv_name = try std.mem.replaceOwned(u8, b.allocator, shader.basename, ".slang", ".spv");
+    //     defer b.allocator.free(spv_name);
+    //     const shader_path = try std.fmt.allocPrint(b.allocator, "src/shaders/{s}", .{shader.path});
+    //     defer b.allocator.free(shader_path);
+    //     // compileShader(b, exe.root_module, shader_path, spv_name);
+    //
+    //     exe.root_module.addAnonymousImport(spv_name, .{ .root_source_file = b.path(shader_path) });
+    // }
     // END SHADERS
 
     // const fonticon_dir = "../../src/libc/fonticon/fa6/";

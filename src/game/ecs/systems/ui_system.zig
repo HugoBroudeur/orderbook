@@ -87,32 +87,12 @@ pub fn system_ui_test(ctx: struct {}, state: *ecs.components.UIState) void {
     ecs.logger.info("[UiSystem.render_ui_test]", .{});
     const io: *ig.ImGuiIO = ig.igGetIO_Nil();
 
-    const backendName: [*c]const u8 = "Dummy";
-    // const backendName: [*c]const u8 = switch (sg.queryBackend()) {
-    //     .D3D11 => "Direct3D11",
-    //     .GLCORE => "OpenGL",
-    //     .GLES3 => "OpenGLES3",
-    //     .METAL_IOS => "Metal iOS",
-    //     .METAL_MACOS => "Metal macOS",
-    //     .METAL_SIMULATOR => "Metal Simulator",
-    //     .WGPU => "WebGPU",
-    //     .DUMMY => "Dummy",
-    // };
-
     ecs.components.Styles.setStyle(@enumFromInt(state.current_theme));
 
     //=== UI CODE STARTS HERE
-    if (ig.igBegin("Hello Dear ImGui!", &state.show_first_window, ig.ImGuiWindowFlags_None)) {
-        // _ = ig.igColorEdit3("Background", &state.pass_action.colors[0].clear_value.r, ig.ImGuiColorEditFlags_None);
-        _ = ig.igText("Dear ImGui Version: %s", ig.igGetVersion());
-    }
-    ig.igEnd();
-
     ig.igSetNextWindowPos(.{ .x = 0, .y = 0 }, ig.ImGuiCond_Once, .{ .x = 0, .y = 0 });
     ig.igSetNextWindowSize(.{ .x = @floatFromInt(state.window_width), .y = @floatFromInt(state.window_height) }, ig.ImGuiCond_Once);
     if (ig.igBegin("Price is Power", &state.show_second_window, ig.ImGuiWindowFlags_None)) {
-        _ = ig.igText("Sokol Backend: %s", backendName);
-
         {
             if (ig.igBeginCombo("Theme", state.themes[@min(state.current_theme, state.themes.len - 1)].ptr, ig.ImGuiComboFlags_None)) {
                 for (state.themes, 0..) |theme, i| {

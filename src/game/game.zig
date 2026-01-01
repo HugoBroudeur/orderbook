@@ -2,12 +2,14 @@ const std = @import("std");
 
 const tracy = @import("tracy");
 const Config = @import("../config.zig");
+const Colors = @import("colors.zig");
 const DbManager = @import("db_manager.zig");
 const RendererManager = @import("renderer_manager.zig");
 const UiManager = @import("ui_manager.zig");
 const EcsManager = @import("ecs_manager.zig");
 const MarketManager = @import("market_manager.zig");
 const FontManager = @import("font_manager.zig");
+const PipelineManager = @import("pipeline_manager.zig");
 const UiSystem = @import("ecs/systems/ui_system.zig");
 
 const sdl = @import("sdl3");
@@ -33,6 +35,7 @@ var renderer_manager: RendererManager = undefined;
 var ui_manager: UiManager = undefined;
 var market_manager: MarketManager = undefined;
 var font_manager: FontManager = undefined;
+var pipeline_manager: PipelineManager = undefined;
 var ui_system: UiSystem = undefined;
 
 const FRAMES_PER_SECOND = 60.0;
@@ -64,6 +67,7 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
     font_manager = FontManager.init(allocator);
     ui_manager = UiManager.init(allocator, &db_manager, &ui_system, &font_manager);
     market_manager = MarketManager.init(allocator, &db_manager);
+    pipeline_manager = PipelineManager.init(allocator, &renderer_manager.device);
     ecs_manager = EcsManager.init(allocator, &db_manager, &renderer_manager, &ui_manager, &market_manager) catch |err| {
         std.log.err("[Game][init] Can't initiate EcsManager: {}", .{err});
         return err;
@@ -73,13 +77,9 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
 pub fn setup() !void {
     errdefer shutdown();
 
-    try renderer_manager.setup(&ecs_manager, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
+    try renderer_manager.setup(&ecs_manager, &pipeline_manager, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
     try font_manager.setup();
-    ecs_manager.setup(.{
-        .gpu_target_info = RendererManager.createColorTargetInfo(),
-        .gpu_pass = null,
-        .clear_color = .{ .r = 0, .g = 0.5, .b = 1, .a = 1 },
-    }) catch |err| {
+    ecs_manager.setup(.{ .clear_color = Colors.Teal }) catch |err| {
         std.log.err("[Game][setup] Can't setup the EcsManager : {}", .{err});
         return err;
     };
@@ -138,6 +138,7 @@ pub fn shutdown() void {
     renderer_manager.deinit();
     ui_manager.deinit();
     font_manager.deinit();
+    pipeline_manager.deinit();
 
     tracy.cleanExit();
 }

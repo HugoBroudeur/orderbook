@@ -324,7 +324,7 @@ pub fn getBestAsk(self: *OrderBook) Price {
     // for (self.asks) |levels| {
     //     var it = levels.iterator();
     var it = self.asks.iterator();
-    std.log.debug("[DEBUG][Orderbook.getBestAsk] Found {} asks", .{self.asks.len()});
+    // std.log.debug("[DEBUG][Orderbook.getBestAsk] Found {} asks", .{self.asks.len()});
     while (it.next()) |entry| {
         if (entry.value_ptr.order_count == 0) continue;
         best_ask = if (best_ask != 0)
