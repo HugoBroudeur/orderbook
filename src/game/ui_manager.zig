@@ -32,9 +32,6 @@ io: *ig.ImGuiIO,
 ig_ctx: *ig.ImGuiContext = undefined,
 implot_ctx: *ig.struct_ImPlotContext = undefined,
 
-clay_memory: []u8 = undefined,
-clay_renderer_data: ClayManager.RendererData = undefined,
-
 pub const settings_file_path = "config/cimgui.ini";
 // pub const font_path = "assets/fonts/SNPro-Regular.ttf";
 pub const fonts: [2][]const u8 = .{
@@ -42,8 +39,6 @@ pub const fonts: [2][]const u8 = .{
     "assets/fonts/ferrum.otf",
 };
 pub const font_size: f32 = 18;
-
-var main_font = "assets/fonts/SNPro/SNPro-Regular.ttf";
 
 pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, ui_system: *UiSystem, font_manager: *FontManager) UiManager {
     // Setup Dear ImGui context
@@ -65,7 +60,6 @@ pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, ui_system: *Ui
 pub fn deinit(self: *UiManager) void {
     // _ = self;
     // self.ui_system.deinit();
-    self.allocator.free(self.clay_memory);
     ig.ImPlot_DestroyContext(self.implot_ctx);
     ig.igDestroyContext(self.ig_ctx);
 }
@@ -100,15 +94,6 @@ pub fn setup(self: *UiManager, ecs_manager: *EcsManager) !void {
     for (&fonts) |*f| {
         _ = ig.ImFontAtlas_AddFontFromFileTTF(io.Fonts, f.ptr, font_size, null, null);
     }
-
-    _ = FontManager.addFont(main_font, font_size);
-
-    // Setup Clay
-    const min_memory_size: u32 = clay.minMemorySize();
-    self.clay_memory = try self.allocator.alloc(u8, min_memory_size);
-    const arena: clay.Arena = clay.createArenaWithCapacityAndMemory(self.clay_memory);
-    _ = clay.initialize(arena, .{ .h = 1000, .w = 1000 }, .{});
-    clay.setMeasureTextFunction(void, {}, FontManager.measureText);
 }
 
 pub fn renderFrame(self: *UiManager, ecs_manager: *EcsManager) void {

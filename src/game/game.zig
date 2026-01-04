@@ -10,6 +10,7 @@ const EcsManager = @import("ecs_manager.zig");
 const MarketManager = @import("market_manager.zig");
 const FontManager = @import("font_manager.zig");
 const PipelineManager = @import("pipeline_manager.zig");
+const ClayManager = @import("clay_manager.zig");
 const UiSystem = @import("ecs/systems/ui_system.zig");
 
 const sdl = @import("sdl3");
@@ -35,6 +36,7 @@ var renderer_manager: RendererManager = undefined;
 var ui_manager: UiManager = undefined;
 var market_manager: MarketManager = undefined;
 var font_manager: FontManager = undefined;
+var clay_manager: ClayManager = undefined;
 var pipeline_manager: PipelineManager = undefined;
 var ui_system: UiSystem = undefined;
 
@@ -68,6 +70,7 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
     ui_manager = UiManager.init(allocator, &db_manager, &ui_system, &font_manager);
     market_manager = MarketManager.init(allocator, &db_manager);
     pipeline_manager = PipelineManager.init(allocator, &renderer_manager.device);
+    clay_manager = try ClayManager.init(allocator, &font_manager);
     ecs_manager = EcsManager.init(allocator, &db_manager, &renderer_manager, &ui_manager, &market_manager) catch |err| {
         std.log.err("[Game][init] Can't initiate EcsManager: {}", .{err});
         return err;
@@ -77,7 +80,12 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
 pub fn setup() !void {
     errdefer shutdown();
 
-    try renderer_manager.setup(&ecs_manager, &pipeline_manager, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
+    try renderer_manager.setup(
+        &ecs_manager,
+        &pipeline_manager,
+        &font_manager,
+        .{ .title = WINDOW_TITLE, .width = WINDOW_WIDTH, .height = WINDOW_HEIGHT },
+    );
     try font_manager.setup();
     ecs_manager.setup(.{ .clear_color = Colors.Teal }) catch |err| {
         std.log.err("[Game][setup] Can't setup the EcsManager : {}", .{err});
@@ -87,6 +95,7 @@ pub fn setup() !void {
         std.log.err("[Game][setup] Can't setup the UiManager : {}", .{err});
         return err;
     };
+    try clay_manager.setup();
     try market_manager.setup(&ecs_manager);
 }
 
@@ -139,6 +148,7 @@ pub fn shutdown() void {
     ui_manager.deinit();
     font_manager.deinit();
     pipeline_manager.deinit();
+    clay_manager.deinit();
 
     tracy.cleanExit();
 }

@@ -86,9 +86,9 @@ pub fn render(self: *EcsManager) void {
     self.ui_manager.renderFrame(self);
 
     //
-    // RENDER FRAME
+    // DRAW FRAME
     //
-    self.renderer_manager.renderFrame(draw_data);
+    self.renderer_manager.drawFrame(draw_data);
 
     //
     // ALWAYS END WITH END PASS

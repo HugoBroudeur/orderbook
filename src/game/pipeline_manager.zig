@@ -1,5 +1,6 @@
 const std = @import("std");
 const sdl = @import("sdl3");
+const ShaderInfo = @import("shader_info.zig");
 
 const PipelineManager = @This();
 
@@ -12,7 +13,11 @@ const CreateShaderParam = struct {
 allocator: std.mem.Allocator,
 device: *sdl.gpu.Device,
 
-const triangle_shader_spv = @embedFile("triangle.spv");
+pub const GraphicPipelineInfo = struct {
+    pipeline: sdl.gpu.GraphicsPipeline,
+    vertex_buffer_size: u32,
+    index_buffer_size: u32,
+};
 
 pub fn init(allocator: std.mem.Allocator, device: *sdl.gpu.Device) PipelineManager {
     return .{
@@ -53,7 +58,6 @@ fn createShader(self: *PipelineManager, data: CreateShaderParam) !sdl.gpu.Shader
     }
 
     const shader_file_path = try std.fmt.allocPrint(self.allocator, "src/shaders/{s}.spv", .{std.fs.path.stem(shader_name)});
-    std.log.debug("[PipelineManager.createShader] Shader File Path: {s}", .{shader_file_path});
     const file = try std.fs.cwd().openFile(shader_file_path, .{});
     defer file.close();
 
@@ -75,23 +79,7 @@ fn createShader(self: *PipelineManager, data: CreateShaderParam) !sdl.gpu.Shader
     return try self.device.createShader(shader_create_info);
 }
 
-// fn createPipeline(self: *RendererManager, primitive_type: sdl.gpu.PrimitiveType) !void {
-//     std.log.info("[RendererManager.createPipeline] Vert Shader: {s} | Frag Shader: {s} | Primitive: {}", .{ vert_shader_name, frag_shader_name, primitive_type });
-//     const vertex_shader = try self.createShader(vert_shader_bin, .vertex);
-//     const frag_shader = try self.createShader(vert_shader_bin, .fragment);
-//     // const frag_shader = try self.createShader(frag_shader_bin, .fragment);
-//
-//     const pipeline_create_info: sdl.gpu.GraphicsPipelineCreateInfo = .{
-//         .vertex_shader = vertex_shader,
-//         .fragment_shader = frag_shader,
-//         .primitive_type = primitive_type,
-//     };
-//
-//     const pipeline = try self.device.createGraphicsPipeline(pipeline_create_info);
-//     try self.pipelines.append(self.allocator, pipeline);
-// }
-
-pub fn loadDemo(self: *PipelineManager, format: sdl.gpu.TextureFormat) !sdl.gpu.GraphicsPipeline {
+pub fn loadDemo(self: *PipelineManager, format: sdl.gpu.TextureFormat) !GraphicPipelineInfo {
     std.log.info("[PipelineManager.loadDemo] Create Demo Pipeline", .{});
     const vertex_shader = try self.createShader(.{
         .shader_name = "triangle.vert",
@@ -115,45 +103,47 @@ pub fn loadDemo(self: *PipelineManager, format: sdl.gpu.TextureFormat) !sdl.gpu.
         }} },
     };
 
-    return try self.device.createGraphicsPipeline(pipeline_create_info);
+    return .{
+        .pipeline = try self.device.createGraphicsPipeline(pipeline_create_info),
+        .vertex_buffer_size = 0,
+        .index_buffer_size = 0,
+    };
 }
 
-// static SDL_GPUGraphicsPipeline* load_ui(
-//     const SDL_GPUTextureFormat format)
-// {
-//     SDL_GPUGraphicsPipelineCreateInfo info =
-//     {
-//         .vertex_shader = load("fullscreen.vert", 0, 0),
-//         .fragment_shader = load("ui.frag", 2, 1),
-//         .target_info =
-//         {
-//             .num_color_targets = 1,
-//             .color_target_descriptions = (SDL_GPUColorTargetDescription[])
-//             {{
-//                 .format = format,
-//                 .blend_state =
-//                 {
-//                     .enable_blend = true,
-//                     .src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA,
-//                     .dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-//                     .src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA,
-//                     .dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-//                     .color_blend_op = SDL_GPU_BLENDOP_ADD,
-//                     .alpha_blend_op = SDL_GPU_BLENDOP_ADD,
-//                 },
-//             }},
-//         },
-//     };
-//     SDL_GPUGraphicsPipeline* pipeline = NULL;
-//     if (info.vertex_shader && info.fragment_shader)
-//     {
-//         pipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
-//     }
-//     if (!pipeline)
-//     {
-//         SDL_Log("Failed to create ui pipeline: %s", SDL_GetError());
-//     }
-//     SDL_ReleaseGPUShader(device, info.vertex_shader);
-//     SDL_ReleaseGPUShader(device, info.fragment_shader);
-//     return pipeline;
-// }
+pub fn loadUi(self: *PipelineManager, format: sdl.gpu.TextureFormat) !GraphicPipelineInfo {
+    std.log.info("[PipelineManager.loadUi] Create Ui Pipeline", .{});
+    const vertex_shader = try self.createShader(.{
+        .shader_name = ShaderInfo.TextureQuadShaderInfo.vertex_shader_name,
+        .uniforms = 0,
+        .samplers = 0,
+    });
+    defer self.device.releaseShader(vertex_shader);
+    const fragment_shader = try self.createShader(.{
+        .shader_name = ShaderInfo.TextureQuadShaderInfo.frament_shader_name,
+        .uniforms = 0,
+        .samplers = 1,
+    });
+    defer self.device.releaseShader(fragment_shader);
+
+    const pipeline_create_info: sdl.gpu.GraphicsPipelineCreateInfo = .{
+        .vertex_shader = vertex_shader,
+        .fragment_shader = fragment_shader,
+        .primitive_type = .triangle_list,
+        .target_info = .{
+            .color_target_descriptions = &.{.{
+                .format = format,
+                // .blend_state = .
+            }},
+        },
+        .vertex_input_state = .{
+            .vertex_buffer_descriptions = ShaderInfo.TextureQuadShaderInfo.vertex_buffer_descriptions,
+            .vertex_attributes = ShaderInfo.TextureQuadShaderInfo.vertex_attributes,
+        },
+    };
+
+    return .{
+        .pipeline = try self.device.createGraphicsPipeline(pipeline_create_info),
+        .vertex_buffer_size = @sizeOf(ShaderInfo.PositionTextureVertex) * 4,
+        .index_buffer_size = @sizeOf(u16) * 3 * 2, // 2 triangles of 3 vertices each
+    };
+}
