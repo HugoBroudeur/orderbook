@@ -19,7 +19,8 @@ pub const Graphics = @import("graphics.zig");
 //  ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝
 
 pub const EnvironmentInfo = struct {
-    world_time: f64,
+    world_time: u64 = 0,
+    dt: u64 = 0,
     window_width: i32 = 0,
     window_height: i32 = 0,
 };

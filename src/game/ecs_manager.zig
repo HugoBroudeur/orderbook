@@ -47,6 +47,7 @@ pub fn deinit(self: *EcsManager) void {
 
 pub fn setup(self: *EcsManager, draw_data: Ecs.components.Graphics.DrawData) !void {
     try Prefab.setup_game(self.allocator, &self.entities, &self.cmd_buf);
+    self.create_single_component_entity(Ecs.components.EnvironmentInfo, .{});
     self.create_single_component_entity(Ecs.components.Graphics.DrawData, draw_data);
     self.create_single_component_entity(Ecs.components.MarketData, .{});
 
@@ -72,6 +73,9 @@ pub fn render(self: *EcsManager) void {
     // ALWAYS START WITH A BEGIN PASS
     //
     const draw_data = self.get_singleton(Ecs.components.Graphics.DrawData);
+    const env = self.get_singleton(Ecs.components.EnvironmentInfo);
+    draw_data.time = env.world_time;
+    draw_data.dt = env.dt;
     self.renderer_manager.startFrame();
 
     //

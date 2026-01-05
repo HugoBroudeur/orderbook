@@ -1,6 +1,6 @@
 const std = @import("std");
 const sdl = @import("sdl3");
-const ShaderInfo = @import("shader_info.zig");
+const zm = @import("zmath");
 
 const PipelineManager = @This();
 
@@ -17,6 +17,16 @@ pub const GraphicPipelineInfo = struct {
     pipeline: sdl.gpu.GraphicsPipeline,
     vertex_buffer_size: u32,
     index_buffer_size: u32,
+};
+
+const UV = packed struct {
+    u: f32,
+    v: f32,
+};
+
+pub const PositionTextureVertex = packed struct {
+    pos: zm.Vec,
+    uv: UV,
 };
 
 pub fn init(allocator: std.mem.Allocator, device: *sdl.gpu.Device) PipelineManager {
@@ -112,15 +122,16 @@ pub fn loadDemo(self: *PipelineManager, format: sdl.gpu.TextureFormat) !GraphicP
 
 pub fn loadUi(self: *PipelineManager, format: sdl.gpu.TextureFormat) !GraphicPipelineInfo {
     std.log.info("[PipelineManager.loadUi] Create Ui Pipeline", .{});
+
     const vertex_shader = try self.createShader(.{
-        .shader_name = ShaderInfo.TextureQuadShaderInfo.vertex_shader_name,
+        .shader_name = "texture_quad.vert",
         .uniforms = 0,
         .samplers = 0,
     });
     defer self.device.releaseShader(vertex_shader);
     const fragment_shader = try self.createShader(.{
-        .shader_name = ShaderInfo.TextureQuadShaderInfo.frament_shader_name,
-        .uniforms = 0,
+        .shader_name = "texture_quad.frag",
+        .uniforms = 1,
         .samplers = 1,
     });
     defer self.device.releaseShader(fragment_shader);
@@ -136,14 +147,33 @@ pub fn loadUi(self: *PipelineManager, format: sdl.gpu.TextureFormat) !GraphicPip
             }},
         },
         .vertex_input_state = .{
-            .vertex_buffer_descriptions = ShaderInfo.TextureQuadShaderInfo.vertex_buffer_descriptions,
-            .vertex_attributes = ShaderInfo.TextureQuadShaderInfo.vertex_attributes,
+            .vertex_buffer_descriptions = &[_]sdl.gpu.VertexBufferDescription{
+                .{
+                    .slot = 0,
+                    .pitch = @sizeOf(PositionTextureVertex),
+                    .input_rate = .vertex,
+                },
+            },
+            .vertex_attributes = &[_]sdl.gpu.VertexAttribute{
+                .{
+                    .buffer_slot = 0,
+                    .format = .f32x4,
+                    .location = 0,
+                    .offset = 0,
+                },
+                .{
+                    .buffer_slot = 0,
+                    .format = .f32x2,
+                    .location = 1,
+                    .offset = @sizeOf(zm.Vec),
+                },
+            },
         },
     };
 
     return .{
         .pipeline = try self.device.createGraphicsPipeline(pipeline_create_info),
-        .vertex_buffer_size = @sizeOf(ShaderInfo.PositionTextureVertex) * 4,
+        .vertex_buffer_size = @sizeOf(PositionTextureVertex) * 4,
         .index_buffer_size = @sizeOf(u16) * 3 * 2, // 2 triangles of 3 vertices each
     };
 }

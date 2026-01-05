@@ -2,6 +2,7 @@ const std = @import("std");
 const sdl = @import("sdl3");
 const clay = @import("zclay");
 const FontManager = @import("font_manager.zig");
+const DrawApi = @import("draw_api.zig");
 
 const Color = @import("colors.zig");
 
@@ -11,14 +12,16 @@ allocator: std.mem.Allocator,
 buffer: []u8 = undefined,
 
 font_manager: *FontManager,
+draw_api: *DrawApi,
 font: FontManager.Font = undefined,
 
-pub fn init(allocator: std.mem.Allocator, font_manager: *FontManager) !ClayManager {
+pub fn init(allocator: std.mem.Allocator, font_manager: *FontManager, draw_api: *DrawApi) !ClayManager {
     const buffer_size: u32 = clay.minMemorySize();
     return .{
         .allocator = allocator,
         .buffer = try allocator.alloc(u8, buffer_size),
         .font_manager = font_manager,
+        .draw_api = draw_api,
     };
 }
 
@@ -341,6 +344,7 @@ var current_clipping_rectangle: sdl.rect.IRect = undefined;
 // }
 
 pub fn renderCommands(
+    self: *ClayManager,
     // renderer_data: *RendererData,
     cmds: []clay.RenderCommand,
 ) void {
@@ -358,6 +362,8 @@ pub fn renderCommands(
                 const config = &cmd.render_data.rectangle;
                 const color = Color.fromArray(config.background_color);
                 _ = color;
+
+                self.draw_api.drawRect(.{ .x = rect.x, .y = rect.y, .w = rect.w, .h = rect.h });
 
                 // TO DO Draw rectangle
 

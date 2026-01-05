@@ -11,6 +11,7 @@ const MarketManager = @import("market_manager.zig");
 const FontManager = @import("font_manager.zig");
 const PipelineManager = @import("pipeline_manager.zig");
 const ClayManager = @import("clay_manager.zig");
+const DrawApi = @import("draw_api.zig");
 const UiSystem = @import("ecs/systems/ui_system.zig");
 
 const sdl = @import("sdl3");
@@ -38,6 +39,7 @@ var market_manager: MarketManager = undefined;
 var font_manager: FontManager = undefined;
 var clay_manager: ClayManager = undefined;
 var pipeline_manager: PipelineManager = undefined;
+var draw_api: DrawApi = undefined;
 var ui_system: UiSystem = undefined;
 
 const FRAMES_PER_SECOND = 60.0;
@@ -69,8 +71,8 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
     font_manager = FontManager.init(allocator);
     ui_manager = UiManager.init(allocator, &db_manager, &ui_system, &font_manager);
     market_manager = MarketManager.init(allocator, &db_manager);
-    pipeline_manager = PipelineManager.init(allocator, &renderer_manager.device);
-    clay_manager = try ClayManager.init(allocator, &font_manager);
+    draw_api = DrawApi.init(&renderer_manager.gpu);
+    clay_manager = try ClayManager.init(allocator, &font_manager, &draw_api);
     ecs_manager = EcsManager.init(allocator, &db_manager, &renderer_manager, &ui_manager, &market_manager) catch |err| {
         std.log.err("[Game][init] Can't initiate EcsManager: {}", .{err});
         return err;
@@ -81,9 +83,8 @@ pub fn setup() !void {
     errdefer shutdown();
 
     try renderer_manager.setup(
-        &ecs_manager,
-        &pipeline_manager,
         &font_manager,
+        &clay_manager,
         .{ .title = WINDOW_TITLE, .width = WINDOW_WIDTH, .height = WINDOW_HEIGHT },
     );
     try font_manager.setup();
@@ -118,7 +119,7 @@ pub fn run() void {
                 },
                 .window_close_requested => {
                     if (event.getWindow()) |window| {
-                        if (window.getId() catch 0 == renderer_manager.window.getId() catch 0) {
+                        if (window.getId() catch 0 == renderer_manager.gpu.window.getId() catch 0) {
                             done = true;
                         }
                     }
@@ -147,8 +148,8 @@ pub fn shutdown() void {
     renderer_manager.deinit();
     ui_manager.deinit();
     font_manager.deinit();
-    pipeline_manager.deinit();
     clay_manager.deinit();
+    draw_api.deinit();
 
     tracy.cleanExit();
 }
