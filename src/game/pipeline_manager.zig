@@ -15,8 +15,8 @@ device: *sdl.gpu.Device,
 
 pub const GraphicPipelineInfo = struct {
     pipeline: sdl.gpu.GraphicsPipeline,
-    vertex_buffer_size: u32,
-    index_buffer_size: u32,
+    vertex_size: u32,
+    index_size: u32,
 };
 
 const UV = packed struct {
@@ -27,6 +27,12 @@ const UV = packed struct {
 pub const PositionTextureVertex = packed struct {
     pos: zm.Vec,
     uv: UV,
+};
+
+pub const D2Vertex = packed struct {
+    pos: @Vector(2, f32),
+    uv: UV,
+    col: zm.F32x4,
 };
 
 pub fn init(allocator: std.mem.Allocator, device: *sdl.gpu.Device) PipelineManager {
@@ -93,7 +99,7 @@ pub fn loadDemo(self: *PipelineManager, format: sdl.gpu.TextureFormat) !GraphicP
     std.log.info("[PipelineManager.loadDemo] Create Demo Pipeline", .{});
     const vertex_shader = try self.createShader(.{
         .shader_name = "triangle.vert",
-        .uniforms = 0,
+        .uniforms = 1,
         .samplers = 0,
     });
     defer self.device.releaseShader(vertex_shader);
@@ -115,8 +121,8 @@ pub fn loadDemo(self: *PipelineManager, format: sdl.gpu.TextureFormat) !GraphicP
 
     return .{
         .pipeline = try self.device.createGraphicsPipeline(pipeline_create_info),
-        .vertex_buffer_size = 0,
-        .index_buffer_size = 0,
+        .vertex_size = 0,
+        .index_size = 0,
     };
 }
 
@@ -124,8 +130,71 @@ pub fn loadUi(self: *PipelineManager, format: sdl.gpu.TextureFormat) !GraphicPip
     std.log.info("[PipelineManager.loadUi] Create Ui Pipeline", .{});
 
     const vertex_shader = try self.createShader(.{
-        .shader_name = "texture_quad.vert",
+        .shader_name = "2d_ui.vert",
+        .uniforms = 1,
+        .samplers = 0,
+    });
+    defer self.device.releaseShader(vertex_shader);
+    const fragment_shader = try self.createShader(.{
+        .shader_name = "2d_ui.frag",
         .uniforms = 0,
+        .samplers = 1,
+    });
+    defer self.device.releaseShader(fragment_shader);
+
+    const pipeline_create_info: sdl.gpu.GraphicsPipelineCreateInfo = .{
+        .vertex_shader = vertex_shader,
+        .fragment_shader = fragment_shader,
+        .primitive_type = .triangle_list,
+        .target_info = .{
+            .color_target_descriptions = &.{.{
+                .format = format,
+            }},
+        },
+        .vertex_input_state = .{
+            .vertex_buffer_descriptions = &[_]sdl.gpu.VertexBufferDescription{
+                .{
+                    .slot = 0,
+                    .pitch = @sizeOf(D2Vertex),
+                    .input_rate = .vertex,
+                },
+            },
+            .vertex_attributes = &[_]sdl.gpu.VertexAttribute{
+                .{
+                    .buffer_slot = 0,
+                    .format = .f32x2,
+                    .location = 0,
+                    .offset = 0,
+                },
+                .{
+                    .buffer_slot = 0,
+                    .format = .f32x2,
+                    .location = 1,
+                    .offset = @sizeOf(f32) * 2,
+                },
+                .{
+                    .buffer_slot = 0,
+                    .format = .f32x4,
+                    .location = 2,
+                    .offset = @sizeOf(f32) * 4,
+                },
+            },
+        },
+    };
+
+    return .{
+        .pipeline = try self.device.createGraphicsPipeline(pipeline_create_info),
+        .vertex_size = @sizeOf(D2Vertex),
+        .index_size = @sizeOf(u16) * 3 * 2, // 2 triangles of 3 vertices each
+    };
+}
+
+pub fn loadSolid(self: *PipelineManager, format: sdl.gpu.TextureFormat) !GraphicPipelineInfo {
+    std.log.info("[PipelineManager.loadSolid] Create Solid Material Pipeline", .{});
+
+    const vertex_shader = try self.createShader(.{
+        .shader_name = "texture_quad.vert",
+        .uniforms = 1,
         .samplers = 0,
     });
     defer self.device.releaseShader(vertex_shader);
@@ -173,7 +242,7 @@ pub fn loadUi(self: *PipelineManager, format: sdl.gpu.TextureFormat) !GraphicPip
 
     return .{
         .pipeline = try self.device.createGraphicsPipeline(pipeline_create_info),
-        .vertex_buffer_size = @sizeOf(PositionTextureVertex) * 4,
-        .index_buffer_size = @sizeOf(u16) * 3 * 2, // 2 triangles of 3 vertices each
+        .vertex_size = @sizeOf(PositionTextureVertex) * 4,
+        .index_size = @sizeOf(u16) * 3 * 2, // 2 triangles of 3 vertices each
     };
 }

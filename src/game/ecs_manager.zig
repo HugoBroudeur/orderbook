@@ -1,6 +1,7 @@
 const std = @import("std");
 const DbManager = @import("db_manager.zig");
-const RendererManager = @import("renderer_manager.zig");
+// const RendererManager = @import("renderer_manager.zig");
+const Renderer2D = @import("../renderer/renderer_2d.zig");
 const UiManager = @import("ui_manager.zig");
 const MarketManager = @import("market_manager.zig");
 const Ecs = @import("ecs/ecs.zig");
@@ -14,13 +15,14 @@ const EcsManager = @This();
 
 allocator: std.mem.Allocator,
 db_manager: *DbManager,
-renderer_manager: *RendererManager,
+// renderer_manager: *RendererManager,
+renderer_2d: *Renderer2D,
 ui_manager: *UiManager,
 market_manager: *MarketManager,
 entities: zcs.Entities,
 cmd_buf: zcs.CmdBuf,
 
-pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, renderer_manager: *RendererManager, ui_manager: *UiManager, market_manager: *MarketManager) !EcsManager {
+pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, renderer_2d: *Renderer2D, ui_manager: *UiManager, market_manager: *MarketManager) !EcsManager {
     var es = try zcs.Entities.init(.{ .gpa = allocator });
 
     const cb = try zcs.CmdBuf.init(.{
@@ -32,7 +34,8 @@ pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, renderer_manag
     return .{
         .allocator = allocator,
         .db_manager = db_manager,
-        .renderer_manager = renderer_manager,
+        // .renderer_manager = renderer_manager,
+        .renderer_2d = renderer_2d,
         .ui_manager = ui_manager,
         .market_manager = market_manager,
         .entities = es,
@@ -76,7 +79,7 @@ pub fn render(self: *EcsManager) void {
     const env = self.get_singleton(Ecs.components.EnvironmentInfo);
     draw_data.time = env.world_time;
     draw_data.dt = env.dt;
-    self.renderer_manager.startFrame();
+    self.renderer_2d.startFrame();
 
     //
     // ALWAYS START WITH A SOKOL PASS
@@ -92,7 +95,7 @@ pub fn render(self: *EcsManager) void {
     //
     // DRAW FRAME
     //
-    self.renderer_manager.drawFrame(draw_data);
+    self.renderer_2d.drawFrame(draw_data);
 
     //
     // ALWAYS END WITH END PASS

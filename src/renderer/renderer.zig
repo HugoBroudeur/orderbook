@@ -38,7 +38,6 @@ const Uniforms = struct {
     mvp: UniformMvp,
     time: UniformTime,
 };
-const RendererState = enum { idle, booted };
 
 allocator: std.mem.Allocator,
 
@@ -56,8 +55,6 @@ uniforms: Uniforms = undefined,
 
 is_minimised: bool = false,
 
-state: RendererState = .idle,
-
 pub fn init(allocator: std.mem.Allocator) !RendererManager {
     const init_flags: sdl.InitFlags = .{ .video = true, .gamepad = true, .audio = true };
     sdl.init(init_flags) catch |err| {
@@ -74,14 +71,12 @@ pub fn init(allocator: std.mem.Allocator) !RendererManager {
 }
 
 pub fn deinit(self: *RendererManager) void {
-    if (self.state == .booted) {
-        self.gpu.device.waitForIdle() catch unreachable;
-        impl_sdl3.ImGui_ImplSDL3_Shutdown();
-        impl_sdlgpu3.ImGui_ImplSDLGPU3_Shutdown();
+    self.gpu.device.waitForIdle() catch unreachable;
+    impl_sdl3.ImGui_ImplSDL3_Shutdown();
+    impl_sdlgpu3.ImGui_ImplSDLGPU3_Shutdown();
 
-        self.gpu.deinit();
-        sdl.quit(self.init_flags);
-    }
+    self.gpu.deinit();
+    sdl.quit(self.init_flags);
 }
 
 pub fn setup(
@@ -133,8 +128,6 @@ pub fn setup(
             .time = 0,
         },
     };
-
-    self.state = .booted;
 }
 
 fn initImgui(self: *RendererManager) void {

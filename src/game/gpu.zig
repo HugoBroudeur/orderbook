@@ -10,26 +10,32 @@ const Colors = @import("colors.zig");
 
 const GPU = @This();
 
-pub const DrawPassType = enum { demo, ui, shadow, ssao, sky, solid, raycast, transparent };
+pub const MB = 1024 * 1024;
+pub const BUFFER_SIZE = 2 * MB;
+pub const VERTEX_BUFFER_SIZE = 64 * 1024; //64k vertices
+pub const INDEX_BUFFER_SIZE = 64 * 1024; //64k indices
+
+pub const DrawPassType = enum { demo, ui, solid };
 pub const TransferBufferType = enum { atlas_buffer_data, atlas_texture_data };
 pub const TextureType = enum { demo, atlas, swapchain };
 pub const SamplerType = enum { nearest, linear };
-pub const UniformBufferType = enum { time };
-pub const BufferType = enum { index_quad, vertex_quad, uniform_time };
+pub const VertexBufferType = enum { ui, solid };
+pub const IndexBufferType = enum { ui, solid };
 
 device: sdl.gpu.Device = undefined,
 window: sdl.video.Window = undefined,
 
-pipelines: std.EnumArray(DrawPassType, ?PipelineManager.GraphicPipelineInfo),
-transfer_buffers: std.EnumArray(TransferBufferType, ?sdl.gpu.TransferBuffer),
-buffers: std.EnumArray(BufferType, ?sdl.gpu.Buffer),
-// vertex_buffers: std.EnumArray(DrawPassType, ?sdl.gpu.Buffer),
-// index_buffers: std.EnumArray(DrawPassType, ?sdl.gpu.Buffer),
-textures: std.EnumArray(TextureType, ?sdl.gpu.Texture),
-samplers: std.EnumArray(SamplerType, ?sdl.gpu.Sampler),
+pipelines: std.EnumArray(DrawPassType, PipelineManager.GraphicPipelineInfo),
+transfer_buffers: std.EnumArray(TransferBufferType, sdl.gpu.TransferBuffer),
+// vertex_buffers: std.EnumArray(
+//     VertexBufferType,
+// ),
+// index_buffers: std.EnumArray(IndexBufferType, sdl.gpu.Buffer),
+textures: std.EnumArray(TextureType, sdl.gpu.Texture),
+samplers: std.EnumArray(SamplerType, sdl.gpu.Sampler),
 
 // TODO: Move to AssetManager
-images: std.EnumArray(TextureType, ?sdl.surface.Surface),
+images: std.EnumArray(TextureType, sdl.surface.Surface),
 
 command_buffer: sdl.gpu.CommandBuffer = undefined,
 text_engine: sdl.ttf.GpuTextEngine = undefined,
@@ -61,22 +67,22 @@ pub fn init(allocator: std.mem.Allocator) !GPU {
         .window = window,
         .text_engine = text_engine,
         .pipeline_manager = PipelineManager.init(allocator, &device),
-        .pipelines = .initFill(null),
-        .transfer_buffers = .initFill(null),
-        .buffers = .initFill(null),
-        .textures = .initFill(null),
-        .samplers = .initFill(null),
-        .images = .initFill(null),
+        .pipelines = .initFill(undefined),
+        .transfer_buffers = .initFill(undefined),
+        // .buffers = .initFill(undefined),
+        .textures = .initFill(undefined),
+        .samplers = .initFill(undefined),
+        .images = .initFill(undefined),
     };
 
     try gpu.createPipelines();
-    try gpu.createBuffers();
+    // try gpu.createBuffers();
     try gpu.createImages();
-    try gpu.createTextures();
+    // try gpu.createTextures();
     try gpu.createSamplers();
 
     try gpu.createTransferBuffers();
-    try gpu.uploadTextureToGPU();
+    // try gpu.uploadTextureToGPU();
 
     return gpu;
 }
@@ -85,42 +91,58 @@ pub fn deinit(self: *GPU) void {
     self.pipeline_manager.deinit();
     self.device.waitForIdle() catch unreachable;
 
-    for (self.transfer_buffers.values) |maybe_tbo| {
-        if (maybe_tbo) |tbo| {
-            self.device.releaseTransferBuffer(tbo);
-        }
+    for (self.transfer_buffers.values) |tbo| {
+        self.device.releaseTransferBuffer(tbo);
     }
     for (self.pipelines.values) |pipeline| {
-        if (pipeline) |p| {
-            self.device.releaseGraphicsPipeline(p.pipeline);
-        }
+        self.device.releaseGraphicsPipeline(pipeline.pipeline);
     }
-    for (self.buffers.values) |maybe_buffer| {
-        if (maybe_buffer) |buffer| {
-            self.device.releaseBuffer(buffer);
-        }
-    }
+    // for (self.buffers.values) |buffer| {
+    //     self.device.releaseBuffer(buffer);
+    // }
     // TODO: should be destroyed but it creates a memory leak
     // for (self.textures.values) |maybe_texture| {
     //     if (maybe_texture) |texture| {
     //         self.device.releaseTexture(texture);
     //     }
     // }
-    for (self.samplers.values) |maybe_sampler| {
-        if (maybe_sampler) |sampler| {
-            self.device.releaseSampler(sampler);
-        }
+    for (self.samplers.values) |sampler| {
+        self.device.releaseSampler(sampler);
     }
-    for (self.images.values) |maybe_image| {
-        if (maybe_image) |image| {
-            image.deinit();
-        }
+    for (self.images.values) |image| {
+        image.deinit();
     }
 
     self.text_engine.deinit();
 
     self.device.releaseWindow(self.window);
     self.device.deinit();
+}
+
+pub fn setWindowSize(self: *GPU, width: i32, height: i32) !void {
+    const main_scale = try sdl.video.Display.getContentScale(try sdl.video.Display.getPrimaryDisplay());
+
+    try self.window.setSize(@intFromFloat(@as(f32, @floatFromInt(width)) * main_scale), @intFromFloat(@as(f32, @floatFromInt(height)) * main_scale));
+}
+
+pub fn setWindowTitle(self: *GPU, title: [:0]const u8) !void {
+    try self.window.setTitle(title);
+}
+
+pub fn setWindowIcon(self: *GPU, icon_path: [:0]const u8) !void {
+    const icon_stream = try sdl.io_stream.Stream.initFromFile(icon_path, .read_text);
+    const window_icon = try sdl.image.loadIcoIo(icon_stream);
+    defer window_icon.deinit();
+    try self.window.setIcon(window_icon);
+}
+
+pub fn mapTransferBuffer(
+    self: *GPU,
+    transfer_buffer: sdl.gpu.TransferBuffer,
+    cycle: bool,
+) ![*]u8 {
+    self.has_data_mapped = true;
+    return self.device.mapTransferBuffer(transfer_buffer, cycle);
 }
 
 fn createPipelines(self: *GPU) !void {
@@ -134,46 +156,58 @@ fn createPipelines(self: *GPU) !void {
         const pipeline = try self.pipeline_manager.loadUi(format);
         self.pipelines.set(.ui, pipeline);
     }
+    {
+        const pipeline = try self.pipeline_manager.loadSolid(format);
+        self.pipelines.set(.solid, pipeline);
+    }
 }
 
 fn createBuffers(self: *GPU) !void {
     std.log.info("[GPU.createBuffers]", .{});
-    if (self.pipelines.get(.ui)) |pipeline| {
-        {
-            const buffer = try self.device.createBuffer(.{ .usage = .{ .vertex = true }, .size = pipeline.vertex_buffer_size });
-            self.buffers.set(.vertex_quad, buffer);
-        }
-
-        {
-            const buffer = try self.device.createBuffer(.{ .usage = .{ .index = true }, .size = pipeline.vertex_buffer_size });
-            self.buffers.set(.index_quad, buffer);
-        }
-    }
-
-    {
-        const buffer = try self.device.createBuffer(.{ .usage = .{ .graphics_storage_read = true }, .size = @sizeOf(f32) });
-        self.buffers.set(.uniform_time, buffer);
-    }
+    _ = self;
+    // {
+    //     const buffer = try self.device.createBuffer(.{ .usage = .{ .vertex = true }, .size = BUFFER_SIZE });
+    //     self.buffers.set(.solid_vertex, buffer);
+    // }
+    // {
+    //     const buffer = try self.device.createBuffer(.{ .usage = .{ .index = true }, .size = BUFFER_SIZE });
+    //     self.buffers.set(.solid_index, buffer);
+    // }
+    // {
+    //     const buffer = try self.device.createBuffer(.{ .usage = .{ .vertex = true }, .size = BUFFER_SIZE });
+    //     self.buffers.set(.ui_vertex, buffer);
+    // }
+    // {
+    //     const buffer = try self.device.createBuffer(.{ .usage = .{ .index = true }, .size = BUFFER_SIZE });
+    //     self.buffers.set(.ui_index, buffer);
+    // }
+    //
+    // {
+    //     const buffer = try self.device.createBuffer(.{ .usage = .{ .graphics_storage_read = true }, .size = @sizeOf(f32) * 2 * 2 });
+    //     self.buffers.set(.ui_uniform, buffer);
+    // }
+    // {
+    //     const buffer = try self.device.createBuffer(.{ .usage = .{ .graphics_storage_read = true }, .size = @sizeOf(zm.Mat) * 2 });
+    //     self.buffers.set(.solid_uniform, buffer);
+    // }
 }
 
 fn createTransferBuffers(self: *GPU) !void {
     std.log.info("[GPU.createTransferBuffers]", .{});
-    if (self.pipelines.get(.ui)) |pipeline| {
-        const data_transfer_buffer = try self.device.createTransferBuffer(.{
-            .usage = .upload,
-            .size = pipeline.index_buffer_size + pipeline.vertex_buffer_size,
-        });
-        self.transfer_buffers.set(.atlas_buffer_data, data_transfer_buffer);
-    }
+    const pipeline = self.pipelines.get(.ui);
+    const data_transfer_buffer = try self.device.createTransferBuffer(.{
+        .usage = .upload,
+        .size = pipeline.index_size + pipeline.vertex_size * 2,
+    });
+    self.transfer_buffers.set(.atlas_buffer_data, data_transfer_buffer);
 
-    if (self.images.get(.atlas)) |img| {
-        // const img_size_bytes: usize = img.getWidth() * img.getHeight() * 4; //4 channels: r,g,b,a
-        const texture_transfer_buffer = try self.device.createTransferBuffer(.{
-            .usage = .upload,
-            .size = @intCast(img.getPixels().?.len),
-        });
-        self.transfer_buffers.set(.atlas_texture_data, texture_transfer_buffer);
-    }
+    const img = self.images.get(.atlas);
+    // const img_size_bytes: usize = img.getWidth() * img.getHeight() * 4; //4 channels: r,g,b,a
+    const texture_transfer_buffer = try self.device.createTransferBuffer(.{
+        .usage = .upload,
+        .size = @intCast(img.getPixels().?.len),
+    });
+    self.transfer_buffers.set(.atlas_texture_data, texture_transfer_buffer);
 }
 
 // TODO: Load assets Should be in an asset manager
@@ -196,19 +230,18 @@ fn createTextures(self: *GPU) !void {
     std.log.info("[GPU.createTextures]", .{});
     // UI Background
 
-    if (self.images.get(.atlas)) |img| {
-        const atlas_texture = try self.device.createTexture(.{
-            .format = .r8g8b8a8_unorm,
-            // .format = .b8g8r8a8_unorm,
-            .texture_type = .two_dimensional_array,
-            .width = @intCast(img.getWidth()),
-            .height = @intCast(img.getHeight()),
-            .layer_count_or_depth = 1,
-            .num_levels = 1,
-            .usage = .{ .sampler = true },
-        });
-        self.textures.set(.atlas, atlas_texture);
-    }
+    const img = self.images.get(.atlas);
+    const atlas_texture = try self.device.createTexture(.{
+        .format = .r8g8b8a8_unorm,
+        // .format = .b8g8r8a8_unorm,
+        .texture_type = .two_dimensional_array,
+        .width = @intCast(img.getWidth()),
+        .height = @intCast(img.getHeight()),
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+        .usage = .{ .sampler = true },
+    });
+    self.textures.set(.atlas, atlas_texture);
 }
 
 fn createSamplers(self: *GPU) !void {
@@ -244,18 +277,28 @@ fn createSamplers(self: *GPU) !void {
 fn uploadTextureToGPU(self: *GPU) !void {
     std.log.info("[GPU.uploadTextureToGPU]", .{});
 
-    // Set up Buffer Data
-    if (self.transfer_buffers.get(.atlas_buffer_data)) |tbo| {
+    {
+        // Set up Buffer Data
+
+        const tbo = self.transfer_buffers.get(.atlas_buffer_data);
         const gpu_tb_ptr = try self.device.mapTransferBuffer(tbo, false);
         defer self.device.unmapTransferBuffer(tbo);
 
-        const vertices = [4]PipelineManager.PositionTextureVertex{
-            .{ .pos = zm.f32x4(-1, 1, 0, 1), .uv = .{ .u = 0, .v = 0 } },
-            .{ .pos = zm.f32x4(1, 1, 0, 1), .uv = .{ .u = 1, .v = 0 } },
-            .{ .pos = zm.f32x4(1, -1, 0, 1), .uv = .{ .u = 1, .v = 1 } },
-            .{ .pos = zm.f32x4(-1, -1, 0, 1), .uv = .{ .u = 0, .v = 1 } },
+        const vertices = [_]PipelineManager.PositionTextureVertex{
+            .{ .pos = zm.f32x4(-1, 1, -0.3, 1), .uv = .{ .u = 0, .v = 0 } },
+            .{ .pos = zm.f32x4(1, 1, -0.3, 1), .uv = .{ .u = 1, .v = 0 } },
+            .{ .pos = zm.f32x4(1, -1, -0.3, 1), .uv = .{ .u = 1, .v = 1 } },
+            .{ .pos = zm.f32x4(-1, -1, -0.3, 1), .uv = .{ .u = 0, .v = 1 } },
+
+            .{ .pos = zm.f32x4(-1, 1, -1, 1), .uv = .{ .u = 0, .v = 0 } },
+            .{ .pos = zm.f32x4(1, 1, -1, 1), .uv = .{ .u = 1, .v = 0 } },
+            .{ .pos = zm.f32x4(1, -1, -1, 1), .uv = .{ .u = 1, .v = 1 } },
+            .{ .pos = zm.f32x4(-1, -1, -1, 1), .uv = .{ .u = 0, .v = 1 } },
         };
-        const indices = [6]u16{ 0, 1, 2, 0, 2, 3 };
+        const indices = [_]u16{
+            0, 1, 2, 0, 2, 3,
+            // 0, 1, 2, 0, 2, 3,
+        };
 
         const vertex_bytes = @sizeOf(@TypeOf(vertices));
         const index_bytes = @sizeOf(@TypeOf(indices));
@@ -292,14 +335,15 @@ fn uploadTextureToGPU(self: *GPU) !void {
     //     std.log.err("Transfer buffer .atlas_texture_data not found!", .{});
     // }
 
-    // Set up Texture Data
-    if (self.transfer_buffers.get(.atlas_texture_data)) |tbo| {
+    {
+        // Set up Texture Data
+
+        const tbo = self.transfer_buffers.get(.atlas_texture_data);
         const gpu_tb_ptr = try self.device.mapTransferBuffer(tbo, false);
         defer self.device.unmapTransferBuffer(tbo);
 
-        if (self.images.get(.atlas)) |img| {
-            @memcpy(gpu_tb_ptr[0..img.getPixels().?.len], img.getPixels().?);
-        }
+        const img = self.images.get(.atlas);
+        @memcpy(gpu_tb_ptr[0..img.getPixels().?.len], img.getPixels().?);
     }
 
     self.command_buffer = self.device.acquireCommandBuffer() catch {
@@ -316,55 +360,55 @@ fn uploadTextureToGPU(self: *GPU) !void {
         const copy_pass = self.command_buffer.beginCopyPass();
         defer copy_pass.end();
 
-        if (self.transfer_buffers.get(.atlas_buffer_data)) |tbo| {
-            if (self.pipelines.get(.ui)) |pipeline| {
-                if (self.buffers.get(.vertex_quad)) |vbo| {
-                    copy_pass.uploadToBuffer(.{ .transfer_buffer = tbo, .offset = 0 }, .{
-                        .buffer = vbo,
-                        .offset = 0,
-                        // TODO: Vertex Buffer should have more info
-                        .size = pipeline.vertex_buffer_size,
-                    }, false);
-                }
-                if (self.buffers.get(.index_quad)) |ibo| {
-                    copy_pass.uploadToBuffer(.{ .transfer_buffer = tbo, .offset = pipeline.vertex_buffer_size }, .{
-                        .buffer = ibo,
-                        .offset = 0,
-                        // TODO: Vertex Buffer should have more info
-                        .size = pipeline.index_buffer_size,
-                    }, false);
-                }
+        {
+            const tbo = self.transfer_buffers.get(.atlas_buffer_data);
+            const pipeline = self.pipelines.get(.solid);
+            {
+                const vbo = self.buffers.get(.solid_vertex);
+                copy_pass.uploadToBuffer(.{ .transfer_buffer = tbo, .offset = 0 }, .{
+                    .buffer = vbo,
+                    .offset = 0,
+                    // TODO: Vertex Buffer should have more info
+                    .size = pipeline.vertex_size * 2,
+                }, false);
+            }
+            {
+                const ibo = self.buffers.get(.solid_index);
+                copy_pass.uploadToBuffer(.{ .transfer_buffer = tbo, .offset = pipeline.vertex_size }, .{
+                    .buffer = ibo,
+                    .offset = 0,
+                    // TODO: Vertex Buffer should have more info
+                    .size = pipeline.index_size * 2,
+                }, false);
             }
         }
-
-        if (self.transfer_buffers.get(.atlas_texture_data)) |tbo| {
-            if (self.textures.get(.atlas)) |texture| {
-                if (self.images.get(.atlas)) |img| {
-                    copy_pass.uploadToTexture(.{ .transfer_buffer = tbo, .offset = 0 }, .{
-                        .texture = texture,
-                        .width = @intCast(img.getWidth()),
-                        .height = @intCast(img.getHeight()),
-                        .depth = 1,
-                    }, false);
-                }
-            }
+        {
+            const tbo = self.transfer_buffers.get(.atlas_texture_data);
+            const texture = self.textures.get(.atlas);
+            const img = self.images.get(.atlas);
+            copy_pass.uploadToTexture(.{ .transfer_buffer = tbo, .offset = 0 }, .{
+                .texture = texture,
+                .width = @intCast(img.getWidth()),
+                .height = @intCast(img.getHeight()),
+                .depth = 1,
+            }, false);
         }
     }
 
-    { // Debug
-        if (self.images.get(.atlas)) |img| {
-            const pixels = img.getPixels().?;
-            std.log.info("Image: {}x{}, {} bytes", .{ img.getWidth(), img.getHeight(), pixels.len });
-
-            // Check first few pixels (should NOT be all zeros)
-            std.log.info("First pixel (format {}): ({}, {}, {})", .{ img.getFormat().?, pixels[0], pixels[1], pixels[2] });
-            std.log.info("Pixel at 100: ({}, {}, {})", .{ pixels[300], pixels[301], pixels[302] });
-
-            // Calculate expected size
-            const expected_rgba_size = img.getWidth() * img.getHeight() * 4;
-            std.log.info("Expected buffer size: {}", .{expected_rgba_size});
-        }
-    }
+    // { // Debug
+    //     if (self.images.get(.atlas)) |img| {
+    //         const pixels = img.getPixels().?;
+    //         std.log.info("Image: {}x{}, {} bytes", .{ img.getWidth(), img.getHeight(), pixels.len });
+    //
+    //         // Check first few pixels (should NOT be all zeros)
+    //         std.log.info("First pixel (format {}): ({}, {}, {})", .{ img.getFormat().?, pixels[0], pixels[1], pixels[2] });
+    //         std.log.info("Pixel at 100: ({}, {}, {})", .{ pixels[300], pixels[301], pixels[302] });
+    //
+    //         // Calculate expected size
+    //         const expected_rgba_size = img.getWidth() * img.getHeight() * 4;
+    //         std.log.info("Expected buffer size: {}", .{expected_rgba_size});
+    //     }
+    // }
 }
 
 fn destroyTranferBuffers(self: *GPU) !void {

@@ -12,16 +12,17 @@ allocator: std.mem.Allocator,
 buffer: []u8 = undefined,
 
 font_manager: *FontManager,
-draw_api: *DrawApi,
+// draw_api: *DrawApi,
 font: FontManager.Font = undefined,
 
-pub fn init(allocator: std.mem.Allocator, font_manager: *FontManager, draw_api: *DrawApi) !ClayManager {
+// pub fn init(allocator: std.mem.Allocator, font_manager: *FontManager, draw_api: *DrawApi) !ClayManager {
+pub fn init(allocator: std.mem.Allocator, font_manager: *FontManager) !ClayManager {
     const buffer_size: u32 = clay.minMemorySize();
     return .{
         .allocator = allocator,
         .buffer = try allocator.alloc(u8, buffer_size),
         .font_manager = font_manager,
-        .draw_api = draw_api,
+        // .draw_api = draw_api,
     };
 }
 
@@ -348,6 +349,7 @@ pub fn renderCommands(
     // renderer_data: *RendererData,
     cmds: []clay.RenderCommand,
 ) void {
+    _ = self;
     for (cmds) |cmd| {
         const rect = sdl.rect.FRect{
             .x = cmd.bounding_box.x,
@@ -363,7 +365,7 @@ pub fn renderCommands(
                 const color = Color.fromArray(config.background_color);
                 _ = color;
 
-                self.draw_api.drawRect(.{ .x = rect.x, .y = rect.y, .w = rect.w, .h = rect.h });
+                // self.draw_api.drawRect(.{ .x = rect.x, .y = rect.y, .w = rect.w, .h = rect.h });
 
                 // TO DO Draw rectangle
 

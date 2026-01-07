@@ -5,6 +5,7 @@ const Config = @import("../config.zig");
 const Colors = @import("colors.zig");
 const DbManager = @import("db_manager.zig");
 const RendererManager = @import("renderer_manager.zig");
+const Renderer2D = @import("../renderer/renderer_2d.zig");
 const UiManager = @import("ui_manager.zig");
 const EcsManager = @import("ecs_manager.zig");
 const MarketManager = @import("market_manager.zig");
@@ -33,13 +34,14 @@ pub const GameError = error{
 const game_allocator: std.mem.Allocator = undefined;
 var ecs_manager: EcsManager = undefined;
 var db_manager: DbManager = undefined;
+var renderer_2d: Renderer2D = undefined;
 var renderer_manager: RendererManager = undefined;
 var ui_manager: UiManager = undefined;
 var market_manager: MarketManager = undefined;
 var font_manager: FontManager = undefined;
 var clay_manager: ClayManager = undefined;
 var pipeline_manager: PipelineManager = undefined;
-var draw_api: DrawApi = undefined;
+// var draw_api: DrawApi = undefined;
 var ui_system: UiSystem = undefined;
 
 const FRAMES_PER_SECOND = 60.0;
@@ -67,13 +69,19 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
         return err;
     };
 
+    renderer_2d = Renderer2D.init(allocator) catch |err| {
+        std.log.err("[Game][init] Can't initiate Renderer2D: {}", .{err});
+        return err;
+    };
+
     ui_system = UiSystem.init();
     font_manager = FontManager.init(allocator);
     ui_manager = UiManager.init(allocator, &db_manager, &ui_system, &font_manager);
     market_manager = MarketManager.init(allocator, &db_manager);
-    draw_api = DrawApi.init(&renderer_manager.gpu);
-    clay_manager = try ClayManager.init(allocator, &font_manager, &draw_api);
-    ecs_manager = EcsManager.init(allocator, &db_manager, &renderer_manager, &ui_manager, &market_manager) catch |err| {
+    // draw_api = DrawApi.init(&renderer_2d.gpu);
+    // clay_manager = try ClayManager.init(allocator, &font_manager, &draw_api);
+    clay_manager = try ClayManager.init(allocator, &font_manager);
+    ecs_manager = EcsManager.init(allocator, &db_manager, &renderer_2d, &ui_manager, &market_manager) catch |err| {
         std.log.err("[Game][init] Can't initiate EcsManager: {}", .{err});
         return err;
     };
@@ -82,7 +90,7 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
 pub fn setup() !void {
     errdefer shutdown();
 
-    try renderer_manager.setup(
+    try renderer_2d.setup(
         &font_manager,
         &clay_manager,
         .{ .title = WINDOW_TITLE, .width = WINDOW_WIDTH, .height = WINDOW_HEIGHT },
@@ -119,7 +127,7 @@ pub fn run() void {
                 },
                 .window_close_requested => {
                     if (event.getWindow()) |window| {
-                        if (window.getId() catch 0 == renderer_manager.gpu.window.getId() catch 0) {
+                        if (window.getId() catch 0 == renderer_2d.gpu.window.getId() catch 0) {
                             done = true;
                         }
                     }
@@ -145,11 +153,12 @@ pub fn shutdown() void {
     db_manager.deinit();
     market_manager.deinit();
     ecs_manager.deinit();
+    renderer_2d.deinit();
     renderer_manager.deinit();
     ui_manager.deinit();
     font_manager.deinit();
     clay_manager.deinit();
-    draw_api.deinit();
+    // draw_api.deinit();
 
     tracy.cleanExit();
 }
