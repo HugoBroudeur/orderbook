@@ -1,7 +1,8 @@
 const std = @import("std");
 const networking = @import("networking");
 const env = @import("config.zig");
-const game = @import("game/game.zig");
+// const game = @import("game/game.zig");
+const app = @import("app/app.zig");
 
 // const sokol = @import("sokol");
 // const slog = sokol.log;
@@ -59,12 +60,12 @@ pub fn main() !void {
 
     // try game.start(allocator);
 
-    try game.init(
+    try app.init(
         allocator,
         config,
     );
 
-    game.run();
+    app.run();
 
     // sapp.run(.{
     //     .init_cb = init,

@@ -1,3 +1,5 @@
+// This is a 2D Renderer for the SDL implementation
+
 const std = @import("std");
 const sdl = @import("sdl3");
 
@@ -14,6 +16,8 @@ const Ecs = @import("../game/ecs/ecs.zig");
 const Colors = @import("../game/colors.zig");
 
 const Api = @import("api.zig");
+const GraphicCtx = @import("graphic_ctx.zig");
+const Window = @import("../app/window.zig");
 const Buffer = @import("buffer.zig");
 const Asset = @import("asset.zig");
 const Texture = @import("texture.zig");
@@ -44,16 +48,13 @@ const Uniforms = struct {
 
 allocator: std.mem.Allocator,
 
-init_flags: sdl.InitFlags,
 gpu: GPU = undefined,
 api: Api = undefined,
-window_size: struct {
-    width: u32 = 0,
-    height: u32 = 0,
-} = .{},
 
 font_manager: *FontManager = undefined,
 clay_manager: *ClayManager = undefined,
+
+ctx: GraphicCtx = undefined,
 
 uniforms: Uniforms = undefined,
 
@@ -70,17 +71,8 @@ is_minimised: bool = false,
 pub const RenderCtx = struct {};
 
 pub fn init(allocator: std.mem.Allocator) !Renderer {
-    const init_flags: sdl.InitFlags = .{ .video = true, .gamepad = true, .audio = true };
-    sdl.init(init_flags) catch |err| {
-        std.log.err("Error: {?s}", .{sdl.errors.get()});
-        return err;
-    };
-
-    sdl.log.setAllPriorities(.debug);
-
     return .{
         .allocator = allocator,
-        .init_flags = init_flags,
         .pipelines = .initUndefined(),
         .textures = .initUndefined(),
     };
@@ -111,21 +103,24 @@ pub fn deinit(self: *Renderer) void {
     self.transfer_buffer_data.deinit();
     self.transfer_buffer_tex.deinit();
 
+    self.ctx.deinit();
+
     self.api.deinit();
     self.gpu.deinit();
-    sdl.quit(self.init_flags);
 }
 
 pub fn setup(
     self: *Renderer,
+    window: *Window,
     font_manager: *FontManager,
     clay_manager: *ClayManager,
-    window_option: struct { title: []const u8, width: i32, height: i32 },
 ) !void {
     self.font_manager = font_manager;
     self.clay_manager = clay_manager;
 
-    self.gpu = Api.createGPU() catch |err| {
+    self.ctx = Api.createGraphicCtx(window);
+
+    self.gpu = Api.createGPU(window) catch |err| {
         std.log.err("[RendererManager.setup] {}: {?s}", .{ err, sdl.errors.get() });
         return err;
     };
@@ -133,12 +128,9 @@ pub fn setup(
 
     // const t = try allocator.dupeZ(u8, title);
     // defer allocator.free(t);
-    try self.gpu.setWindowTitle(@ptrCast(window_option.title));
-    try self.gpu.setWindowSize(window_option.width, window_option.height);
-    try self.gpu.setWindowIcon("assets/favicon.ico");
 
-    self.initImgui();
-    try self.initUniform();
+    try self.initImgui();
+    self.initUniform();
 
     // Create all the resources
     const surface = try Asset.createSurface("assets/images/Background.jpg", .jpg);
@@ -169,21 +161,21 @@ pub fn setup(
     // Transfer some data to GPU
 }
 
-fn initImgui(self: *Renderer) void {
-    _ = impl_sdl3.ImGui_ImplSDL3_InitForSDLGPU(@ptrCast(self.gpu.window.value));
+fn initImgui(self: *Renderer) !void {
+    _ = impl_sdl3.ImGui_ImplSDL3_InitForSDLGPU(@ptrCast(self.ctx.window.ptr.value));
     var init_info: impl_sdlgpu3.ImGui_ImplSDLGPU3_InitInfo = undefined;
     init_info.Device = @ptrCast(self.gpu.device.value);
-    const texture_format = self.gpu.device.getSwapchainTextureFormat(self.gpu.window) catch unreachable;
-    init_info.ColorTargetFormat = @intFromEnum(texture_format);
+
+    const texture_format = try self.gpu.getSwapchainTextureFormat();
+    init_info.ColorTargetFormat = @intFromEnum(texture_format.ptr);
     init_info.MSAASamples = @intFromEnum(sdl.gpu.SampleCount.no_multisampling);
     _ = impl_sdlgpu3.ImGui_ImplSDLGPU3_Init(&init_info);
 }
 
-pub fn initUniform(self: *Renderer) !void {
+pub fn initUniform(self: *Renderer) void {
     // Setup the uniform buffers
-    var width: usize = undefined;
-    var heigth: usize = undefined;
-    width, heigth = try self.gpu.window.getSize();
+    const width: usize = self.ctx.window.getWidth();
+    const heigth: usize = self.ctx.window.getHeigth();
     const fov: f32 = 40;
     const near: f32 = 0.0001;
     const far: f32 = 1000;

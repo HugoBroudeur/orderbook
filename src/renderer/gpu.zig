@@ -2,46 +2,29 @@ const std = @import("std");
 const sdl = @import("sdl3");
 
 const Texture = @import("texture.zig");
+const Window = @import("../app/window.zig");
 
 const GPU = @This();
 
-device: sdl.gpu.Device = undefined,
-window: sdl.video.Window = undefined,
+device: sdl.gpu.Device,
+window: *Window,
 
 command_buffer: sdl.gpu.CommandBuffer = undefined,
-text_engine: sdl.ttf.GpuTextEngine = undefined,
+text_engine: sdl.ttf.GpuTextEngine,
 
-pub fn init() !GPU {
-    // Create Device
+pub fn init(window: *Window) !GPU {
     var device = try sdl.gpu.Device.init(.{ .spirv = true, .dxil = true, .metal_lib = true }, true, null);
 
-    // Create Window
-    const window_flags: sdl.video.Window.Flags = .{ .resizable = true, .hidden = false, .high_pixel_density = true };
+    try device.claimWindow(window.ptr);
+    try device.setSwapchainParameters(window.ptr, .sdr, .vsync);
 
-    const window = try sdl.video.Window.init("", 0, 0, window_flags);
-
-    // Claim Window for the Device
-    try device.claimWindow(window);
-
-    try device.setSwapchainParameters(window, .sdr, .vsync);
-    try window.setPosition(
-        .{ .centered = try window.getDisplayForWindow() },
-        .{ .centered = try window.getDisplayForWindow() },
-    );
-
-    // Create TTF Text Engine
     const text_engine = try sdl.ttf.GpuTextEngine.init(device);
 
-    const gpu = GPU{
+    return .{
         .device = device,
         .window = window,
         .text_engine = text_engine,
     };
-
-    // try gpu.createTransferBuffers();
-    // try gpu.uploadTextureToGPU();
-
-    return gpu;
 }
 
 pub fn deinit(self: *GPU) void {
@@ -49,25 +32,8 @@ pub fn deinit(self: *GPU) void {
 
     self.text_engine.deinit();
 
-    self.device.releaseWindow(self.window);
+    self.device.releaseWindow(self.window.ptr);
     self.device.deinit();
-}
-
-pub fn setWindowSize(self: *GPU, width: i32, height: i32) !void {
-    const main_scale = try sdl.video.Display.getContentScale(try sdl.video.Display.getPrimaryDisplay());
-
-    try self.window.setSize(@intFromFloat(@as(f32, @floatFromInt(width)) * main_scale), @intFromFloat(@as(f32, @floatFromInt(height)) * main_scale));
-}
-
-pub fn setWindowTitle(self: *GPU, title: [:0]const u8) !void {
-    try self.window.setTitle(title);
-}
-
-pub fn setWindowIcon(self: *GPU, icon_path: [:0]const u8) !void {
-    const icon_stream = try sdl.io_stream.Stream.initFromFile(icon_path, .read_text);
-    const window_icon = try sdl.image.loadIcoIo(icon_stream);
-    defer window_icon.deinit();
-    try self.window.setIcon(window_icon);
 }
 
 pub fn mapTransferBuffer(
@@ -80,11 +46,11 @@ pub fn mapTransferBuffer(
 }
 
 pub fn getSwapchainTextureFormat(self: *GPU) !Texture.TextureFormat {
-    return .{ .ptr = try self.device.getSwapchainTextureFormat(self.window) };
+    return .{ .ptr = try self.device.getSwapchainTextureFormat(self.window.ptr) };
 }
 
 pub fn acquireSwapchainTexture(self: *GPU) !?Texture {
-    const swapchain_image = try self.command_buffer.acquireSwapchainTexture(self.window);
+    const swapchain_image = try self.command_buffer.acquireSwapchainTexture(self.window.ptr);
     const _ptr = swapchain_image.@"0";
     const width = swapchain_image.@"1";
     const heigth = swapchain_image.@"2";
@@ -98,7 +64,7 @@ pub fn acquireSwapchainTexture(self: *GPU) !?Texture {
 
 fn createPipelines(self: *GPU) !void {
     // Setup all resources
-    const format = try self.device.getSwapchainTextureFormat(self.window);
+    const format = try self.device.getSwapchainTextureFormat(self.window.ptr);
     {
         const pipeline = try self.pipeline_manager.loadDemo(format);
         self.pipelines.set(.demo, pipeline);

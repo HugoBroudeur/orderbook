@@ -1,10 +1,13 @@
 // This is the implementation for SDL3
 
 const std = @import("std");
+const sdl = @import("sdl3");
+
+const Window = @import("../app/window.zig");
 const Buffer = @import("buffer.zig");
 const Texture = @import("texture.zig");
-const sdl = @import("sdl3");
 const GPU = @import("gpu.zig");
+const GraphicCtx = @import("graphic_ctx.zig");
 
 pub const Api = @This();
 
@@ -21,8 +24,12 @@ pub fn deinit(self: *Api) void {
     _ = self;
 }
 
-pub fn createGPU() !GPU {
-    return try GPU.init();
+pub fn createGPU(window: *Window) !GPU {
+    return try GPU.init(window);
+}
+
+pub fn createGraphicCtx(window: *Window) GraphicCtx {
+    return GraphicCtx.init(window);
 }
 
 pub fn createVertexBuffer(self: *Api, buffer_type: Buffer.VertexBufferType) !Buffer.VertexBuffer {
