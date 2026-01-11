@@ -43,6 +43,7 @@ pub const TcpServer = struct {
 
     pub fn deinit(self: *Self) void {
         // self.thread_pool.deinit();
+        self.client_sockets.deinit(self.allocator);
         self.socket.deinit();
     }
 

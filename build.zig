@@ -117,9 +117,12 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addImport("sdl3", dep_sdl3.module("sdl3"));
     exe.root_module.addImport("sqlite", dep_sqlite.module("sqlite"));
     exe.root_module.addImport("zcs", dep_zcs.module("zcs"));
-    exe.root_module.addImport("tracy", dep_tracy.module("tracy"));
     exe.root_module.addImport("zclay", dep_zclay.module("zclay"));
     exe.root_module.addImport("zmath", dep_zmath.module("root"));
+
+    exe.root_module.addImport("tracy", dep_tracy.module("tracy"));
+    // Tracy (should be disable for Release)
+    // exe.root_module.addImport("tracy_impl", dep_tracy.module("tracy_impl_enabled"));
 
     // Load Icon
     // exe.root_module.addWin32ResourceFile(.{ .file = b.path("src/res/res.rc") });

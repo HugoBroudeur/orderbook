@@ -5,13 +5,13 @@ struct VertexUniformData {
 
 struct VS_Input {
   float2 Position : POSITION;
-  float2 TexCoord : TEXCOORD1;
-  float4 Color : COLOR0;
+  float2 TexCoord : TEXCOORD0;
+  float4 Color : COLOR1;
 };
 
 struct PS_Input {
   float4 Position : SV_Position;
-  float4 Color : COLOR0;
+  float4 Color : COLOR1;
   float2 TexCoord : TEXCOORD0;
 };
 
@@ -26,14 +26,16 @@ PS_Input vertex(VS_Input input) {
   PS_Input output;
   output.TexCoord = input.TexCoord;
   output.Color = input.Color;
+  // output.Position.xy = input.Position;
   output.Position.xy = input.Position * vu.Scale + vu.Translate;
-  output.Position.zw = float2(0,  1);
+  output.Position.zw = float2(0, 1);
   return output;
 }
 
 // Actual frament shader, using array for layered textured (atlas)
 [shader("fragment")]
-float4 fragment(PS_Input input) : SV_Target0 {
-  // return input.Color * Texture.Sample(Sampler, input.TexCoord);
-  return input.Color;
+float4 fragment(PS_Input input) : SV_Target {
+  return input.Color * Texture.Sample(Sampler, input.TexCoord);
+  // return float4(1, 0, 0, 1); // Debug show red
+  // return input.Color;
 }

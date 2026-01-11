@@ -4,11 +4,16 @@ const std = @import("std");
 const sdl = @import("sdl3");
 const zm = @import("zmath");
 
+const Buffer = @import("buffer.zig");
 const Shader = @import("shader.zig");
 const Texture = @import("texture.zig");
+const Data = @import("data.zig");
 const GPU = @import("gpu.zig");
+const RenderPass = @import("pass.zig").RenderPass;
 
 const Pipeline = @This();
+
+const MAX_VERTEX_ATTRIBUTES = 20;
 
 const CreateShaderParam = struct {
     shader_name: []const u8,
@@ -19,28 +24,11 @@ const CreateShaderParam = struct {
 gpu: *GPU,
 
 ptr: sdl.gpu.GraphicsPipeline,
-is_in_gpu: bool = false,
 
 pub const GraphicPipelineInfo = struct {
     pipeline: sdl.gpu.GraphicsPipeline,
     vertex_size: u32,
     index_size: u32,
-};
-
-const UV = packed struct {
-    u: f32,
-    v: f32,
-};
-
-pub const PositionTextureVertex = packed struct {
-    pos: zm.Vec,
-    uv: UV,
-};
-
-pub const D2Vertex = packed struct {
-    pos: @Vector(2, f32),
-    uv: UV,
-    col: zm.F32x4,
 };
 
 pub fn init(gpu: *GPU) Pipeline {
@@ -54,15 +42,12 @@ pub fn deinit(self: *Pipeline) void {
 }
 
 pub fn destroy(self: *Pipeline) void {
-    if (self.is_in_gpu) {
-        self.gpu.device.releaseGraphicsPipeline(self.ptr);
-        self.ptr = undefined;
-        self.is_in_gpu = false;
-    }
+    self.gpu.device.releaseGraphicsPipeline(self.ptr);
+    self.ptr = undefined;
 }
 
-pub fn bind(self: *Pipeline, render_pass: sdl.gpu.RenderPass) void {
-    render_pass.bindGraphicsPipeline(self.ptr);
+pub fn bind(self: *Pipeline, render_pass: RenderPass) void {
+    render_pass.ptr.?.bindGraphicsPipeline(self.ptr);
 }
 
 pub fn createDemoPipeline(gpu: *GPU, format: Texture.TextureFormat) !Pipeline {
@@ -88,17 +73,17 @@ pub fn createDemoPipeline(gpu: *GPU, format: Texture.TextureFormat) !Pipeline {
     });
 }
 
-pub fn createUiPipeline(gpu: *GPU, format: Texture.TextureFormat) !Pipeline {
-    std.log.info("[Pipeline.createUiPipeline]", .{});
+pub fn create2DPipeline(gpu: *GPU, format: Texture.TextureFormat, layout: Buffer.IBufferLayout) !Pipeline {
+    std.log.info("[Pipeline.create2DPipeline]", .{});
 
     var vertex_shader = try Shader.create(gpu, .{
-        .shader_name = "2d_ui.vert",
+        .shader_name = "2d.vert",
         .uniforms = 1,
         .samplers = 0,
     });
     defer vertex_shader.deinit();
     var fragment_shader = try Shader.create(gpu, .{
-        .shader_name = "2d_ui.frag",
+        .shader_name = "2d.frag",
         .uniforms = 0,
         .samplers = 1,
     });
@@ -108,35 +93,7 @@ pub fn createUiPipeline(gpu: *GPU, format: Texture.TextureFormat) !Pipeline {
         .texture_format = format,
         .fragment_shader = fragment_shader,
         .vertex_shader = vertex_shader,
-        .vertex_input_state = .{
-            .vertex_buffer_descriptions = &[_]sdl.gpu.VertexBufferDescription{
-                .{
-                    .slot = 0,
-                    .pitch = @sizeOf(D2Vertex),
-                    .input_rate = .vertex,
-                },
-            },
-            .vertex_attributes = &[_]sdl.gpu.VertexAttribute{
-                .{
-                    .buffer_slot = 0,
-                    .format = .f32x2,
-                    .location = 0,
-                    .offset = 0,
-                },
-                .{
-                    .buffer_slot = 0,
-                    .format = .f32x2,
-                    .location = 1,
-                    .offset = @sizeOf(f32) * 2,
-                },
-                .{
-                    .buffer_slot = 0,
-                    .format = .f32x4,
-                    .location = 2,
-                    .offset = @sizeOf(f32) * 4,
-                },
-            },
-        },
+        .layout = layout,
     });
 }
 
@@ -164,7 +121,7 @@ pub fn createSolidPipeline(gpu: *GPU, format: Texture.TextureFormat) !Pipeline {
             .vertex_buffer_descriptions = &[_]sdl.gpu.VertexBufferDescription{
                 .{
                     .slot = 0,
-                    .pitch = @sizeOf(PositionTextureVertex),
+                    .pitch = @sizeOf(Data.PositionTextureVertex),
                     .input_rate = .vertex,
                 },
             },
@@ -191,6 +148,7 @@ pub const CreatePipelineDesc = struct {
     fragment_shader: Shader,
     texture_format: Texture.TextureFormat,
     vertex_input_state: ?sdl.gpu.VertexInputState = null,
+    layout: ?Buffer.IBufferLayout = null,
 };
 pub fn create(gpu: *GPU, desc: CreatePipelineDesc) !Pipeline {
     var pipeline_create_info: sdl.gpu.GraphicsPipelineCreateInfo = .{
@@ -206,6 +164,35 @@ pub fn create(gpu: *GPU, desc: CreatePipelineDesc) !Pipeline {
         pipeline_create_info.vertex_input_state = vis;
     }
 
+    if (desc.layout) |layout| {
+        var attributes: [MAX_VERTEX_ATTRIBUTES]sdl.gpu.VertexAttribute = undefined;
+        var count: u32 = 0;
+
+        for (layout.getElements(), 0..) |el, i| {
+            if (i >= MAX_VERTEX_ATTRIBUTES) return error.TooManyVertexAttributes;
+            if (el.data_type.toSdl()) |format| {
+                attributes[count] = .{
+                    .buffer_slot = 0,
+                    .format = format,
+                    .location = count,
+                    .offset = el.offset,
+                };
+                count += 1;
+            }
+        }
+
+        pipeline_create_info.vertex_input_state = .{
+            .vertex_buffer_descriptions = &[_]sdl.gpu.VertexBufferDescription{
+                .{
+                    .slot = 0,
+                    .pitch = layout.getStride(),
+                    .input_rate = .vertex,
+                },
+            },
+            .vertex_attributes = attributes[0..count],
+        };
+    }
+
     const ptr = try gpu.device.createGraphicsPipeline(pipeline_create_info);
-    return .{ .gpu = gpu, .is_in_gpu = true, .ptr = ptr };
+    return .{ .gpu = gpu, .ptr = ptr };
 }

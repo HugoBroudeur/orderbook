@@ -3,16 +3,20 @@
 const std = @import("std");
 const sdl = @import("sdl3");
 
-const Window = @import("../app/window.zig");
-const Buffer = @import("buffer.zig");
-const Texture = @import("texture.zig");
+const Asset = @import("asset.zig");
+const Buffer = @import("buffer.zig").Buffer(.sdl);
+const Camera = @import("camera.zig");
+const CopyPass = @import("pass.zig").CopyPass;
+const RenderPass = @import("pass.zig").RenderPass;
+const Data = @import("data.zig");
 const GPU = @import("gpu.zig");
 const GraphicCtx = @import("graphic_ctx.zig");
+const Pipeline = @import("pipeline.zig");
+const Sampler = @import("sampler.zig");
+const Texture = @import("texture.zig");
+const Window = @import("../app/window.zig");
 
 pub const Api = @This();
-
-pub const VERTEX_BUFFER_SIZE = 64 * 1024; //64k vertices
-pub const INDEX_BUFFER_SIZE = 64 * 1024; //64k indices
 
 gpu: *GPU,
 
@@ -32,23 +36,33 @@ pub fn createGraphicCtx(window: *Window) GraphicCtx {
     return GraphicCtx.init(window);
 }
 
-pub fn createVertexBuffer(self: *Api, buffer_type: Buffer.VertexBufferType) !Buffer.VertexBuffer {
-    var buffer = Buffer.VertexBuffer.init(buffer_type, self.gpu);
-    try buffer.create();
-    return buffer;
+pub fn createVertexBuffer(self: *Api, comptime Vertex: type, comptime size: u32) !Buffer.VertexBuffer(Vertex, size) {
+    return try Buffer.VertexBuffer(Vertex, size).create(self.gpu);
 }
 
-pub fn createIndexBuffer(self: *Api, buffer_type: Buffer.IndexBufferType) !Buffer.IndexBuffer {
-    var buffer = Buffer.IndexBuffer.init(buffer_type, self.gpu);
-    try buffer.create();
-    return buffer;
+pub fn createIndexBuffer(self: *Api, comptime Vertex: type, comptime size: u32) !Buffer.VertexBuffer(Vertex, size) {
+    return try Buffer.VertexBuffer(Vertex, size).create(self.gpu);
 }
 
-pub fn createTransferBuffer(self: *Api, usage: sdl.gpu.TransferBufferUsage, size: u32) !Buffer.TransferBuffer {
-    var buffer = Buffer.TransferBuffer.init(self.gpu, usage, size);
-    try buffer.create();
-    return buffer;
+pub fn createTransferBuffer(self: *Api, comptime buf_type: Buffer.TransferBufferType, size: u32) !Buffer.TransferBuffer(buf_type) {
+    return try Buffer.TransferBuffer(.upload).create(self.gpu, size);
 }
+
+pub fn createRenderPass(self: *Api) RenderPass {
+    return RenderPass.init(self.gpu);
+}
+
+// pub fn createIndexBuffer(self: *Api, buffer_type: Buffer.IndexBufferType) !Buffer.IndexBuffer {
+//     var buffer = Buffer.IndexBuffer.init(buffer_type, self.gpu);
+//     try buffer.create();
+//     return buffer;
+// }
+
+// pub fn createTransferBuffer(self: *Api, usage: sdl.gpu.TransferBufferUsage, size: u32) !Buffer.TransferBuffer {
+//     var buffer = Buffer.TransferBuffer.init(self.gpu, usage, size);
+//     try buffer.create();
+//     return buffer;
+// }
 
 pub fn mapDataToGpu(tb: Buffer.TransferBuffer, data: []u8, cycle: bool) void {
     const gpu_tb_ptr = tb.mapToGpu(cycle);

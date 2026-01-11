@@ -41,7 +41,8 @@ pub fn setup(self: *MarketManager, ecs_manager: *EcsManager) !void {
 
     var it = self.market_items.iterator();
     while (it.next()) |mi| {
-        const book = try Ecs.components.OrderBook.init(self.allocator, 1);
+        var book = try Ecs.components.OrderBook.init(self.allocator, 1);
+        defer book.deinit();
         ecs_manager.create_single_component_entity(Ecs.components.MarketTrading, .{ .book = book, .id = @intCast(mi.value_ptr.id), .name = mi.value_ptr.full_name });
     }
     ecs_manager.flush_cmd_buf();
@@ -56,6 +57,7 @@ fn fetch_market_categories(self: *MarketManager) !void {
     defer tx.deinit();
 
     const market_categories = try tx.all(Ecs.components.MarketCategory, self.allocator, .{}, .{});
+    defer self.allocator.free(market_categories);
     for (market_categories) |mc| {
         try self.market_categories.put(mc.id, mc);
     }
@@ -66,6 +68,7 @@ fn fetch_market_sub_categories(self: *MarketManager) !void {
     defer tx.deinit();
 
     const market_sub_categories = try tx.all(Ecs.components.SubMarketCategory, self.allocator, .{}, .{});
+    defer self.allocator.free(market_sub_categories);
     for (market_sub_categories) |msc| {
         try self.market_sub_categories.put(msc.id, msc);
     }
@@ -76,6 +79,7 @@ fn fetch_market_items(self: *MarketManager) !void {
     defer tx.deinit();
 
     const market_items = try tx.all(Ecs.components.MarketItem, self.allocator, .{}, .{});
+    defer self.allocator.free(market_items);
     for (market_items) |im| {
         try self.market_items.put(im.id, im);
     }

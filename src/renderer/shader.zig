@@ -95,3 +95,61 @@ fn getShaderByteCode(name: []const u8) ![]u8 {
 
     return shader_byte_code;
 }
+
+pub const ShaderDataType = enum {
+    None,
+    Float,
+    Float2,
+    Float3,
+    Float4,
+    Mat3,
+    Mat4,
+    Int,
+    Int2,
+    Int3,
+    Int4,
+    Bool,
+
+    pub fn size(self: ShaderDataType) u32 {
+        return switch (self) {
+            .None => 0,
+            .Float, .Float2, .Float3, .Float4, .Mat3, .Mat4 => @sizeOf(f32) * self.count(),
+            .Int, .Int2, .Int3, .Int4 => @sizeOf(i32) * self.count(),
+            .Bool => @sizeOf(bool) * self.count(),
+        };
+    }
+
+    pub fn count(self: ShaderDataType) u32 {
+        return switch (self) {
+            .None => 0,
+            .Float => 1,
+            .Float2 => 2,
+            .Float3 => 3,
+            .Float4 => 4,
+            .Mat3 => 3 * 3,
+            .Mat4 => 4 * 4,
+            .Int => 1,
+            .Int2 => 2,
+            .Int3 => 3,
+            .Int4 => 4,
+            .Bool => 1,
+        };
+    }
+
+    pub fn toSdl(self: ShaderDataType) ?sdl.gpu.VertexElementFormat {
+        return switch (self) {
+            .None => null,
+            .Float => .f32x1,
+            .Float2 => .f32x2,
+            .Float3 => .f32x3,
+            .Float4 => .f32x4,
+            .Mat3 => null,
+            .Mat4 => null,
+            .Int => .i32x1,
+            .Int2 => .i32x2,
+            .Int3 => .i32x3,
+            .Int4 => .i32x4,
+            .Bool => .u8x2,
+        };
+    }
+};

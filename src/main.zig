@@ -1,3 +1,20 @@
+// If `tracy_impl` is not set in your root file, Tracy integration will be disabled.
+// pub const tracy_impl = @import("tracy_impl");
+// You can optionally configure Tracy by setting `tracy_options` in your root file.
+// pub const tracy = @import("tracy");
+// pub const tracy_options: tracy.Options = .{
+//     .on_demand = false,
+//     .no_broadcast = false,
+//     .only_localhost = false,
+//     .only_ipv4 = false,
+//     .delayed_init = false,
+//     .manual_lifetime = false,
+//     .verbose = false,
+//     .data_port = null,
+//     .broadcast_port = null,
+//     .default_callstack_depth = 0,
+// };
+
 const std = @import("std");
 const networking = @import("networking");
 const env = @import("config.zig");
@@ -37,9 +54,24 @@ const WINDOW_HEIGHT = 1060;
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    // defer if (gpa_instance.deinit() != .ok) @panic("Memory leak on exit!");
 
     const allocator = arena.allocator();
+
+    // var gpa = std.heap.DebugAllocator(.{
+    //     .safety = true, // Enable safety checks
+    //     // .thread_safe = true, // Thread safety
+    //     .verbose_log = true, // Set true for detailed logs
+    // }){};
+    // defer {
+    //     const leaked = gpa.deinit();
+    //     if (leaked == .leak) {
+    //         std.debug.print("MEMORY LEAK DETECTED!\n", .{});
+    //     }
+    // }
+    // const allocator = gpa.allocator();
+
+    // var tracy_allocator: tracy.Allocator = .{ .parent = arena.allocator() };
+    // const allocator = tracy_allocator.allocator();
 
     const config = env.init();
 

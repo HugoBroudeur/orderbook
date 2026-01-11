@@ -8,6 +8,8 @@ const GPU = @import("gpu.zig");
 
 const Texture = @This();
 
+pub const TextureType = enum { two_dimensional, two_dimensional_array };
+
 gpu: *GPU,
 
 ptr: sdl.gpu.Texture = undefined,
@@ -15,31 +17,28 @@ surface: ?sdl.surface.Surface = null,
 width: u32 = 0,
 heigth: u32 = 0,
 
-is_in_gpu: bool = false,
-
-pub fn init(gpu: *GPU) Texture {
-    return .{ .gpu = gpu };
-}
-
-pub fn deinit(self: *Texture) void {
-    self.destroy();
-}
-
 pub fn destroy(self: *Texture) void {
-    if (self.is_in_gpu) {
-        self.gpu.device.releaseTexture(self.ptr);
-        self.ptr = undefined;
-        self.heigth = 0;
-        self.width = 0;
-        self.is_in_gpu = false;
+    self.gpu.device.releaseTexture(self.ptr);
+    self.ptr = undefined;
+    if (self.surface) |surface| {
+        surface.deinit();
     }
+    self.heigth = 0;
+    self.width = 0;
 }
 
-pub fn createFromSurface(gpu: *GPU, surface: sdl.surface.Surface) !Texture {
+pub fn createFromSurface(gpu: *GPU, surface: sdl.surface.Surface, tex_type: TextureType) !Texture {
+    std.log.info("[Texture.createFromSurface] {s} [{} bytes] ({}px x {}px)", .{ @tagName(tex_type), surface.getPixels().?.len, surface.getWidth(), surface.getHeight() });
+
+    const tt: sdl.gpu.TextureType = switch (tex_type) {
+        .two_dimensional => .two_dimensional,
+        .two_dimensional_array => .two_dimensional_array,
+    };
+
     const ptr = try gpu.device.createTexture(.{
         .format = .r8g8b8a8_unorm,
         // .format = .b8g8r8a8_unorm,
-        .texture_type = .two_dimensional_array,
+        .texture_type = tt,
         .width = @intCast(surface.getWidth()),
         .height = @intCast(surface.getHeight()),
         .layer_count_or_depth = 1,
@@ -50,7 +49,6 @@ pub fn createFromSurface(gpu: *GPU, surface: sdl.surface.Surface) !Texture {
     return .{
         .gpu = gpu,
         .ptr = ptr,
-        .is_in_gpu = true,
         .surface = surface,
         .width = @intCast(surface.getWidth()),
         .heigth = @intCast(surface.getHeight()),
@@ -61,7 +59,6 @@ pub fn createFromPtr(gpu: *GPU, ptr: sdl.gpu.Texture, width: u32, heigth: u32) T
     return .{
         .gpu = gpu,
         .ptr = ptr,
-        .is_in_gpu = true,
         .width = width,
         .heigth = heigth,
     };

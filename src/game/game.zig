@@ -150,15 +150,15 @@ pub fn run() void {
 }
 
 pub fn shutdown() void {
-    db_manager.deinit();
     market_manager.deinit();
-    ecs_manager.deinit();
     renderer_2d.deinit();
     renderer_manager.deinit();
     ui_manager.deinit();
     font_manager.deinit();
     clay_manager.deinit();
     // draw_api.deinit();
+    ecs_manager.deinit();
+    db_manager.deinit();
 
     tracy.cleanExit();
 }

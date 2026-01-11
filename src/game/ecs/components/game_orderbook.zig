@@ -24,8 +24,8 @@ pub fn init(allocator: std.mem.Allocator, shard_count: usize) !OrderBook {
 
 pub fn deinit(self: *OrderBook) void {
     self.orders.deinit();
-    self.asks.deinit();
     self.bids.deinit();
+    self.asks.deinit();
 }
 
 pub const OrderType = enum {

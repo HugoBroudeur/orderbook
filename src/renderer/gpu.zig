@@ -36,15 +36,6 @@ pub fn deinit(self: *GPU) void {
     self.device.deinit();
 }
 
-pub fn mapTransferBuffer(
-    self: *GPU,
-    transfer_buffer: sdl.gpu.TransferBuffer,
-    cycle: bool,
-) ![*]u8 {
-    self.has_data_mapped = true;
-    return self.device.mapTransferBuffer(transfer_buffer, cycle);
-}
-
 pub fn getSwapchainTextureFormat(self: *GPU) !Texture.TextureFormat {
     return .{ .ptr = try self.device.getSwapchainTextureFormat(self.window.ptr) };
 }
@@ -62,94 +53,9 @@ pub fn acquireSwapchainTexture(self: *GPU) !?Texture {
     return null;
 }
 
-fn createPipelines(self: *GPU) !void {
-    // Setup all resources
-    const format = try self.device.getSwapchainTextureFormat(self.window.ptr);
-    {
-        const pipeline = try self.pipeline_manager.loadDemo(format);
-        self.pipelines.set(.demo, pipeline);
-    }
-    {
-        const pipeline = try self.pipeline_manager.loadUi(format);
-        self.pipelines.set(.ui, pipeline);
-    }
-    {
-        const pipeline = try self.pipeline_manager.loadSolid(format);
-        self.pipelines.set(.solid, pipeline);
-    }
-}
-
 // fn uploadTextureToGPU(self: *GPU) !void {
 //     std.log.info("[GPU.uploadTextureToGPU]", .{});
 //
-//     {
-//         // Set up Buffer Data
-//
-//         const tbo = self.transfer_buffers.get(.atlas_buffer_data);
-//         const gpu_tb_ptr = try self.device.mapTransferBuffer(tbo, false);
-//         defer self.device.unmapTransferBuffer(tbo);
-//
-//         const vertices = [_]PipelineManager.PositionTextureVertex{
-//             .{ .pos = zm.f32x4(-1, 1, -0.3, 1), .uv = .{ .u = 0, .v = 0 } },
-//             .{ .pos = zm.f32x4(1, 1, -0.3, 1), .uv = .{ .u = 1, .v = 0 } },
-//             .{ .pos = zm.f32x4(1, -1, -0.3, 1), .uv = .{ .u = 1, .v = 1 } },
-//             .{ .pos = zm.f32x4(-1, -1, -0.3, 1), .uv = .{ .u = 0, .v = 1 } },
-//
-//             .{ .pos = zm.f32x4(-1, 1, -1, 1), .uv = .{ .u = 0, .v = 0 } },
-//             .{ .pos = zm.f32x4(1, 1, -1, 1), .uv = .{ .u = 1, .v = 0 } },
-//             .{ .pos = zm.f32x4(1, -1, -1, 1), .uv = .{ .u = 1, .v = 1 } },
-//             .{ .pos = zm.f32x4(-1, -1, -1, 1), .uv = .{ .u = 0, .v = 1 } },
-//         };
-//         const indices = [_]u16{
-//             0, 1, 2, 0, 2, 3,
-//             // 0, 1, 2, 0, 2, 3,
-//         };
-//
-//         const vertex_bytes = @sizeOf(@TypeOf(vertices));
-//         const index_bytes = @sizeOf(@TypeOf(indices));
-//
-//         std.mem.copyForwards(u8, gpu_tb_ptr[0..vertex_bytes], std.mem.asBytes(&vertices));
-//         std.mem.copyForwards(u8, gpu_tb_ptr[vertex_bytes..(vertex_bytes + index_bytes)], std.mem.asBytes(&indices));
-//     }
-//
-//     // Set up Texture Data with detailed logging
-//     // if (self.transfer_buffers.get(.atlas_texture_data)) |tbo| {
-//     //     std.log.info("Got transfer buffer", .{});
-//     //
-//     //     const gpu_tb_ptr = try self.device.mapTransferBuffer(tbo, false);
-//     //     defer self.device.unmapTransferBuffer(tbo);
-//     //     std.log.info("Mapped transfer buffer", .{});
-//     //
-//     //     if (self.images.get(.atlas)) |img| {
-//     //         const pixels = img.getPixels().?;
-//     //         const width = img.getWidth();
-//     //         const height = img.getHeight();
-//     //
-//     //         std.log.info("Image info: {}x{}, {} bytes", .{ width, height, pixels.len });
-//     //         std.log.info("Pixel format: {}", .{img.getFormat().?});
-//     //         std.log.info("Expected: {} bytes", .{width * height * 4});
-//     //         std.log.info("First 16 bytes: [{}, {}, {}, {}] [{}, {}, {}, {}] [{}, {}, {}, {}] [{}, {}, {}, {}]", .{ pixels[0], pixels[1], pixels[2], pixels[3], pixels[4], pixels[5], pixels[6], pixels[7], pixels[8], pixels[9], pixels[10], pixels[11], pixels[12], pixels[13], pixels[14], pixels[15] });
-//     //
-//     //         @memcpy(gpu_tb_ptr[0..pixels.len], pixels);
-//     //
-//     //         std.log.info("After memcpy, first 16 bytes in GPU buffer: [{}, {}, {}, {}] [{}, {}, {}, {}] [{}, {}, {}, {}] [{}, {}, {}, {}]", .{ gpu_tb_ptr[0], gpu_tb_ptr[1], gpu_tb_ptr[2], gpu_tb_ptr[3], gpu_tb_ptr[4], gpu_tb_ptr[5], gpu_tb_ptr[6], gpu_tb_ptr[7], gpu_tb_ptr[8], gpu_tb_ptr[9], gpu_tb_ptr[10], gpu_tb_ptr[11], gpu_tb_ptr[12], gpu_tb_ptr[13], gpu_tb_ptr[14], gpu_tb_ptr[15] });
-//     //     } else {
-//     //         std.log.err("Image .atlas not found!", .{});
-//     //     }
-//     // } else {
-//     //     std.log.err("Transfer buffer .atlas_texture_data not found!", .{});
-//     // }
-//
-//     {
-//         // Set up Texture Data
-//
-//         const tbo = self.transfer_buffers.get(.atlas_texture_data);
-//         const gpu_tb_ptr = try self.device.mapTransferBuffer(tbo, false);
-//         defer self.device.unmapTransferBuffer(tbo);
-//
-//         const img = self.images.get(.atlas);
-//         @memcpy(gpu_tb_ptr[0..img.getPixels().?.len], img.getPixels().?);
-//     }
 //
 //     self.command_buffer = self.device.acquireCommandBuffer() catch {
 //         std.log.err("[GPU.sendSetupDataToGpu] {?s}", .{sdl.errors.get()});
