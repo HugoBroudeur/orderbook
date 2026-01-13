@@ -4,16 +4,18 @@ const assert = std.debug.assert;
 const tracy = @import("tracy");
 const Config = @import("../config.zig");
 const Colors = @import("../game/colors.zig");
-const DbManager = @import("../game/db_manager.zig");
-const RendererManager = @import("../game/renderer_manager.zig");
-const Renderer2D = @import("../renderer/renderer_2d.zig");
-const UiManager = @import("../game/ui_manager.zig");
-const EcsManager = @import("../game/ecs_manager.zig");
-const MarketManager = @import("../game/market_manager.zig");
-const FontManager = @import("../game/font_manager.zig");
-const PipelineManager = @import("../game/pipeline_manager.zig");
+
 const ClayManager = @import("../game/clay_manager.zig");
+const DbManager = @import("../game/db_manager.zig");
 const DrawApi = @import("../game/draw_api.zig");
+const EcsManager = @import("../game/ecs_manager.zig");
+const FontManager = @import("../game/font_manager.zig");
+const MarketManager = @import("../game/market_manager.zig");
+const PipelineManager = @import("../game/pipeline_manager.zig");
+const Renderer2D = @import("../renderer/renderer_2d.zig");
+const RendererManager = @import("../game/renderer_manager.zig");
+const SceneManager = @import("../game/scene_manager.zig");
+const UiManager = @import("../game/ui_manager.zig");
 const UiSystem = @import("../game/ecs/systems/ui_system.zig");
 
 const sdl = @import("sdl3");
@@ -25,12 +27,15 @@ const Layer = @import("layer.zig");
 const LayerStack = @import("layer_stack.zig");
 const Window = @import("window.zig");
 const Event = @import("../events/event.zig");
+const DrawCommand = @import("../renderer/command.zig"); // 2D
 
 const App = @This();
 
 const WINDOW_WIDTH = 1920;
 const WINDOW_HEIGHT = 1060;
 const WINDOW_TITLE = "Price is Power";
+pub const FPS_THREASHOLD: u32 = 140;
+pub const FPS_LIMITER: bool = true;
 const IMGUI_HAS_DOCK = false;
 const SDL_INIT_FLAGS: sdl.InitFlags = .{ .video = true, .gamepad = true, .audio = true };
 
@@ -44,19 +49,19 @@ const game_allocator: std.mem.Allocator = undefined;
 
 var window: Window = undefined;
 
-var ecs_manager: EcsManager = undefined;
+// var draw_api: DrawApi = undefined;
+var clay_manager: ClayManager = undefined;
 var db_manager: DbManager = undefined;
+var ecs_manager: EcsManager = undefined;
+var font_manager: FontManager = undefined;
+var market_manager: MarketManager = undefined;
+var pipeline_manager: PipelineManager = undefined;
 var renderer_2d: Renderer2D = undefined;
 var renderer_manager: RendererManager = undefined;
+var scene_manager: SceneManager = undefined;
 var ui_manager: UiManager = undefined;
-var market_manager: MarketManager = undefined;
-var font_manager: FontManager = undefined;
-var clay_manager: ClayManager = undefined;
-var pipeline_manager: PipelineManager = undefined;
-// var draw_api: DrawApi = undefined;
 var ui_system: UiSystem = undefined;
-
-pub const FPS_THREASHOLD: u32 = 80;
+var draw_queue: DrawCommand.DrawQueue = undefined;
 
 var timing: Timing = .{
     .tick_acc = 0,
@@ -95,7 +100,9 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
     // draw_api = DrawApi.init(&renderer_2d.gpu);
     // clay_manager = try ClayManager.init(allocator, &font_manager, &draw_api);
     clay_manager = try ClayManager.init(allocator, &font_manager);
-    ecs_manager = EcsManager.init(allocator, &db_manager, &renderer_2d, &ui_manager, &market_manager) catch |err| {
+    draw_queue = try DrawCommand.DrawQueue.init(allocator, &renderer_2d);
+    scene_manager = SceneManager.init(&draw_queue);
+    ecs_manager = EcsManager.init(allocator, &db_manager, &ui_manager, &market_manager, &scene_manager) catch |err| {
         std.log.err("[Game][init] Can't initiate EcsManager: {}", .{err});
         return err;
     };
@@ -123,7 +130,7 @@ pub fn setup() !void {
         return err;
     };
 
-    ecs_manager.setup(.{ .clear_color = Colors.Teal }) catch |err| {
+    ecs_manager.setup() catch |err| {
         std.log.err("[App] Can't setup the EcsManager : {}", .{err});
         return err;
     };
@@ -150,17 +157,26 @@ pub fn run() void {
     };
 
     var framerate = FixedFramerate.init(FPS_THREASHOLD);
+    if (FPS_LIMITER) {
+        framerate.on();
+    } else {
+        framerate.off();
+    }
 
     while (running) {
         pollEvent();
 
-        framerate.update_count = 0;
-        while (framerate.shouldWait()) {}
+        if (framerate.isOn()) {
+            framerate.update_count = 0;
+            while (framerate.shouldWait()) {}
 
-        while (framerate.shouldUpdate()) {
+            while (framerate.shouldUpdate()) {
+                ecs_manager.progress();
+            }
+            assert(framerate.update_count > 0); // Make sure at least 1 update happened
+        } else {
             ecs_manager.progress();
         }
-        assert(framerate.update_count > 0); // Make sure at least 1 update happened
 
         // if (framerate.shouldDraw()) {
         ecs_manager.render();
@@ -223,14 +239,17 @@ pub fn initSdlBackend() !void {
 }
 
 pub fn shutdown() void {
+    draw_queue.deinit();
     db_manager.deinit();
     market_manager.deinit();
     ecs_manager.deinit();
+    scene_manager.deinit();
     renderer_2d.deinit();
     renderer_manager.deinit();
     ui_manager.deinit();
     font_manager.deinit();
     clay_manager.deinit();
+    scene_manager.deinit();
     // draw_api.deinit();
     window.deinit();
 
@@ -260,6 +279,9 @@ const FixedFramerate = struct {
     pub const ONE_MILLISECOND = 1_000_000;
     pub const ONE_NANOSECOND = 1_000_000_000;
 
+    // local state
+    is_active: bool = true,
+
     // Calculated on start
     freq: u64,
     max_accumulated: u64,
@@ -287,6 +309,17 @@ const FixedFramerate = struct {
             .threshold = freq / @as(u64, fps),
             .last_tick = sdl.timer.getPerformanceCounter(),
         };
+    }
+
+    pub fn on(self: *This) void {
+        self.is_active = true;
+    }
+    pub fn off(self: *This) void {
+        self.is_active = false;
+    }
+
+    pub fn isOn(self: *This) bool {
+        return self.is_active;
     }
 
     pub fn shouldWait(self: *This) bool {

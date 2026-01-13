@@ -4,6 +4,7 @@ const std = @import("std");
 const sdl = @import("sdl3");
 const assert = std.debug.assert;
 
+const Logger = @import("../log.zig").MaxLogs(50);
 const GPU = @import("gpu.zig");
 const Pipeline = @import("pipeline.zig");
 const Sampler = @import("sampler.zig");
@@ -88,11 +89,11 @@ pub const CopyPass = struct {
     }
 
     pub fn start(self: *CopyPass) void {
-        std.log.debug("[CopyPass.start]", .{});
+        Logger.debug("[CopyPass.start]", .{});
         assert(!self.hasStarted());
 
         self.cmd_buf = self.gpu.device.acquireCommandBuffer() catch {
-            std.log.err("[CopyPass.start] Acquire Command Buffer error: {?s}", .{sdl.errors.get()});
+            Logger.err("[CopyPass.start] Acquire Command Buffer error: {?s}", .{sdl.errors.get()});
             return;
         };
 
@@ -100,13 +101,13 @@ pub const CopyPass = struct {
     }
 
     pub fn end(self: *CopyPass) void {
-        std.log.debug("[CopyPass.end]", .{});
+        Logger.debug("[CopyPass.end]", .{});
         assert(self.hasStarted());
 
         self.ptr.?.end();
 
         self.cmd_buf.submit() catch {
-            std.log.err("[CopyPass.end] Submit Command Buffer error: {?s}", .{sdl.errors.get()});
+            Logger.err("[CopyPass.end] Submit Command Buffer error: {?s}", .{sdl.errors.get()});
         };
 
         self.ptr = null;

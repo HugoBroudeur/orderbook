@@ -1,42 +1,43 @@
 const std = @import("std");
 
-const Log = @This();
+pub fn MaxLogs(comptime MAX: usize) type {
+    return struct {
+        const Logger = @This();
 
-var log_render_system = true;
-var counter: usize = 0;
+        var max: usize = MAX;
+        var cur: usize = 0;
+        var print: bool = true;
 
-var max_logs: usize = 100;
+        pub fn debug(
+            comptime format: []const u8,
+            args: anytype,
+        ) void {
+            incr();
+            if (!print) return;
+            std.log.info(format, args);
+        }
 
-pub fn info(
-    comptime format: []const u8,
-    args: anytype,
-) void {
-    counter += 1;
-    if (counter > max_logs) {
-        return;
-    }
-    if (!log_render_system) {
-        return;
-    }
-    std.log.info(format, args);
-}
+        pub fn info(
+            comptime format: []const u8,
+            args: anytype,
+        ) void {
+            incr();
+            if (!print) return;
+            std.log.info(format, args);
+        }
 
-pub fn err(
-    comptime format: []const u8,
-    args: anytype,
-) void {
-    if (!log_render_system) {
-        return;
-    }
-    std.log.err(format, args);
-}
+        pub fn err(
+            comptime format: []const u8,
+            args: anytype,
+        ) void {
+            incr();
+            if (!print) return;
+            std.log.err(format, args);
+        }
 
-pub fn print_info(
-    comptime format: []const u8,
-    args: anytype,
-) void {
-    if (!log_render_system) {
-        return;
-    }
-    std.log.info(format, args);
+        fn incr() void {
+            cur += 1;
+            if (cur > max) print = false;
+        }
+    };
 }

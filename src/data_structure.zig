@@ -7,7 +7,7 @@ pub fn DynamicBuffer(comptime T: type) type {
         allocator: std.mem.Allocator,
         buffer: std.ArrayList(T),
         size: usize,
-        cur_pos: u32 = 0,
+        cur_pos: usize = 0,
 
         pub fn init(allocator: std.mem.Allocator, comptime size: usize) !Self {
             return .{
@@ -26,11 +26,30 @@ pub fn DynamicBuffer(comptime T: type) type {
             self.cur_pos = 0;
         }
 
-        pub fn push(self: *Self, el: T) bool {
+        pub fn rewind(self: *Self, to: usize) void {
+            if (to >= self.cur_pos) return;
+            if (self.cur_pos == 0) return;
+            @memset(self.buffer.items[to .. self.cur_pos - 1], undefined);
+            self.buffer.items.len = to;
+            self.cur_pos = @intCast(to);
+        }
+
+        pub fn push(self: *Self, el: T) void {
             assert(self.cur_pos + 1 <= self.size);
 
             self.buffer.appendBounded(el) catch unreachable;
             self.cur_pos += 1;
+        }
+
+        pub fn pushSlice(self: *Self, els: []T) void {
+            assert(self.cur_pos + els.len <= self.size);
+
+            self.buffer.appendSliceBounded(els) catch unreachable;
+            self.cur_pos += els.len;
+        }
+
+        pub fn getRemainingSlot(self: *Self) usize {
+            return self.size - self.cur_pos;
         }
 
         // TODO?: This O(n)
@@ -54,6 +73,14 @@ pub fn DynamicBuffer(comptime T: type) type {
             if (self.buffer.pop() != null) {
                 self.cur_pos -= 1;
             }
+        }
+
+        pub fn sizeInBytes(self: *Self) usize {
+            return self.buffer.items[0..self.cur_pos].len * @sizeOf(T);
+        }
+
+        pub fn getSlice(self: *Self) []T {
+            return self.buffer.items[0..self.cur_pos];
         }
     };
 }

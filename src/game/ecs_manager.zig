@@ -4,6 +4,7 @@ const DbManager = @import("db_manager.zig");
 const Renderer2D = @import("../renderer/renderer_2d.zig");
 const UiManager = @import("ui_manager.zig");
 const MarketManager = @import("market_manager.zig");
+const SceneManager = @import("scene_manager.zig");
 const Ecs = @import("ecs/ecs.zig");
 const Prefab = @import("ecs/prefabs/prefab.zig");
 const OrderbookSystem = @import("ecs/systems/orderbook_system.zig");
@@ -16,13 +17,14 @@ const EcsManager = @This();
 allocator: std.mem.Allocator,
 db_manager: *DbManager,
 // renderer_manager: *RendererManager,
-renderer_2d: *Renderer2D,
+renderer_2d: *Renderer2D = undefined,
 ui_manager: *UiManager,
 market_manager: *MarketManager,
+scene_manager: *SceneManager,
 entities: zcs.Entities,
 cmd_buf: zcs.CmdBuf,
 
-pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, renderer_2d: *Renderer2D, ui_manager: *UiManager, market_manager: *MarketManager) !EcsManager {
+pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, ui_manager: *UiManager, market_manager: *MarketManager, scene_manager: *SceneManager) !EcsManager {
     var es = try zcs.Entities.init(.{ .gpa = allocator });
 
     const cb = try zcs.CmdBuf.init(.{
@@ -35,7 +37,8 @@ pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, renderer_2d: *
         .allocator = allocator,
         .db_manager = db_manager,
         // .renderer_manager = renderer_manager,
-        .renderer_2d = renderer_2d,
+        // .renderer_2d = renderer_2d,
+        .scene_manager = scene_manager,
         .ui_manager = ui_manager,
         .market_manager = market_manager,
         .entities = es,
@@ -48,10 +51,10 @@ pub fn deinit(self: *EcsManager) void {
     self.entities.deinit(self.allocator);
 }
 
-pub fn setup(self: *EcsManager, draw_data: Ecs.components.Graphics.DrawData) !void {
+pub fn setup(self: *EcsManager) !void {
     try Prefab.setup_game(self.allocator, &self.entities, &self.cmd_buf);
     self.create_single_component_entity(Ecs.components.EnvironmentInfo, .{});
-    self.create_single_component_entity(Ecs.components.Graphics.DrawData, draw_data);
+    self.create_single_component_entity(Ecs.components.Graphics.DrawData, .{});
     self.create_single_component_entity(Ecs.components.MarketData, .{});
 
     self.flush_cmd_buf();
@@ -71,14 +74,14 @@ pub fn progress(self: *EcsManager) void {
 
 pub fn render(self: *EcsManager) void {
     // _ = self;
-
-    //
-    // ALWAYS START WITH A BEGIN PASS
-    //
     const draw_data = self.get_singleton(Ecs.components.Graphics.DrawData);
     const env = self.get_singleton(Ecs.components.EnvironmentInfo);
     draw_data.time = env.world_time;
     draw_data.dt = env.dt;
+
+    //
+    // ALWAYS START WITH A BEGIN PASS
+    //
     self.renderer_2d.startFrame();
 
     //
@@ -95,7 +98,8 @@ pub fn render(self: *EcsManager) void {
     //
     // DRAW FRAME
     //
-    self.renderer_2d.drawFrame(draw_data);
+    self.scene_manager.render(self);
+    // self.renderer_2d.drawFrame(draw_data);
 
     //
     // ALWAYS END WITH END PASS

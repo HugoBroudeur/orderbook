@@ -16,7 +16,7 @@ pub const DrawData = struct {
     // render_pass: ?sdl.gpu.RenderPass,
     time: u64 = 0,
     dt: u64 = 0,
-    clear_color: Color = Color.Transparent,
+    // clear_color: Color = Color.Transparent,
     ui: *ig.ImDrawData = undefined,
     clay_render_cmds: []clay.RenderCommand = &.{},
     // pass_action: sg.PassAction = .{},
