@@ -3,29 +3,38 @@ const Layer = @import("layer.zig");
 
 pub fn LayerStack(comptime max_layers: usize, comptime max_overlays: usize) type {
     return struct {
-        layers: Stack(*Layer, max_layers),
-        overlays: Stack(*Layer, max_overlays),
+        const This = @This();
+        layers: Stack(Layer, max_layers),
+        overlays: Stack(Layer, max_overlays),
 
-        pub fn init() !LayerStack {
+        pub fn init() !This {
             return .{
                 .layers = .init(),
                 .overlays = .init(),
             };
         }
 
-        pub fn pushLayer(self: *LayerStack, layer: *Layer) !void {
+        pub fn stack(self: *This) [max_layers + max_overlays]Layer {
+            var out: [max_layers + max_overlays]Layer = undefined;
+
+            out[0..max_layers].* = self.layers.items();
+            out[max_layers .. max_layers + max_overlays].* = self.overlays.items();
+            return out;
+        }
+
+        pub fn pushLayer(self: *This, layer: Layer) void {
             self.layers.push(layer);
         }
 
-        pub fn pushOverlay(self: *LayerStack, overlay: *Layer) !void {
+        pub fn pushOverlay(self: *This, overlay: Layer) void {
             self.overlays.push(overlay);
         }
 
-        pub fn popLayer(self: *LayerStack, layer: *Layer) void {
+        pub fn popLayer(self: *This, layer: Layer) void {
             self.layers.pop(layer);
         }
 
-        pub fn popOverlay(self: *LayerStack, overlay: *Layer) void {
+        pub fn popOverlay(self: *This, overlay: Layer) void {
             self.overlays.pop(overlay);
         }
     };
@@ -37,8 +46,12 @@ fn Stack(comptime T: type, comptime size: usize) type {
         stack: [size]T,
         cur_pos: u32,
 
-        fn init() !Self {
-            return .{ .cur_pos = 0 };
+        fn init() Self {
+            return .{ .cur_pos = 0, .stack = @splat(undefined) };
+        }
+
+        pub fn items(self: *Self) [size]T {
+            return self.stack;
         }
 
         fn push(self: *Self, el: T) void {

@@ -2,7 +2,7 @@
 
 const GraphicCtx = @This();
 
-const Window = @import("../app/window.zig");
+const Window = @import("../core/window.zig");
 
 window: *Window,
 

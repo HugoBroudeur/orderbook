@@ -14,7 +14,7 @@ const GraphicCtx = @import("graphic_ctx.zig");
 const Pipeline = @import("pipeline.zig");
 const Sampler = @import("sampler.zig");
 const Texture = @import("texture.zig");
-const Window = @import("../app/window.zig");
+const Window = @import("../core/window.zig");
 
 pub const Api = @This();
 

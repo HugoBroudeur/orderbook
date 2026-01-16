@@ -1,3 +1,4 @@
+const std = @import("std");
 const sdl = @import("sdl3");
 const zm = @import("zmath");
 
@@ -6,6 +7,14 @@ pub const Rect = struct {
     y: f32,
     width: f32,
     heigth: f32,
+
+    pub fn zero() Rect {
+        return .{ .x = 0, .y = 0, .width = 0, .heigth = 0 };
+    }
+
+    pub fn eq(self: Rect, rect: Rect) bool {
+        return std.meta.eql(self, rect);
+    }
 };
 
 pub const Point = struct { x: f32, y: f32, z: f32 = 0 };

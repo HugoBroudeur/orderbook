@@ -3,7 +3,7 @@
 const std = @import("std");
 
 const DataStructure = @import("../data_structure.zig");
-const Logger = @import("../log.zig").MaxLogs(50);
+const Logger = @import("../core/log.zig").MaxLogs(50);
 const Batcher = @import("batcher.zig");
 const Texture = @import("texture.zig");
 const Renderer2D = @import("renderer_2d.zig");
@@ -13,7 +13,7 @@ const Color = Primitive.Color;
 const Point = Primitive.Point;
 const ig = @import("cimgui");
 
-const COMMAND_QUEUE_SIZE = 15000;
+const COMMAND_QUEUE_SIZE = 1000000;
 
 pub const QuadImgCmd = struct {
     p1: Point,

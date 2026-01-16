@@ -4,12 +4,12 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const Quad = @import("data.zig").Quad;
-const Logger = @import("../log.zig").MaxLogs(50);
+const Logger = @import("../core/log.zig").MaxLogs(50);
 const Cmd = @import("command.zig");
 
 const DataStructure = @import("../data_structure.zig");
 
-pub const MAX_BATCHES: usize = 10; // Probably needs to be equal to the CPU count ?
+pub const MAX_BATCHES: usize = 40; // Probably needs to be equal to the CPU count ?
 pub const BATCH_SIZE_QUADS: u32 = 10000;
 pub const BATCH_SIZE_VERTICES: u32 = BATCH_SIZE_QUADS * Quad.VERTEX_COUNT;
 pub const BATCH_SIZE_INDICES: u32 = BATCH_SIZE_QUADS * Quad.INDEX_COUNT;
@@ -81,13 +81,15 @@ pub const Batch = struct {
         return self.vertices.getRemainingSlot() >= size;
     }
 
+    pub fn getCurrentIndicesInBytes(self: *Batch) u32 {
+        return self.cur_indices * @sizeOf(Quad.Indice);
+    }
+
     pub fn toBytes(self: *Batch) struct { vertices: []const u8, indices: []const u8 } {
         return .{
             .vertices = std.mem.sliceAsBytes(self.vertices.getSlice()),
             .indices = std.mem.sliceAsBytes(self.indices.items[0..self.cur_indices]),
         };
-
-        // return std.mem.sliceAsBytes(self.vertices.getSlice()) ++ std.mem.sliceAsBytes(self.indices.items[0..self.cur_indices]);
     }
 };
 
@@ -146,7 +148,7 @@ pub fn begin(self: *Batcher) void {
 }
 pub fn end(self: *Batcher) []Batch {
     assert(self.batching);
-    Logger.info("[Batcher.end] Current Batch: {}", .{self.cur_batch});
+    // Logger.info("[Batcher.end] Current Batch: {}", .{self.cur_batch});
 
     self.batching = false;
 
@@ -172,13 +174,14 @@ pub fn shouldFlush(self: *Batcher, cmd: Cmd.DrawCmd) bool {
 pub fn flush(self: *Batcher) void {
     std.log.debug("[Batcher.flush] flushing Batch {} [{}/{} vertices]", .{ self.cur_batch, self.batches.items[self.cur_batch].vertices.cur_pos, self.batches.items[self.cur_batch].vertices.size });
     assert(self.batching);
-    assert(self.cur_batch < self.pool_size);
+    assert(self.cur_batch + 1 < self.pool_size);
 
     self.cur_batch += 1;
 }
 
 pub fn push(self: *Batcher, _draw_cmd: Cmd.DrawCmd) void {
     assert(self.batching);
+    assert(self.cur_batch < self.pool_size);
     var draw_cmd = _draw_cmd;
     var batch = &self.batches.items[self.cur_batch];
     switch (draw_cmd) {

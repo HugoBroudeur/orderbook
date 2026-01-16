@@ -12,7 +12,7 @@ pub const WindowProps = struct {
     title: [:0]const u8 = "Price is Power",
     width: u32 = 1920,
     heigth: u32 = 1060,
-    framerate_limit: u32 = 70,
+    framerate_limit: u32 = 140,
 };
 
 ptr: sdl.video.Window,

@@ -4,7 +4,7 @@ const std = @import("std");
 const sdl = @import("sdl3");
 const assert = std.debug.assert;
 
-const Logger = @import("../log.zig").MaxLogs(50);
+const Logger = @import("../core/log.zig").MaxLogs(50);
 const GPU = @import("gpu.zig");
 const Pipeline = @import("pipeline.zig");
 const Sampler = @import("sampler.zig");

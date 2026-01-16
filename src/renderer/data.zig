@@ -18,6 +18,11 @@ pub const D2Vertex = packed struct {
 
 pub const Indice = u16;
 
+pub const ViewProj = struct {
+    view: zm.Mat,
+    proj: zm.Mat,
+};
+
 // Define all the Shader data to render a quad and the number of indices for 1 quad
 pub const Quad = struct {
     pub const VERTEX_COUNT: u32 = 4;

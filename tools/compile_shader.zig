@@ -76,9 +76,21 @@ pub fn runCmd(
         "-target",
         "spirv",
         "-fvk-use-entrypoint-name",
+        "-capability",
+        "vk_mem_model",
+        "-capability",
+        "spirv_1_0",
+        // "-enable-experimental-dynamic-dispatch",
         "-o",
         output,
         input,
+    };
+
+    const spirval_cmd = [_][]const u8{
+        "spirv-val",
+        output,
+        "--target-env",
+        "vulkan1.0",
     };
 
     var cmd = std.process.Child.init(
@@ -117,6 +129,14 @@ pub fn runCmd(
 
     const term = try cmd.wait();
     const code = if (term == .Exited) term.Exited else 1;
+
+    var cmd_val = std.process.Child.init(
+        &spirval_cmd,
+        allocator,
+    );
+    try cmd_val.spawn();
+    _ = try cmd.wait();
+
     return .{
         .code = code,
         .term = term,

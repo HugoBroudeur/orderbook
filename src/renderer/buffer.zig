@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const sdl = @import("sdl3");
 const PipelineManager = @import("../game/pipeline_manager.zig");
 
-const Logger = @import("../log.zig").MaxLogs(50);
+const Logger = @import("../core/log.zig").MaxLogs(50);
 const GPU = @import("gpu.zig");
 const DataStructure = @import("../data_structure.zig");
 const CopyPass = @import("pass.zig").CopyPass;
@@ -267,15 +267,16 @@ pub const VertexBuffer = struct {
         render_pass.ptr.?.bindVertexBuffers(0, &.{.{ .buffer = self.ptr, .offset = 0 }});
     }
 
-    pub fn upload(self: *Self, copy_pass: CopyPass, tb: TransferBuffer(.upload), offset: u32) void {
-        Logger.debug("[VertexBuffer.upload] Uploading {} bytes at offset {}, using Buffer of {} bytes", .{ self.size_bytes, offset, tb.size });
+    // pub fn upload(self: *Self, copy_pass: CopyPass, tb: *TransferBuffer(.upload), offset: u32, size: u32) void {
+    pub fn upload(self: *Self, copy_pass: sdl.gpu.CopyPass, tb: *TransferBuffer(.upload), offset: u32, size: u32, cycle: bool) void {
+        Logger.debug("[VertexBuffer.upload] Max {} bytes [uploading {} bytes, offset {}]", .{ tb.size, size, offset });
         assert(self.size_bytes + offset <= tb.size);
 
-        copy_pass.ptr.?.uploadToBuffer(.{ .transfer_buffer = tb.ptr, .offset = offset }, .{
+        copy_pass.uploadToBuffer(.{ .transfer_buffer = tb.ptr, .offset = offset }, .{
             .buffer = self.ptr,
             .offset = 0,
-            .size = self.size_bytes,
-        }, false);
+            .size = size,
+        }, cycle);
     }
 
     // pub fn interface(self: *Self) IVertexBuffer {
@@ -299,10 +300,9 @@ pub fn IndexBuffer(comptime index_type: IndexBufferType) type {
         ptr: sdl.gpu.Buffer = undefined,
         size_bytes: u32,
 
-        pub fn create(gpu: *GPU, max_indices: u32) !Self {
+        pub fn create(gpu: *GPU, size_bytes: u32) !Self {
             const buffer_usage_flag: sdl.gpu.BufferUsageFlags = .{ .index = true };
 
-            const size_bytes = @sizeOf(IndexType) * max_indices;
             const ptr = try gpu.device.createBuffer(.{ .usage = buffer_usage_flag, .size = size_bytes });
 
             return .{
@@ -326,16 +326,17 @@ pub fn IndexBuffer(comptime index_type: IndexBufferType) type {
             render_pass.ptr.?.bindIndexBuffer(.{ .buffer = self.ptr, .offset = 0 }, index_element_size);
         }
 
-        pub fn upload(self: *Self, copy_pass: CopyPass, tb: TransferBuffer(.upload), offset: u32) void {
-            Logger.debug("[IndexType.upload] Uploading {} bytes at offset {}, using TransferBuffer of {} bytes", .{ self.size_bytes, offset, tb.size });
+        // pub fn upload(self: *Self, copy_pass: CopyPass, tb: *TransferBuffer(.upload), offset: u32, size: u32) void {
+        pub fn upload(self: *Self, copy_pass: sdl.gpu.CopyPass, tb: *TransferBuffer(.upload), offset: u32, size: u32, cycle: bool) void {
+            Logger.debug("[IndexType.upload] Max {} Bytes [uploading {} bytes, offset {}]", .{ tb.size, size, offset });
 
             assert(self.size_bytes + offset <= tb.size);
 
-            copy_pass.ptr.?.uploadToBuffer(.{ .transfer_buffer = tb.ptr, .offset = offset }, .{
+            copy_pass.uploadToBuffer(.{ .transfer_buffer = tb.ptr, .offset = offset }, .{
                 .buffer = self.ptr,
                 .offset = 0,
-                .size = self.size_bytes,
-            }, false);
+                .size = size,
+            }, cycle);
         }
     };
 }
@@ -353,6 +354,7 @@ pub fn TransferBuffer(comptime usage: TransferBufferType) type {
         ptr: sdl.gpu.TransferBuffer,
         gpu: *GPU,
         usage: TransferBufferType = usage,
+        // Max size of the buffer
         size: u32,
         has_data_mapped: bool = false,
 
@@ -376,18 +378,19 @@ pub fn TransferBuffer(comptime usage: TransferBufferType) type {
             self.ptr = undefined;
         }
 
-        pub fn upload(self: *Self, copy_pass: CopyPass, offset: u32, buffer: sdl.gpu.Buffer) void {
-            Logger.debug("[TransferBuffer.upload] Uploading {} bytes at offset {}, using Buffer of {} bytes", .{ self.size_bytes, offset, self.size });
+        pub fn upload(self: *Self, copy_pass: CopyPass, offset: u32, buffer: sdl.gpu.Buffer, size: u32) void {
+            Logger.debug("[TransferBuffer.upload] Uploading {} bytes at offset {}, using Buffer of {} bytes", .{ size, offset, self.size });
 
             copy_pass.ptr.?.uploadToBuffer(.{ .transfer_buffer = self.ptr, .offset = 0 }, .{
                 .buffer = buffer,
                 .offset = offset,
-                .size = self.size_bytes,
+                .size = size,
             }, false);
         }
 
         pub fn transferToGpu(self: *Self, gpu: *GPU, cycle: bool, data: []const u8, offset: usize) !void {
-            Logger.debug("[TransferBuffer.transferToGpu] Data in bytes: {}, at offset {}", .{ data.len, offset });
+            Logger.debug("[TransferBuffer.transferToGpu] Buffer Size {} [{} bytes, offset {}]", .{ self.size, data.len, offset });
+            assert(self.size >= data.len + offset);
             var ptr = try gpu.device.mapTransferBuffer(self.ptr, cycle);
             defer gpu.device.unmapTransferBuffer(self.ptr);
 
@@ -459,14 +462,6 @@ pub fn TransferBuffer(comptime usage: TransferBufferType) type {
                 .height = texture.heigth,
                 .depth = 1,
             }, false);
-        }
-
-        fn mapToGpu(self: *Self, cycle: bool) ![*]u8 {
-            return self.gpu.device.mapTransferBuffer(self.ptr, cycle);
-        }
-
-        fn unmapToGpu(self: *Self) void {
-            self.gpu.device.unmapTransferBuffer(self.ptr);
         }
     };
 }

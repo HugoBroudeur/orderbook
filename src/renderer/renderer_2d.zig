@@ -1,6 +1,7 @@
 // This is a 2D Renderer for the SDL implementation
 
 const std = @import("std");
+const assert = std.debug.assert;
 const sdl = @import("sdl3");
 const tracy = @import("tracy");
 
@@ -23,15 +24,16 @@ const Buffer = @import("buffer.zig");
 const Camera = @import("camera.zig");
 const Command = @import("command.zig");
 const CopyPass = @import("pass.zig").CopyPass;
-const Logger = @import("../log.zig").MaxLogs(50);
+const Logger = @import("../core/log.zig").MaxLogs(50);
 const RenderPass = @import("pass.zig").RenderPass;
 const Data = @import("data.zig");
 const GPU = @import("gpu.zig");
 const GraphicCtx = @import("graphic_ctx.zig");
 const Pipeline = @import("pipeline.zig");
 const Sampler = @import("sampler.zig");
+const Stats = @import("stats.zig");
 const Texture = @import("texture.zig");
-const Window = @import("../app/window.zig");
+const Window = @import("../core/window.zig");
 
 const Renderer = @This();
 
@@ -56,6 +58,7 @@ const Uniforms = struct {
 };
 
 allocator: std.mem.Allocator,
+stats: Stats,
 
 gpu: GPU = undefined,
 api: Api = undefined,
@@ -88,6 +91,7 @@ pub const RenderCtx = struct {};
 pub fn init(allocator: std.mem.Allocator) !Renderer {
     return .{
         .allocator = allocator,
+        .stats = .init(),
         .batcher = try .init(allocator),
     };
 }
@@ -429,7 +433,7 @@ pub fn drawRotatedQuad(self: *Renderer) void {
 }
 
 pub fn flush(self: *Renderer, draw_queue: *Command.DrawQueue) void {
-    Logger.debug("[Renderer2D.flush] Queue size: {}", .{draw_queue.cmds.cur_pos});
+    Logger.debug("[Renderer2D.flush] {} Draw Commands", .{draw_queue.cmds.cur_pos});
     // draw_queue.sort() // optimise draw calls ?
 
     self.batcher.begin();
@@ -447,7 +451,7 @@ pub fn flush(self: *Renderer, draw_queue: *Command.DrawQueue) void {
 
     const batches = self.batcher.end();
 
-    // TODO, if can't draw all in 1 batch, process max cmd as possible using a pointer to count how many commmands are left
+    // TODO, if can't draw all in 1 batch, process max cmd as possible using a pointer to count how many commands are left
     // For now, rewind to 0
     draw_queue.cmds.rewind(0);
 
@@ -455,115 +459,224 @@ pub fn flush(self: *Renderer, draw_queue: *Command.DrawQueue) void {
 }
 
 pub fn draw(self: *Renderer, batches: []Batcher.Batch) void {
+    // sdl.timer.delayMilliseconds(16);
     Logger.info("[Renderer2D.draw] Drawing {} batches", .{batches.len});
+
+    self.stats.startFrame();
+    self.stats.startClock(.frame);
+    defer {
+        self.stats.tickClock(.frame);
+        self.stats.endFrame();
+        self.stats.samplePrint(500); // print every 1000 frames
+    }
 
     self.uniforms.time.time = @floatFromInt(sdl.timer.getMillisecondsSinceInit() / 1000); // convert to seconds
 
-    self.gpu.command_buffer = self.gpu.device.acquireCommandBuffer() catch {
-        Logger.err("[Renderer2D.draw] {?s}", .{sdl.errors.get()});
-        return;
-    };
-    defer {
-        self.gpu.command_buffer.submit() catch {
-            Logger.err("[Renderer2D.draw] Command Buffer error: {?s}", .{sdl.errors.get()});
-        };
-    }
-
-    const swtext = self.gpu.acquireSwapchainTexture() catch {
-        Logger.err("[Renderer2D.draw] {?s}", .{sdl.errors.get()});
-        self.gpu.command_buffer.cancel() catch {};
-        return;
-    };
-
-    if (swtext) |texture| {
-        self.textures.set(.swapchain, texture);
-    }
+    // Copy Pass just upload vertices + indexes
+    // First pass: calculate total sizes
+    var total_vertex_bytes: u32 = 0;
+    var total_index_bytes: u32 = 0;
+    var total_indices: u32 = 0;
+    var total_vertices: u32 = 0;
 
     for (batches) |*batch| {
-        { // Copy Pass just upload vertices + indexes
+        assert(batch.cur_indices <= batch.indices.items.len); // Debug just in case
+        total_vertex_bytes += @intCast(batch.vertices.sizeInBytes());
+        total_index_bytes += @intCast(batch.getCurrentIndicesInBytes());
+        total_indices += batch.cur_indices;
+        total_vertices += @intCast(batch.vertices.cur_pos);
+    }
+
+    // Logger.info("[Renderer2D.draw] Total: {} vertex bytes, {} index bytes, {} indices", .{ total_vertex_bytes, total_index_bytes, total_indices });
+
+    // Second pass: upload with cumulative offsets
+    var current_vertex_offset: u32 = 0;
+    var current_index_offset: u32 = 0;
+
+    {
+        self.stats.startClock(.transfer);
+        defer self.stats.tickClock(.transfer);
+
+        // TODO I will need to calculate the right transfer buffer size
+        for (batches, 0..) |*batch, i| {
             const data = batch.toBytes();
-            self.transfer_buffer_data.transferToGpu(&self.gpu, true, data.vertices, 0) catch {
+            const cycle = i != 0; // Cycle on first the one only
+            self.transfer_buffer_data.transferToGpu(&self.gpu, cycle, data.vertices, current_vertex_offset) catch {
                 Logger.err("[Renderer2D.draw] Error while transfering vertices data to GPU: {?s}", .{sdl.errors.get()});
+                self.stats.addSkippedDraw();
+                return;
             };
-            self.transfer_buffer_data.transferToGpu(&self.gpu, true, data.indices, data.vertices.len) catch {
+            self.transfer_buffer_data.transferToGpu(&self.gpu, true, data.indices, total_vertex_bytes + current_index_offset) catch {
                 Logger.err("[Renderer2D.draw] Error while transfering indices data to GPU: {?s}", .{sdl.errors.get()});
+                self.stats.addSkippedDraw();
+                return;
             };
 
-            var copy_pass = CopyPass.init(&self.gpu);
-            copy_pass.start();
+            // Logger.info("[Renderer2D.draw] Batch uploaded - vertex offset: {}, index offset: {}", .{ current_vertex_offset, total_vertex_bytes + current_index_offset });
 
-            self.vertex_buffer.upload(copy_pass, self.transfer_buffer_data, 0);
-            self.index_buffer.upload(copy_pass, self.transfer_buffer_data, @intCast(batch.vertices.sizeInBytes()));
+            // Accumulate offsets for next batch
+            current_vertex_offset += @intCast(data.vertices.len);
+            current_index_offset += @intCast(data.indices.len);
+        }
+    }
+
+    {
+        self.stats.startClock(.acquire_cmd_buf);
+        defer self.stats.tickClock(.acquire_cmd_buf);
+
+        var submit_cmd = true;
+        self.gpu.command_buffer = self.gpu.device.acquireCommandBuffer() catch {
+            Logger.err("[Renderer2D.draw] Failed Acquiring command buffer: {?s}", .{sdl.errors.get()});
+            self.stats.addSkippedDraw();
+            return;
+        };
+        defer {
+            if (submit_cmd) {
+                self.gpu.command_buffer.submit() catch {
+                    Logger.err("[Renderer2D.draw] Command Buffer error: {?s}", .{sdl.errors.get()});
+                    self.stats.addSkippedDraw();
+                };
+
+                // ⭐ ADD THIS: Wait for the GPU to finish this frame
+                // This prevents queue saturation
+                // self.gpu.device.waitForIdle() catch |err| {
+                //     Logger.err("[Renderer2D.draw] Wait idle failed: {}", .{err});
+                // };
+            }
+        }
+
+        {
+            self.stats.startClock(.acquire_texture);
+            defer self.stats.tickClock(.acquire_texture);
+
+            const swtext = self.gpu.acquireSwapchainTexture() catch {
+                // self.gpu.command_buffer.cancel() catch {};
+                submit_cmd = true;
+                Logger.err("[Renderer2D.draw] Failed acquiring SwapchainTexture: {?s}", .{sdl.errors.get()});
+                self.stats.addSkippedDraw();
+                return;
+            };
+
+            const swapchain_texture = swtext orelse {
+                // self.gpu.command_buffer.cancel() catch {};
+                submit_cmd = true;
+                // Logger.err("[Renderer2D.draw] SwapchainTexture Null: {?s}", .{sdl.errors.get()});
+                self.stats.addSkippedDraw();
+                return;
+            };
+            self.textures.set(.swapchain, swapchain_texture);
+        }
+
+        {
+            self.stats.startClock(.copy_pass);
+            defer self.stats.tickClock(.copy_pass);
+
+            const copy_pass = self.gpu.command_buffer.beginCopyPass();
+
+            // Upload vertices: pass explicit size
+            // Logger.info("[Renderer2D.draw] Copying {} vertex bytes from offset 0", .{total_vertex_bytes});
+            self.vertex_buffer.upload(copy_pass, &self.transfer_buffer_data, 0, total_vertex_bytes, true);
+
+            // Upload indices: pass explicit size
+            // Logger.info("[Renderer2D.draw] Copying {} index bytes from offset {}", .{ total_index_bytes, total_vertex_bytes });
+            self.index_buffer.upload(copy_pass, &self.transfer_buffer_data, total_vertex_bytes, total_index_bytes, true);
+
+            // self.vertex_buffer.upload(copy_pass, &self.transfer_buffer_data, 0);
+            // // self.index_buffer.upload(copy_pass, &self.transfer_buffer_data, @intCast(batch.vertices.sizeInBytes()));
+            // self.index_buffer.upload(copy_pass, &self.transfer_buffer_data, 0,total_vertex_data_in_bytes);
 
             copy_pass.end();
         }
 
-        { // RenderPass Debug Triangle
-            const texture = self.textures.get(.swapchain);
-            const gpu_target_info: sdl.gpu.ColorTargetInfo = .{
-                .load = .clear,
-                .store = .store,
-                .clear_color = Colors.Black.toSdl(),
-                .texture = texture.ptr,
-            };
+        const swapchain_texture = self.textures.get(.swapchain);
+        {
+            self.stats.startClock(.render_passes);
+            defer self.stats.tickClock(.render_passes);
 
-            // Setup and start a render pass
-            const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
-            defer render_pass.end();
+            { // RenderPass Debug Triangle
+                self.stats.startClock(.render_pass_triangle);
+                defer self.stats.tickClock(.render_pass_triangle);
+                const gpu_target_info: sdl.gpu.ColorTargetInfo = .{
+                    // .load = if (i == 0) .clear else .load,
+                    .load = .clear,
+                    .clear_color = Colors.Black.toSdl(),
+                    .store = .store,
+                    .texture = swapchain_texture.ptr,
+                };
 
-            const pipeline = self.pipelines.get(.demo);
-            render_pass.bindGraphicsPipeline(pipeline.ptr);
-            // TODO viewport
-            // TODO scisor
-            const mvp_bytes = std.mem.toBytes(self.uniforms.mvp.proj_matrix);
+                // Setup and start a render pass
+                const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
+                defer render_pass.end();
 
-            self.gpu.command_buffer.pushVertexUniformData(0, &mvp_bytes);
+                const pipeline = self.pipelines.get(.demo);
+                render_pass.bindGraphicsPipeline(pipeline.ptr);
+                // TODO viewport
+                // TODO scisor
+                const mvp_bytes = std.mem.toBytes(self.uniforms.mvp.proj_matrix);
 
-            render_pass.drawPrimitives(3, 1, 0, 0);
-        }
+                self.gpu.command_buffer.pushVertexUniformData(0, &mvp_bytes);
 
-        { // RenderPass Quad 2D solid with text
-            const swapchain_texture = self.textures.get(.swapchain);
-            const gpu_target_info: sdl.gpu.ColorTargetInfo = .{
-                .store = .store,
-                .texture = swapchain_texture.ptr,
-            };
+                self.stats.addDrawCall(3, 1);
+                render_pass.drawPrimitives(3, 1, 0, 0);
+            }
 
-            const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
-            defer render_pass.end();
+            { // RenderPass Quad 2D solid with text
+                self.stats.startClock(.render_pass_2d);
+                defer self.stats.tickClock(.render_pass_2d);
 
-            const pipeline = self.pipelines.get(._2d);
-            render_pass.bindGraphicsPipeline(pipeline.ptr);
+                const gpu_target_info: sdl.gpu.ColorTargetInfo = .{
+                    .store = .store,
+                    .load = .load,
+                    .texture = swapchain_texture.ptr,
+                };
 
-            const transform_bytes = std.mem.toBytes(self.uniforms.transform);
+                const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
+                defer render_pass.end();
 
-            self.gpu.command_buffer.pushVertexUniformData(0, &transform_bytes);
+                const pipeline = self.pipelines.get(._2d);
+                render_pass.bindGraphicsPipeline(pipeline.ptr);
 
-            render_pass.bindVertexBuffers(0, &.{.{ .buffer = self.vertex_buffer.ptr, .offset = 0 }});
-            render_pass.bindIndexBuffer(.{ .buffer = self.index_buffer.ptr, .offset = 0 }, .indices_16bit);
-            const texture = self.textures.get(.atlas);
-            // render_pass.bindTexture(texture, self.data.nearest_sampler);
-            render_pass.bindFragmentSamplers(0, &.{.{ .texture = texture.ptr, .sampler = self.nearest_sampler.ptr }});
+                const transform_bytes = std.mem.toBytes(self.uniforms.transform);
 
-            render_pass.drawIndexedPrimitives(batch.cur_indices, batch.cur_instances, 0, 0, 0);
-        }
+                self.gpu.command_buffer.pushVertexUniformData(0, &transform_bytes);
 
-        { // RenderPass UI (CIMGUI)
-            const swapchain_texture = self.textures.get(.swapchain);
-            const gpu_target_info: sdl.gpu.ColorTargetInfo = .{
-                .store = .store,
-                .texture = swapchain_texture.ptr,
-            };
+                render_pass.bindVertexBuffers(0, &.{.{ .buffer = self.vertex_buffer.ptr, .offset = 0 }});
+                render_pass.bindIndexBuffer(.{ .buffer = self.index_buffer.ptr, .offset = 0 }, .indices_16bit);
+                const texture = self.textures.get(.atlas);
+                // render_pass.bindTexture(texture, self.data.nearest_sampler);
+                render_pass.bindFragmentSamplers(0, &.{.{ .texture = texture.ptr, .sampler = self.nearest_sampler.ptr }});
 
-            impl_sdlgpu3.ImGui_ImplSDLGPU3_PrepareDrawData(@ptrCast(self.imgui_draw_data), @ptrCast(self.gpu.command_buffer.value));
+                { // Debug to ensure we are good
+                    const expected_index_bytes = total_indices * @sizeOf(u16);
+                    assert(total_index_bytes == expected_index_bytes);
+                }
 
-            const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
-            defer render_pass.end();
+                self.stats.addDrawCall(total_vertices, total_indices);
+                render_pass.drawIndexedPrimitives(total_indices, 1, 0, 0, 0);
 
-            // TODO
-            // self.clay_manager.renderCommands(draw_data.clay_render_cmds);
+                // render_pass.drawIndexedPrimitives(0, 1, 0, 0, 0);
+            }
 
-            impl_sdlgpu3.ImGui_ImplSDLGPU3_RenderDrawData(@ptrCast(self.imgui_draw_data), @ptrCast(self.gpu.command_buffer.value), @ptrCast(render_pass.value), null);
+            { // RenderPass UI (CIMGUI)
+                self.stats.startClock(.render_pass_ui);
+                defer self.stats.tickClock(.render_pass_ui);
+
+                const gpu_target_info: sdl.gpu.ColorTargetInfo = .{
+                    .store = .store,
+                    .load = .load,
+                    .texture = swapchain_texture.ptr,
+                };
+
+                impl_sdlgpu3.ImGui_ImplSDLGPU3_PrepareDrawData(@ptrCast(self.imgui_draw_data), @ptrCast(self.gpu.command_buffer.value));
+
+                const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
+                defer render_pass.end();
+
+                // TODO
+                // self.clay_manager.renderCommands(draw_data.clay_render_cmds);
+
+                impl_sdlgpu3.ImGui_ImplSDLGPU3_RenderDrawData(@ptrCast(self.imgui_draw_data), @ptrCast(self.gpu.command_buffer.value), @ptrCast(render_pass.value), null);
+            }
         }
     }
 }

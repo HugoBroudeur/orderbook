@@ -3,6 +3,7 @@ const Camera = @import("../renderer/camera.zig");
 const Commands = @import("../renderer/command.zig");
 const EcsManager = @import("ecs_manager.zig");
 const Ecs = @import("ecs/ecs.zig");
+const zm = @import("zmath");
 
 const SceneManager = @This();
 
@@ -35,6 +36,8 @@ pub fn render(self: *SceneManager, ecs_manager: *EcsManager) void {
     // Draw the Imgui UI
     self.draw_queue.push(.{ .imgui = .{ .data = draw_data.ui } });
 
+    // Send Camera
+
     // Draw Rect
     self.draw_queue.push(.{ .quad = .{
         .p1 = .{ .x = -1, .y = 0 },
@@ -44,16 +47,18 @@ pub fn render(self: *SceneManager, ecs_manager: *EcsManager) void {
         .color = .Red,
     } });
 
-    self.draw_queue.push(.{ .quad_fill = .{
-        .p1 = .{ .x = 0, .y = 1 },
-        .p2 = .{ .x = 1, .y = 1 },
-        .p3 = .{ .x = 1, .y = 0 },
-        .p4 = .{ .x = 0, .y = 0 },
-        .color1 = .Red,
-        .color2 = .Yellow,
-        .color3 = .Teal,
-        .color4 = .Blue,
-    } });
+    for (0..2_000) |i| {
+        self.draw_queue.push(.{ .quad_fill = .{
+            .p1 = .{ .x = 0, .y = zm.clamp((1 * (1 - @as(f32, @floatFromInt(i)) * 0.01)), -1, 1) },
+            .p2 = .{ .x = 1, .y = 1 },
+            .p3 = .{ .x = 1, .y = 0 },
+            .p4 = .{ .x = 0, .y = 0 },
+            .color1 = .Red,
+            .color2 = .Yellow,
+            .color3 = .Teal,
+            .color4 = .Blue,
+        } });
+    }
 
     self.endScene();
 }

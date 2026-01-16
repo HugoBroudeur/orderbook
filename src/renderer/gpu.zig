@@ -2,7 +2,7 @@ const std = @import("std");
 const sdl = @import("sdl3");
 
 const Texture = @import("texture.zig");
-const Window = @import("../app/window.zig");
+const Window = @import("../core/window.zig");
 
 const GPU = @This();
 
@@ -17,6 +17,7 @@ pub fn init(window: *Window) !GPU {
 
     try device.claimWindow(window.ptr);
     try device.setSwapchainParameters(window.ptr, .sdr, .vsync);
+    try device.setAllowedFramesInFlight(3);
 
     const text_engine = try sdl.ttf.GpuTextEngine.init(device);
 
