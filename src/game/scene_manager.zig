@@ -15,11 +15,18 @@ camera: Camera.Camera(.orthographic),
 current_scene: Scene,
 draw_queue: *Commands.DrawQueue,
 
+random: std.Random,
+
 pub fn init(draw_queue: *Commands.DrawQueue) SceneManager {
+    // Use current timestamp as seed
+    var prng = std.Random.DefaultPrng.init(@intCast(std.time.milliTimestamp()));
+
+    // const roll = rand.intRangeAtMost(u32, 1, 6); // Dice roll: 1-6
     return .{
         .camera = .{ .name = "2D Orthographic Camera" },
         .current_scene = .{ .name = "Main Loop" },
         .draw_queue = draw_queue,
+        .random = prng.random(),
     };
 }
 
@@ -47,12 +54,15 @@ pub fn render(self: *SceneManager, ecs_manager: *EcsManager) void {
         .color = .Red,
     } });
 
-    for (0..2_000) |i| {
+    for (0..100) |i| {
+        const r = self.random.float(f32) * 2 - 1; // generate [-1, 1]
+        const offset = zm.clamp(1 + r, -1, 1);
+        _ = i;
         self.draw_queue.push(.{ .quad_fill = .{
-            .p1 = .{ .x = 0, .y = zm.clamp((1 * (1 - @as(f32, @floatFromInt(i)) * 0.01)), -1, 1) },
-            .p2 = .{ .x = 1, .y = 1 },
-            .p3 = .{ .x = 1, .y = 0 },
-            .p4 = .{ .x = 0, .y = 0 },
+            .p1 = .{ .x = r, .y = offset },
+            .p2 = .{ .x = offset, .y = offset },
+            .p3 = .{ .x = offset, .y = r },
+            .p4 = .{ .x = r, .y = r },
             .color1 = .Red,
             .color2 = .Yellow,
             .color3 = .Teal,

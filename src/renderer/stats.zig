@@ -59,6 +59,7 @@ pub const Clock = struct {
 };
 
 frame_index: u64 = 0,
+skip_calculation: bool = false,
 
 // per-frame accumulators
 frame_vertices: u32 = 0,
@@ -70,6 +71,7 @@ frame_skipped_draws: u32 = 0,
 sec_start_ticks: u64 = 0,
 sec_draw_calls: u32 = 0,
 sec_skipped_draws: u32 = 0,
+sec_frames: u32 = 0,
 
 high_num_vertices_per_frame: u32 = 0,
 high_num_indices_per_frame: u32 = 0,
@@ -82,6 +84,7 @@ draw_call_per_frame: u32 = 0,
 skip_draw_per_frame: u32 = 0,
 draw_call_per_sec: u32 = 0,
 skip_draw_per_sec: u32 = 0,
+frame_per_sec: u32 = 0,
 
 total_skip_frame: u64 = 0,
 ratio_skip_frame: f64 = 0,
@@ -94,6 +97,7 @@ pub fn init() Stats {
 
 pub fn startFrame(self: *Stats) void {
     const now = sdl.timer.getPerformanceCounter();
+    self.skip_calculation = false;
 
     // First frame init
     if (self.frame_index == 0) {
@@ -102,38 +106,38 @@ pub fn startFrame(self: *Stats) void {
 
     self.frame_index += 1;
 
-    // === Update vertex / index stats ===
-    updateStats(
-        self.frame_vertices,
-        &self.high_num_vertices_per_frame,
-        &self.low_num_vertices_per_frame,
-        &self.average_num_vertices_per_frame,
-        self.frame_index,
-    );
-
-    updateStats(
-        self.frame_indices,
-        &self.high_num_indices_per_frame,
-        &self.low_num_indices_per_frame,
-        &self.average_num_indices_per_frame,
-        self.frame_index,
-    );
-
-    // === Accumulate per-second ===
-    self.sec_draw_calls += self.frame_draw_calls;
-    self.sec_skipped_draws += self.frame_skipped_draws;
-
-    const freq = sdl.timer.getPerformanceFrequency();
-    const elapsed_ticks = now - self.sec_start_ticks;
-
-    if (elapsed_ticks >= freq) {
-        self.draw_call_per_sec = self.sec_draw_calls;
-        self.skip_draw_per_sec = self.sec_skipped_draws;
-
-        self.sec_draw_calls = 0;
-        self.sec_skipped_draws = 0;
-        self.sec_start_ticks = now;
-    }
+    // // === Update vertex / index stats ===
+    // updateStats(
+    //     self.frame_vertices,
+    //     &self.high_num_vertices_per_frame,
+    //     &self.low_num_vertices_per_frame,
+    //     &self.average_num_vertices_per_frame,
+    //     self.frame_index,
+    // );
+    //
+    // updateStats(
+    //     self.frame_indices,
+    //     &self.high_num_indices_per_frame,
+    //     &self.low_num_indices_per_frame,
+    //     &self.average_num_indices_per_frame,
+    //     self.frame_index,
+    // );
+    //
+    // // === Accumulate per-second ===
+    // self.sec_draw_calls += self.frame_draw_calls;
+    // self.sec_skipped_draws += self.frame_skipped_draws;
+    //
+    // const freq = sdl.timer.getPerformanceFrequency();
+    // const elapsed_ticks = now - self.sec_start_ticks;
+    //
+    // if (elapsed_ticks >= freq) {
+    //     self.draw_call_per_sec = self.sec_draw_calls;
+    //     self.skip_draw_per_sec = self.sec_skipped_draws;
+    //
+    //     self.sec_draw_calls = 0;
+    //     self.sec_skipped_draws = 0;
+    //     self.sec_start_ticks = now;
+    // }
 
     // === Reset per-frame counters ===
     self.frame_vertices = 0;
@@ -149,22 +153,23 @@ pub fn endFrame(self: *Stats) void {
     // ==============================
     // Per-frame vertex/index stats
     // ==============================
+    if (!self.skip_calculation) {
+        updateStats(
+            self.frame_vertices,
+            &self.high_num_vertices_per_frame,
+            &self.low_num_vertices_per_frame,
+            &self.average_num_vertices_per_frame,
+            self.frame_index,
+        );
 
-    updateStats(
-        self.frame_vertices,
-        &self.high_num_vertices_per_frame,
-        &self.low_num_vertices_per_frame,
-        &self.average_num_vertices_per_frame,
-        self.frame_index,
-    );
-
-    updateStats(
-        self.frame_indices,
-        &self.high_num_indices_per_frame,
-        &self.low_num_indices_per_frame,
-        &self.average_num_indices_per_frame,
-        self.frame_index,
-    );
+        updateStats(
+            self.frame_indices,
+            &self.high_num_indices_per_frame,
+            &self.low_num_indices_per_frame,
+            &self.average_num_indices_per_frame,
+            self.frame_index,
+        );
+    }
 
     // ==============================
     // Draw call counters
@@ -175,6 +180,8 @@ pub fn endFrame(self: *Stats) void {
 
     self.sec_draw_calls += self.frame_draw_calls;
     self.sec_skipped_draws += self.frame_skipped_draws;
+
+    self.sec_frames += if (self.skip_calculation) 0 else 1;
 
     self.total_skip_frame += self.frame_skipped_draws;
     self.ratio_skip_frame = (1 - @as(f64, @floatFromInt(self.total_skip_frame)) / @as(f64, @floatFromInt(self.frame_index))) * 100;
@@ -192,7 +199,9 @@ pub fn endFrame(self: *Stats) void {
     if (elapsed_ticks >= freq) {
         self.draw_call_per_sec = self.sec_draw_calls;
         self.skip_draw_per_sec = self.sec_skipped_draws;
+        self.frame_per_sec = self.sec_frames;
 
+        self.sec_frames = 0;
         self.sec_draw_calls = 0;
         self.sec_skipped_draws = 0;
         self.sec_start_ticks = now;
@@ -202,26 +211,28 @@ pub fn endFrame(self: *Stats) void {
     // Timing clocks aggregation
     // ==============================
 
-    var it = self.clocks.iterator();
-    while (it.next()) |entry| {
-        const clock = entry.value;
+    if (!self.skip_calculation) {
+        var it = self.clocks.iterator();
+        while (it.next()) |entry| {
+            const clock = entry.value;
 
-        if (clock.cur > clock.last) {
-            const ms =
-                @as(f64, @floatFromInt(clock.cur - clock.last)) /
-                @as(f64, @floatFromInt(freq)) * 1000.0;
+            if (clock.cur > clock.last) {
+                const ms =
+                    @as(f64, @floatFromInt(clock.cur - clock.last)) /
+                    @as(f64, @floatFromInt(freq)) * 1000.0;
 
-            // High / Low
-            if (clock.high_ms == 0 or ms > clock.high_ms)
-                clock.high_ms = ms;
-            if (clock.low_ms == 0 or ms < clock.low_ms)
-                clock.low_ms = ms;
+                // High / Low
+                if (clock.high_ms == 0 or ms > clock.high_ms)
+                    clock.high_ms = ms;
+                if (clock.low_ms == 0 or ms < clock.low_ms)
+                    clock.low_ms = ms;
 
-            // Exponential moving average (stable & cheap)
-            if (clock.average_ms == 0)
-                clock.average_ms = ms
-            else
-                clock.average_ms = clock.average_ms * 0.9 + ms * 0.1;
+                // Exponential moving average (stable & cheap)
+                if (clock.average_ms == 0)
+                    clock.average_ms = ms
+                else
+                    clock.average_ms = clock.average_ms * 0.9 + ms * 0.1;
+            }
         }
     }
 }
@@ -236,6 +247,7 @@ pub fn addDrawCall(self: *Stats, vertices: u32, indices: u32) void {
 pub fn addSkippedDraw(self: *Stats) void {
     self.frame_skipped_draws += 1;
     self.skip_draw_per_frame += 1;
+    self.skip_calculation = true;
 }
 
 pub fn samplePrint(self: *Stats, interval: u64) void {
@@ -264,6 +276,7 @@ pub fn print(self: *Stats) void {
         \\  Indices           : {d:>6}   avg {d:>6}   min {d:>6}   max {d:>6}
         \\
         \\Per Second:
+        \\  FPS               : {d:>6}
         \\  Draw Calls        : {d:>6}
         \\  Skipped Draws     : {d:>6}
         \\
@@ -288,6 +301,7 @@ pub fn print(self: *Stats) void {
             self.low_num_indices_per_frame,
             self.high_num_indices_per_frame,
 
+            self.frame_per_sec,
             self.draw_call_per_sec,
             self.skip_draw_per_sec,
         },

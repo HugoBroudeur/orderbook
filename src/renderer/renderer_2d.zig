@@ -82,7 +82,49 @@ imgui_draw_data: *ig.ImDrawData = undefined,
 
 batcher: Batcher,
 
-// vertex_buffer: Buffer.IVertexBuffer = undefined,
+buffers: struct {
+    // vertex: Buffer.VertexBuffer = undefined,
+    // index: Buffer.IndexBuffer(.u16) = undefined,
+    // instance:
+    // mesh:
+    // material:
+    // visibility:
+    // visible_counter:
+    // draw_command:
+    // prefix_sum:
+    // particle0:
+    // particle1:
+} = .{},
+pipelines_: struct {
+    graphics: struct {
+        // line:
+        // fill:
+        // uber:
+        // pbr:
+        // tonemap:
+        // particle:
+    } = .{},
+    compute: struct {
+        //    proc_texture:
+        //    noise_texture:
+        //    particle_force:
+        //    particle_integrate:
+        //    particle_single_buffer:
+        //    reset_counter:
+        //    culling:
+        //    command_building:
+        //    prefix_sum:
+
+    } = .{},
+} = .{},
+textures_: struct {
+    // proc:
+    // noise:
+    // msaa:
+    // depth
+    // resolve
+    // tonemapped
+} = .{},
 
 is_minimised: bool = false,
 

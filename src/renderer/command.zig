@@ -8,6 +8,7 @@ const Batcher = @import("batcher.zig");
 const Texture = @import("texture.zig");
 const Renderer2D = @import("renderer_2d.zig");
 const Primitive = @import("../primitive.zig");
+const Clay = @import("zclay");
 const Rect = Primitive.Rect;
 const Color = Primitive.Color;
 const Point = Primitive.Point;
@@ -44,6 +45,10 @@ pub const QuadFillCmd = struct {
 
 pub const ImguiCmd = struct {
     data: *ig.ImDrawData,
+};
+
+pub const ClayCmd = struct {
+    render_cmd: Clay.RenderCommand,
 };
 
 pub const DrawQueue = struct {
@@ -89,6 +94,7 @@ pub const DrawCmd = union(enum) {
     quad_img: QuadImgCmd,
     quad_fill: QuadFillCmd,
     imgui: ImguiCmd,
+    clay: ClayCmd,
 
     pub inline fn getRect(self: DrawCmd) Rect {
         var rect: Rect = undefined;

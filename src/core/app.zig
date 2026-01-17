@@ -30,6 +30,7 @@ const WINDOW_HEIGHT = 1060;
 const WINDOW_TITLE = "Price is Power";
 const FPS_THREASHOLD: u32 = 140;
 const FPS_LIMITER: bool = false;
+const V_SYNC: bool = true;
 const IMGUI_HAS_DOCK = false;
 const SDL_INIT_FLAGS: sdl.InitFlags = .{ .video = true, .gamepad = true, .audio = true };
 
@@ -54,7 +55,7 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
         return err;
     };
     try window.setIcon("assets/favicon.ico");
-    window.setVSync(true);
+    window.setVSync(V_SYNC);
 
     sandbox_layer = SandboxLayer.init("Sandbox layer", allocator, config, &window, &framerate);
     layer_stack = try LayerStack.LayerStack(MAX_LAYERS, MAX_OVERLAYS).init();

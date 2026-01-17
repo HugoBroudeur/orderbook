@@ -12,20 +12,17 @@ pub const WindowProps = struct {
     title: [:0]const u8 = "Price is Power",
     width: u32 = 1920,
     heigth: u32 = 1060,
-    framerate_limit: u32 = 140,
 };
 
 ptr: sdl.video.Window,
-framerate_limit: u32,
 // callback: ?Event.EventFn,
 callback: ?*const fn (ev: *Event) void,
 
 pub fn create(props: WindowProps) !Window {
-    std.log.info("[Window] Creating window [\"{s}\"] ({}x{}) (framerate_limit {})", .{
+    std.log.info("[Window] Creating window [\"{s}\"] ({}x{})", .{
         props.title,
         props.width,
         props.heigth,
-        props.framerate_limit,
     });
     std.debug.assert(sdl.wasInit(.{}).video);
 
@@ -36,7 +33,20 @@ pub fn create(props: WindowProps) !Window {
         .{ .centered = try ptr.getDisplayForWindow() },
     );
 
-    return .{ .ptr = ptr, .callback = null, .framerate_limit = props.framerate_limit };
+    std.log.info(
+        \\==================== Window created ====================
+        \\  Id:                : {}
+        // \\  VSync:             : {?}
+        // \\  Icc Profile:       : {s}
+    ,
+        .{
+            try ptr.getId(),
+            // try ptr.getSurfaceVSync(),
+            // try ptr.getIccProfile(),
+        },
+    );
+
+    return .{ .ptr = ptr, .callback = null };
 }
 
 pub fn deinit(self: *Window) void {
@@ -64,13 +74,13 @@ pub fn setEventCallback(self: *Window, callback: *const fn (ev: *Event) void) vo
 
 pub fn setVSync(self: *Window, enabled: bool) void {
     if (enabled) {
-        self.ptr.setSurfaceVSync(.{ .on_each_num_refresh = @intCast(self.framerate_limit) }) catch |err| {
-            std.log.err("[Window] Can't set VSync \"on each num refresh\" with the framerate_limit {}: {}. SDL error: {?s}", .{ self.framerate_limit, err, sdl.errors.get() });
-
-            self.ptr.setSurfaceVSync(.{ .adaptive = undefined }) catch |er| {
-                std.log.err("[Window] Can't set VSync \"adaptive\": {}. SDL error: {?s}", .{ er, sdl.errors.get() });
-            };
+        self.ptr.setSurfaceVSync(.{ .adaptive = undefined }) catch |err| {
+            std.log.err("[Window] Can't set VSync \"adaptive\": {}. SDL error: {?s}", .{ err, sdl.errors.get() });
         };
+        // self.ptr.setSurfaceVSync(.{ .on_each_num_refresh =  }) catch |err| {
+        //     std.log.err("[Window] Can't set VSync \"on each num refresh\" with the framerate_limit {}: {}. SDL error: {?s}", .{ self.framerate_limit, err, sdl.errors.get() });
+        //
+        // };
     } else {
         self.ptr.setSurfaceVSync(null) catch |err| {
             std.log.err("[Window] Can't turn off VSync: {}. SDL error: {?s}", .{ err, sdl.errors.get() });

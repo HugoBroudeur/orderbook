@@ -13,7 +13,7 @@ command_buffer: sdl.gpu.CommandBuffer = undefined,
 text_engine: sdl.ttf.GpuTextEngine,
 
 pub fn init(window: *Window) !GPU {
-    var device = try sdl.gpu.Device.init(.{ .spirv = true, .dxil = true, .metal_lib = true }, true, null);
+    var device = try sdl.gpu.Device.init(.{ .spirv = true, .dxil = true, .metal_lib = true }, false, null);
 
     try device.claimWindow(window.ptr);
     try device.setSwapchainParameters(window.ptr, .sdr, .vsync);
