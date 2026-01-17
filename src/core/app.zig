@@ -6,8 +6,8 @@ const Config = @import("../config.zig");
 const Colors = @import("../game/colors.zig");
 
 const sdl = @import("sdl3");
-const impl_sdl3 = @import("impl_sdl3");
-const impl_sdlgpu3 = @import("impl_sdlgpu3");
+// const impl_sdl3 = @import("impl_sdl3");
+// const impl_sdlgpu3 = @import("impl_sdlgpu3");
 const ifa = @import("fonticon");
 
 const Layer = @import("layer.zig");
@@ -15,6 +15,7 @@ const LayerStack = @import("layer_stack.zig");
 const Framerate = @import("framerate.zig");
 const SandboxLayer = @import("../layers/sandbox.zig");
 const Window = @import("window.zig");
+const Display = @import("display.zig");
 const Event = @import("../events/event.zig");
 
 const App = @This();
@@ -28,9 +29,9 @@ const MAX_OVERLAYS = 0;
 const WINDOW_WIDTH = 1920;
 const WINDOW_HEIGHT = 1060;
 const WINDOW_TITLE = "Price is Power";
-const FPS_THREASHOLD: u32 = 140;
-const FPS_LIMITER: bool = false;
-const V_SYNC: bool = true;
+const FPS_THREASHOLD: u32 = 165;
+const FPS_LIMITER: bool = true;
+const V_SYNC: bool = false;
 const IMGUI_HAS_DOCK = false;
 const SDL_INIT_FLAGS: sdl.InitFlags = .{ .video = true, .gamepad = true, .audio = true };
 
@@ -38,9 +39,11 @@ const SDL_INIT_FLAGS: sdl.InitFlags = .{ .video = true, .gamepad = true, .audio 
 // Global state
 //
 
+var has_booted: bool = false;
+var display: Display = undefined;
 var window: Window = undefined;
 var running = true;
-var framerate = Framerate.Fixed.init(FPS_THREASHOLD);
+var framerate: Framerate.Fixed = undefined;
 var layer_stack: LayerStack.LayerStack(MAX_LAYERS, MAX_OVERLAYS) = undefined;
 var sandbox_layer: SandboxLayer = undefined;
 
@@ -50,17 +53,22 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
 
     try initSdlBackend();
 
+    display = try .init();
     window = Window.create(.{}) catch |err| {
         std.log.err("[App] Can't create the Window : {}", .{err});
         return err;
     };
+    display.detectCurrentDisplay(&window);
+    window.center(display);
     try window.setIcon("assets/favicon.ico");
-    window.setVSync(V_SYNC);
+    // window.setVSync(V_SYNC);
+    framerate = Framerate.Fixed.init(@intFromFloat(display.refresh_rate));
 
-    sandbox_layer = SandboxLayer.init("Sandbox layer", allocator, config, &window, &framerate);
+    sandbox_layer = SandboxLayer.init(allocator, config, &window, &framerate);
     layer_stack = try LayerStack.LayerStack(MAX_LAYERS, MAX_OVERLAYS).init();
 
     try pushLayer(sandbox_layer.interface());
+    has_booted = true;
 }
 
 pub fn run() void {
@@ -88,7 +96,7 @@ pub fn run() void {
 
 pub fn pollEvent() void {
     while (sdl.events.poll()) |event| {
-        _ = impl_sdl3.ImGui_ImplSDL3_ProcessEvent(@ptrCast(&event.toSdl()));
+        // _ = impl_sdl3.ImGui_ImplSDL3_ProcessEvent(@ptrCast(&event.toSdl()));
         const ev = Event.create(event);
 
         for (layer_stack.stack()) |layer| {
@@ -106,6 +114,10 @@ pub fn pollEvent() void {
                     }
                 }
             },
+            .window_display_changed => {
+                display.detectCurrentDisplay(&window);
+                framerate.setTargetFps(@intFromFloat(display.refresh_rate));
+            },
             else => {},
         }
     }
@@ -121,8 +133,10 @@ pub fn initSdlBackend() !void {
 }
 
 pub fn shutdown() void {
-    for (layer_stack.stack()) |layer| {
-        layer.deinit();
+    if (has_booted) {
+        for (layer_stack.stack()) |layer| {
+            layer.deinit();
+        }
     }
     window.deinit();
 
@@ -134,10 +148,16 @@ pub fn shutdown() void {
 
 pub fn pushLayer(layer: Layer) !void {
     layer_stack.pushLayer(layer);
-    try layer.onAttach();
+    layer.onAttach() catch |err| {
+        std.log.err("[App] Error while attaching layer {s}. {}", .{ layer.getLabel(), err });
+        return err;
+    };
 }
 
 pub fn pushOverlay(layer: Layer) !void {
     layer_stack.pushOverlay(layer);
-    try layer.onAttach();
+    layer.onAttach() catch |err| {
+        std.log.err("[App] Error while attaching layer {s}. {}", .{ layer.getLabel(), err });
+        return err;
+    };
 }

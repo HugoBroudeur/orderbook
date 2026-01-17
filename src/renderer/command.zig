@@ -12,7 +12,7 @@ const Clay = @import("zclay");
 const Rect = Primitive.Rect;
 const Color = Primitive.Color;
 const Point = Primitive.Point;
-const ig = @import("cimgui");
+// const ig = @import("cimgui");
 
 const COMMAND_QUEUE_SIZE = 1000000;
 
@@ -44,7 +44,8 @@ pub const QuadFillCmd = struct {
 };
 
 pub const ImguiCmd = struct {
-    data: *ig.ImDrawData,
+    data: *anyopaque,
+    // data: *ig.ImDrawData,
 };
 
 pub const ClayCmd = struct {

@@ -255,8 +255,6 @@ pub fn samplePrint(self: *Stats, interval: u64) void {
         self.frame_index == 1 or
         self.frame_index == 2 or
         self.frame_index == 3 or
-        self.frame_index == 4 or
-        self.frame_index == 5 or
         self.frame_index % interval == 0)
     {
         self.print();

@@ -1,6 +1,6 @@
 const sdl = @import("sdl3");
 const vec = @import("../math/vec.zig");
-const ig = @import("cimgui");
+// const ig = @import("cimgui");
 const clay = @import("zclay");
 const Color = @import("../../colors.zig");
 
@@ -17,7 +17,8 @@ pub const DrawData = struct {
     time: u64 = 0,
     dt: u64 = 0,
     // clear_color: Color = Color.Transparent,
-    ui: *ig.ImDrawData = undefined,
+    // ui: *ig.ImDrawData = undefined,
+    ui: *anyopaque = undefined,
     clay_render_cmds: []clay.RenderCommand = &.{},
     // pass_action: sg.PassAction = .{},
 };

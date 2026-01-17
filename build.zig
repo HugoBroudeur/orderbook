@@ -14,7 +14,12 @@ const protobuf_files = &.{ "proto", "proto/all.proto", "proto/orderbook/v1/order
 // };
 
 pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{});
+    // const target = b.standardTargetOptions(.{});
+    const target = b.standardTargetOptions(.{ .default_target = .{
+        .cpu_arch = .x86_64,
+        .os_tag = .linux,
+        .abi = .gnu,
+    } });
     const optimize = b.standardOptimizeOption(.{});
 
     // Get executable name from current directory name
@@ -56,11 +61,11 @@ pub fn build(b: *std.Build) !void {
         // .ext_net = false,
         .ext_ttf = true,
         // .log_message_stack_size = 1024,
-        // .main = false,
+        // .main = false, // default false
         // .renderer_debug_text_stack_size = 1024,
 
         // Options passed directly to https://github.com/castholm/SDL (SDL3 C Bindings):
-        // .c_sdl_preferred_linkage = .static,
+        // .c_sdl_preferred_linkage = .static, // default .static
         // .c_sdl_strip = false,
         // .c_sdl_sanitize_c = .off,
         // .c_sdl_lto = .none,
@@ -166,9 +171,17 @@ pub fn build(b: *std.Build) !void {
         // Static link
         exe.addObjectFile(b.path(b.pathJoin(&.{ sdlPath, "lib", "libSDL3.dll.a" })));
     } else if (builtin.target.os.tag == .linux) {
-        exe.root_module.linkSystemLibrary("GL", .{});
+        // exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
+        exe.addLibraryPath(.{ .cwd_relative = "/usr/lib64" });
+        exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+        // exe.addLibraryPath(.{ .cwd_relative = "/usr/opt/lib64" });
+        // exe.addLibraryPath(.{ .cwd_relative = "/usr/opt/lib" });
+        // exe.addLibraryPath(.{ .cwd_relative = "/usr/cuda/lib64" });
+        // exe.addLibraryPath(.{ .cwd_relative = "/usr/cuda/lib" });
+
+        // exe.root_module.linkSystemLibrary("GL", .{});
         exe.root_module.linkSystemLibrary("X11", .{});
-        exe.root_module.linkSystemLibrary("SDL3", .{});
+        // exe.root_module.linkSystemLibrary("SDL3", .{});
         // exe.root_module.linkSystemLibrary("SDL3_ttf", .{});
         // exe.root_module.linkSystemLibrary("sqlite3", .{});
     }
@@ -185,7 +198,9 @@ pub fn build(b: *std.Build) !void {
     // root_module
     exe.root_module.link_libc = true;
     exe.root_module.link_libcpp = true;
-    exe.subsystem = .Windows; // Hide console window
+    if (builtin.target.os.tag == .windows) {
+        exe.subsystem = .Windows; // Hide console window
+    }
 
     b.installArtifact(exe);
 
@@ -247,14 +262,15 @@ pub fn build(b: *std.Build) !void {
     // const resExeIni = b.addInstallFile(b.path(sExeIni), b.pathJoin(&.{ "bin", sExeIni }));
     // b.getInstallStep().dependOn(&resExeIni.step);
 
-    if (true) { // Enable if use SDL3.dll with dynamic linking.
-        const resSdlDll = b.pathJoin(&.{ sdlPath, "bin", "SDL3.dll" });
-        const resSdl = b.addInstallFile(b.path(resSdlDll), "bin/SDL3.dll");
-        b.getInstallStep().dependOn(&resSdl.step);
-    }
+    // if (true) { // Enable if use SDL3.dll with dynamic linking.
+    //     const resSdlDll = b.pathJoin(&.{ sdlPath, "bin", "SDL3.dll" });
+    //     const resSdl = b.addInstallFile(b.path(resSdlDll), "bin/SDL3.dll");
+    //     b.getInstallStep().dependOn(&resSdl.step);
+    // }
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
+    run_cmd.skip_foreign_checks = true;
 
     if (b.args) |args| {
         run_cmd.addArgs(args);

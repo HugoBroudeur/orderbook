@@ -13,11 +13,11 @@ command_buffer: sdl.gpu.CommandBuffer = undefined,
 text_engine: sdl.ttf.GpuTextEngine,
 
 pub fn init(window: *Window) !GPU {
-    var device = try sdl.gpu.Device.init(.{ .spirv = true, .dxil = true, .metal_lib = true }, false, null);
-
+    var device = try sdl.gpu.Device.init(.{ .spirv = true, .dxil = true, .metal_lib = true }, true, null);
     try device.claimWindow(window.ptr);
-    try device.setSwapchainParameters(window.ptr, .sdr, .vsync);
-    try device.setAllowedFramesInFlight(3);
+
+    const frame_in_flight = 2;
+    try setSwapchainParameters(&device, window, frame_in_flight);
 
     const text_engine = try sdl.ttf.GpuTextEngine.init(device);
 
@@ -54,71 +54,56 @@ pub fn acquireSwapchainTexture(self: *GPU) !?Texture {
     return null;
 }
 
-// fn uploadTextureToGPU(self: *GPU) !void {
-//     std.log.info("[GPU.uploadTextureToGPU]", .{});
-//
-//
-//     self.command_buffer = self.device.acquireCommandBuffer() catch {
-//         std.log.err("[GPU.sendSetupDataToGpu] {?s}", .{sdl.errors.get()});
-//         return;
-//     };
-//     defer {
-//         self.command_buffer.submit() catch {
-//             std.log.err("[GPU.sendSetupDataToGpu] Command Buffer error: {?s}", .{sdl.errors.get()});
-//         };
-//     }
-//
-//     {
-//         const copy_pass = self.command_buffer.beginCopyPass();
-//         defer copy_pass.end();
-//
-//         {
-//             const tbo = self.transfer_buffers.get(.atlas_buffer_data);
-//             const pipeline = self.pipelines.get(.solid);
-//             {
-//                 const vbo = self.buffers.get(.solid_vertex);
-//                 copy_pass.uploadToBuffer(.{ .transfer_buffer = tbo, .offset = 0 }, .{
-//                     .buffer = vbo,
-//                     .offset = 0,
-//                     // TODO: Vertex Buffer should have more info
-//                     .size = pipeline.vertex_size * 2,
-//                 }, false);
-//             }
-//             {
-//                 const ibo = self.buffers.get(.solid_index);
-//                 copy_pass.uploadToBuffer(.{ .transfer_buffer = tbo, .offset = pipeline.vertex_size }, .{
-//                     .buffer = ibo,
-//                     .offset = 0,
-//                     // TODO: Vertex Buffer should have more info
-//                     .size = pipeline.index_size * 2,
-//                 }, false);
-//             }
-//         }
-//         {
-//             const tbo = self.transfer_buffers.get(.atlas_texture_data);
-//             const texture = self.textures.get(.atlas);
-//             const img = self.images.get(.atlas);
-//             copy_pass.uploadToTexture(.{ .transfer_buffer = tbo, .offset = 0 }, .{
-//                 .texture = texture,
-//                 .width = @intCast(img.getWidth()),
-//                 .height = @intCast(img.getHeight()),
-//                 .depth = 1,
-//             }, false);
-//         }
-//     }
-//
-//     // { // Debug
-//     //     if (self.images.get(.atlas)) |img| {
-//     //         const pixels = img.getPixels().?;
-//     //         std.log.info("Image: {}x{}, {} bytes", .{ img.getWidth(), img.getHeight(), pixels.len });
-//     //
-//     //         // Check first few pixels (should NOT be all zeros)
-//     //         std.log.info("First pixel (format {}): ({}, {}, {})", .{ img.getFormat().?, pixels[0], pixels[1], pixels[2] });
-//     //         std.log.info("Pixel at 100: ({}, {}, {})", .{ pixels[300], pixels[301], pixels[302] });
-//     //
-//     //         // Calculate expected size
-//     //         const expected_rgba_size = img.getWidth() * img.getHeight() * 4;
-//     //         std.log.info("Expected buffer size: {}", .{expected_rgba_size});
-//     //     }
-//     // }
-// }
+fn setSwapchainParameters(device: *sdl.gpu.Device, window: *Window, frame_in_flight: u32) !void {
+    var present_mode: sdl.gpu.PresentMode = .vsync;
+    if (device.windowSupportsPresentMode(window.ptr, .mailbox)) {
+        present_mode = .mailbox;
+    }
+    if (device.windowSupportsPresentMode(window.ptr, .immediate)) {
+        present_mode = .immediate;
+    }
+    // if (device.windowSupportsPresentMode(window.ptr, .vsync)) {
+    //     present_mode = .vsync;
+    // }
+
+    var composition: sdl.gpu.SwapchainComposition = .sdr;
+    if (device.windowSupportsSwapchainComposition(window.ptr, .sdr_linear)) {
+        composition = .sdr_linear;
+    }
+    if (device.windowSupportsSwapchainComposition(window.ptr, .hdr10_st2084)) {
+        composition = .hdr10_st2084;
+    }
+    if (device.windowSupportsSwapchainComposition(window.ptr, .hdr_extended_linear)) {
+        composition = .hdr_extended_linear;
+    }
+
+    std.log.info(
+        \\==================== GPU info ====================
+        \\  Drivers count                         : {}
+        \\  Support VSync                         : {}
+        \\  Support Mailbox                       : {}
+        \\  Support Immediate                     : {}
+        \\  Support Swapchain sdr                 : {}
+        \\  Support Swapchain sdr_linear          : {}
+        \\  Support Swapchain hdr10_st2084        : {}
+        \\  Support Swapchain hdr_extended_linear : {}
+        \\  Chosen mode                           : {s}
+        \\  Chosen composition                    : {s}
+    ,
+        .{
+            sdl.gpu.getNumDrivers(),
+            device.windowSupportsPresentMode(window.ptr, .vsync),
+            device.windowSupportsPresentMode(window.ptr, .mailbox),
+            device.windowSupportsPresentMode(window.ptr, .immediate),
+            device.windowSupportsSwapchainComposition(window.ptr, .sdr),
+            device.windowSupportsSwapchainComposition(window.ptr, .sdr_linear),
+            device.windowSupportsSwapchainComposition(window.ptr, .hdr10_st2084),
+            device.windowSupportsSwapchainComposition(window.ptr, .hdr_extended_linear),
+            @tagName(present_mode),
+            @tagName(composition),
+        },
+    );
+
+    try device.setSwapchainParameters(window.ptr, composition, present_mode);
+    try device.setAllowedFramesInFlight(frame_in_flight);
+}

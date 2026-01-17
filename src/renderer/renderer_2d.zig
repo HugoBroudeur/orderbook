@@ -5,9 +5,9 @@ const assert = std.debug.assert;
 const sdl = @import("sdl3");
 const tracy = @import("tracy");
 
-const ig = @import("cimgui");
-const impl_sdl3 = @import("impl_sdl3");
-const impl_sdlgpu3 = @import("impl_sdlgpu3");
+// const ig = @import("cimgui");
+// const impl_sdl3 = @import("impl_sdl3");
+// const impl_sdlgpu3 = @import("impl_sdlgpu3");
 const zm = @import("zmath");
 
 const UiManager = @import("../game/ui_manager.zig");
@@ -78,7 +78,8 @@ nearest_sampler: Sampler = undefined,
 pipelines: std.EnumArray(PipelineType, Pipeline) = .initUndefined(),
 textures: std.EnumArray(TextureType, Texture) = .initUndefined(),
 
-imgui_draw_data: *ig.ImDrawData = undefined,
+// imgui_draw_data: *ig.ImDrawData = undefined,
+imgui_draw_data: *anyopaque = undefined,
 
 batcher: Batcher,
 
@@ -143,8 +144,8 @@ pub fn deinit(self: *Renderer) void {
         Logger.err("[Renderer2D.deinit] Zig Error {}. SDL Error: {?s}", .{ err, sdl.errors.get() });
         unreachable;
     };
-    impl_sdl3.ImGui_ImplSDL3_Shutdown();
-    impl_sdlgpu3.ImGui_ImplSDLGPU3_Shutdown();
+    // impl_sdl3.ImGui_ImplSDL3_Shutdown();
+    // impl_sdlgpu3.ImGui_ImplSDLGPU3_Shutdown();
 
     self.ctx.deinit();
 
@@ -181,8 +182,8 @@ pub fn setup(
 
     self.ctx = Api.createGraphicCtx(window);
 
-    self.gpu = Api.createGPU(window) catch |err| {
-        Logger.err("[Renderer2D.setup] {}: {?s}", .{ err, sdl.errors.get() });
+    self.gpu = GPU.init(window) catch |err| {
+        Logger.err("[GPU.init] {}: {?s}", .{ err, sdl.errors.get() });
         return err;
     };
     self.api = Api.init(&self.gpu);
@@ -270,14 +271,15 @@ pub fn setup(
 }
 
 fn initImgui(self: *Renderer) !void {
-    _ = impl_sdl3.ImGui_ImplSDL3_InitForSDLGPU(@ptrCast(self.ctx.window.ptr.value));
-    var init_info: impl_sdlgpu3.ImGui_ImplSDLGPU3_InitInfo = undefined;
-    init_info.Device = @ptrCast(self.gpu.device.value);
-
-    const texture_format = try self.gpu.getSwapchainTextureFormat();
-    init_info.ColorTargetFormat = @intFromEnum(texture_format.ptr);
-    init_info.MSAASamples = @intFromEnum(sdl.gpu.SampleCount.no_multisampling);
-    _ = impl_sdlgpu3.ImGui_ImplSDLGPU3_Init(&init_info);
+    _ = self;
+    // _ = impl_sdl3.ImGui_ImplSDL3_InitForSDLGPU(@ptrCast(self.ctx.window.ptr.value));
+    // var init_info: impl_sdlgpu3.ImGui_ImplSDLGPU3_InitInfo = undefined;
+    // init_info.Device = @ptrCast(self.gpu.device.value);
+    //
+    // const texture_format = try self.gpu.getSwapchainTextureFormat();
+    // init_info.ColorTargetFormat = @intFromEnum(texture_format.ptr);
+    // init_info.MSAASamples = @intFromEnum(sdl.gpu.SampleCount.no_multisampling);
+    // _ = impl_sdlgpu3.ImGui_ImplSDLGPU3_Init(&init_info);
 }
 
 pub fn initUniform(self: *Renderer) void {
@@ -309,8 +311,8 @@ pub fn startFrame(self: *Renderer) void {
     _ = self;
 
     // Mandatory start a Imgui frame binding
-    impl_sdlgpu3.ImGui_ImplSDLGPU3_NewFrame();
-    impl_sdl3.ImGui_ImplSDL3_NewFrame();
+    // impl_sdlgpu3.ImGui_ImplSDLGPU3_NewFrame();
+    // impl_sdl3.ImGui_ImplSDL3_NewFrame();
 }
 
 pub fn drawFrame(self: *Renderer) void {
@@ -373,45 +375,6 @@ fn drawDemo(self: *Renderer) void {
     self.gpu.command_buffer.pushVertexUniformData(0, &mvp_bytes);
 
     render_pass.drawPrimitives(3, 1, 0, 0);
-}
-
-pub fn drawUi(self: *Renderer) void {
-    const swapchain_texture = self.textures.get(.swapchain);
-    const gpu_target_info: sdl.gpu.ColorTargetInfo = .{
-        .store = .store,
-        .texture = swapchain_texture.ptr,
-    };
-
-    impl_sdlgpu3.ImGui_ImplSDLGPU3_PrepareDrawData(@ptrCast(self.imgui_draw_data), @ptrCast(self.gpu.command_buffer.value));
-
-    // Setup and start a render pass
-    const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
-    defer render_pass.end();
-
-    // TODO
-    // self.clay_manager.renderCommands(draw_data.clay_render_cmds);
-
-    // var pipeline = self.pipelines.get(._2d);
-    // pipeline.bind(render_pass);
-    // // TODO viewport
-    // // TODO scisor
-    // const mvp_bytes = std.mem.toBytes(self.uniforms.mvp);
-    // const time_bytes = std.mem.toBytes(self.uniforms.time);
-    //
-    // self.gpu.command_buffer.pushVertexUniformData(0, &mvp_bytes);
-    // self.gpu.command_buffer.pushFragmentUniformData(0, &time_bytes);
-    // self.vertex_buffer.bind(render_pass);
-    // self.index_buffer.bind(render_pass);
-    // var texture = self.textures.get(.atlas);
-    // texture.bind(render_pass, self.nearest_sampler);
-    // render_pass.bindVertexBuffers(0, &.{.{ .buffer = self.gpu.buffers.get(.ui_vertex), .offset = 0 }});
-    // render_pass.bindIndexBuffer(.{ .buffer = self.gpu.buffers.get(.ui_index), .offset = 0 }, .indices_16bit);
-    // render_pass.bindFragmentSamplers(0, &.{.{ .texture = self.gpu.textures.get(.atlas), .sampler = self.gpu.samplers.get(.nearest) }});
-
-    // render_pass.drawIndexedPrimitives(6, 2, 0, 0, 0);
-
-    // Render ImGui
-    impl_sdlgpu3.ImGui_ImplSDLGPU3_RenderDrawData(@ptrCast(self.imgui_draw_data), @ptrCast(self.gpu.command_buffer.value), @ptrCast(render_pass.value), null);
 }
 
 fn draw2D(self: *Renderer) void {
@@ -509,7 +472,7 @@ pub fn draw(self: *Renderer, batches: []Batcher.Batch) void {
     defer {
         self.stats.tickClock(.frame);
         self.stats.endFrame();
-        self.stats.samplePrint(500); // print every 1000 frames
+        self.stats.samplePrint(5000); // print every 5000 frames
     }
 
     self.uniforms.time.time = @floatFromInt(sdl.timer.getMillisecondsSinceInit() / 1000); // convert to seconds
@@ -699,26 +662,26 @@ pub fn draw(self: *Renderer, batches: []Batcher.Batch) void {
                 // render_pass.drawIndexedPrimitives(0, 1, 0, 0, 0);
             }
 
-            { // RenderPass UI (CIMGUI)
-                self.stats.startClock(.render_pass_ui);
-                defer self.stats.tickClock(.render_pass_ui);
-
-                const gpu_target_info: sdl.gpu.ColorTargetInfo = .{
-                    .store = .store,
-                    .load = .load,
-                    .texture = swapchain_texture.ptr,
-                };
-
-                impl_sdlgpu3.ImGui_ImplSDLGPU3_PrepareDrawData(@ptrCast(self.imgui_draw_data), @ptrCast(self.gpu.command_buffer.value));
-
-                const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
-                defer render_pass.end();
-
-                // TODO
-                // self.clay_manager.renderCommands(draw_data.clay_render_cmds);
-
-                impl_sdlgpu3.ImGui_ImplSDLGPU3_RenderDrawData(@ptrCast(self.imgui_draw_data), @ptrCast(self.gpu.command_buffer.value), @ptrCast(render_pass.value), null);
-            }
+            // { // RenderPass UI (CIMGUI)
+            //     self.stats.startClock(.render_pass_ui);
+            //     defer self.stats.tickClock(.render_pass_ui);
+            //
+            //     const gpu_target_info: sdl.gpu.ColorTargetInfo = .{
+            //         .store = .store,
+            //         .load = .load,
+            //         .texture = swapchain_texture.ptr,
+            //     };
+            //
+            //     impl_sdlgpu3.ImGui_ImplSDLGPU3_PrepareDrawData(@ptrCast(self.imgui_draw_data), @ptrCast(self.gpu.command_buffer.value));
+            //
+            //     const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
+            //     defer render_pass.end();
+            //
+            //     // TODO
+            //     // self.clay_manager.renderCommands(draw_data.clay_render_cmds);
+            //
+            //     impl_sdlgpu3.ImGui_ImplSDLGPU3_RenderDrawData(@ptrCast(self.imgui_draw_data), @ptrCast(self.gpu.command_buffer.value), @ptrCast(render_pass.value), null);
+            // }
         }
     }
 }

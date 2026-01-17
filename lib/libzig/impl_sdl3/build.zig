@@ -28,14 +28,16 @@ pub fn build(b: *std.Build) void {
     const mod = step.addModule(mod_name);
     mod.addImport(mod_name, mod);
 
-    switch (builtin.target.os.tag) {
-        .windows => {
-            mod.addIncludePath(b.path(b.pathJoin(&.{ sdl_path, "include/SDL3" })));
-            mod.addIncludePath(b.path(b.pathJoin(&.{ sdl_path, "include" })));
-        },
-        .linux => mod.addIncludePath(.{ .cwd_relative = "/usr/include/SDL3" }),
-        else => {},
-    }
+    mod.addIncludePath(b.path(b.pathJoin(&.{ sdl_path, "include/SDL3" })));
+    mod.addIncludePath(b.path(b.pathJoin(&.{ sdl_path, "include" })));
+    // switch (builtin.target.os.tag) {
+    //     .windows => {
+    //         mod.addIncludePath(b.path(b.pathJoin(&.{ sdl_path, "include/SDL3" })));
+    //         mod.addIncludePath(b.path(b.pathJoin(&.{ sdl_path, "include" })));
+    //     },
+    //     .linux => mod.addIncludePath(.{ .cwd_relative = "/usr/include/SDL3" }),
+    //     else => {},
+    // }
 
     mod.addCMacro("CIMGUI_USE_SDL3", "");
     mod.addIncludePath(b.path("../../libc/cimgui"));

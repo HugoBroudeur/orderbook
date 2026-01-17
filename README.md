@@ -11,6 +11,15 @@ On Open Suse
 
 ```bash
 sudo zypper install SDL3-devel SDL3_ttf-devel SDL3_image-devel
+sudo zypper install vulkan-tools vulkan-validationlayer
+sudo zypper install slangc
+```
+
+For Fish
+Export the Vulkan validation layer for debugging
+```bash
+# In ~/.config/fish/config.fish
+set -gx VK_LAYER_PATH "/usr/share/vulkan/explicit_layer.d"
 ```
 
 ## Architecture (AI based but good ideas in there)

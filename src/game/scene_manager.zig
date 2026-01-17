@@ -36,12 +36,13 @@ pub fn deinit(self: *SceneManager) void {
 
 pub fn render(self: *SceneManager, ecs_manager: *EcsManager) void {
     Ecs.logger.info("[SceneManager.render] Camera: {s}", .{self.camera.name});
-    const draw_data = ecs_manager.get_singleton(Ecs.components.Graphics.DrawData);
+    _ = ecs_manager;
+    // const draw_data = ecs_manager.get_singleton(Ecs.components.Graphics.DrawData);
 
     self.beginScene();
 
     // Draw the Imgui UI
-    self.draw_queue.push(.{ .imgui = .{ .data = draw_data.ui } });
+    // self.draw_queue.push(.{ .imgui = .{ .data = draw_data.ui } });
 
     // Send Camera
 

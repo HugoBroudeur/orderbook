@@ -17,13 +17,13 @@ const Layer = @import("../core/layer.zig");
 const MarketManager = @import("../game/market_manager.zig");
 const Renderer2D = @import("../renderer/renderer_2d.zig");
 const SceneManager = @import("../game/scene_manager.zig");
-const UiManager = @import("../game/ui_manager.zig");
-const UiSystem = @import("../game/ecs/systems/ui_system.zig");
+// const UiManager = @import("../game/ui_manager.zig");
+// const UiSystem = @import("../game/ecs/systems/ui_system.zig");
 
 const SandboxLayer = @This();
 
 allocator: std.mem.Allocator,
-name: []const u8,
+label: []const u8 = "Sandbox Layer",
 config: Config,
 window: *Window,
 framerate: *Framerate,
@@ -36,18 +36,16 @@ font_manager: FontManager = undefined,
 market_manager: MarketManager = undefined,
 renderer_2d: Renderer2D = undefined,
 scene_manager: SceneManager = undefined,
-ui_manager: UiManager = undefined,
-ui_system: UiSystem = undefined,
+// ui_manager: UiManager = undefined,
+// ui_system: UiSystem = undefined,
 
 pub fn init(
-    name: []const u8,
     allocator: std.mem.Allocator,
     config: Config,
     window: *Window,
     framerate: *Framerate,
 ) SandboxLayer {
     return .{
-        .name = name,
         .allocator = allocator,
         .config = config,
         .window = window,
@@ -62,7 +60,7 @@ pub fn deinit(self: *SandboxLayer) void {
     self.ecs_manager.deinit();
     self.scene_manager.deinit();
     self.renderer_2d.deinit();
-    self.ui_manager.deinit();
+    // self.ui_manager.deinit();
     self.font_manager.deinit();
     self.scene_manager.deinit();
 }
@@ -71,21 +69,29 @@ pub fn interface(self: *SandboxLayer) Layer {
     return Layer.init(self);
 }
 
+pub fn getLabel(self: *SandboxLayer) []const u8 {
+    return self.label;
+}
+
 pub fn onAttach(self: *SandboxLayer) !void {
     self.db_manager = DbManager.init(self.allocator, self.config) catch |err| {
         std.log.err("[Game][init] Can't initiate DbManager: {}", .{err});
         return err;
     };
-    self.ui_system = UiSystem.init();
+    // self.ui_system = UiSystem.init();
     self.font_manager = FontManager.init(self.allocator);
-    self.ui_manager = UiManager.init(self.allocator, &self.db_manager, &self.ui_system, &self.font_manager);
+    // self.ui_manager = UiManager.init(self.allocator, &self.db_manager, &self.ui_system, &self.font_manager);
     self.market_manager = MarketManager.init(self.allocator, &self.db_manager);
     self.clay_manager = try ClayManager.init(self.allocator, &self.font_manager);
     self.renderer_2d = try Renderer2D.init(self.allocator);
     self.draw_queue = try DrawCommand.DrawQueue.init(self.allocator, &self.renderer_2d);
     self.scene_manager = SceneManager.init(&self.draw_queue);
-    self.ecs_manager = try EcsManager.init(self.allocator, &self.db_manager, &self.ui_manager, &self.market_manager, &self.scene_manager);
+    self.ecs_manager = try EcsManager.init(self.allocator, &self.db_manager, &self.market_manager, &self.scene_manager);
 
+    self.ecs_manager.setup() catch |err| {
+        std.log.err("[App] Can't setup the EcsManager : {}", .{err});
+        return err;
+    };
     self.renderer_2d.setup(
         self.window,
         &self.font_manager,
@@ -99,14 +105,10 @@ pub fn onAttach(self: *SandboxLayer) !void {
         return err;
     };
 
-    self.ecs_manager.setup() catch |err| {
-        std.log.err("[App] Can't setup the EcsManager : {}", .{err});
-        return err;
-    };
-    self.ui_manager.setup(&self.ecs_manager) catch |err| {
-        std.log.err("[App] Can't setup the UiManager : {}", .{err});
-        return err;
-    };
+    // self.ui_manager.setup(&self.ecs_manager) catch |err| {
+    //     std.log.err("[App] Can't setup the UiManager : {}", .{err});
+    //     return err;
+    // };
     self.clay_manager.setup() catch |err| {
         std.log.err("[App] Can't setup the ClayManager : {}", .{err});
         return err;
@@ -126,11 +128,18 @@ pub fn onUpdate(self: *SandboxLayer) void {
         }
         assert(self.framerate.update_count > 0); // Make sure at least 1 update happened
         if (self.framerate.shouldDraw()) {
-            self.ecs_manager.render();
+            self.renderer_2d.startFrame();
+            // self.ui_manager.renderFrame(&self.ecs_manager);
+            self.scene_manager.render(&self.ecs_manager);
+            // self.ecs_manager.render();
         }
     } else {
         self.ecs_manager.progress();
-        self.ecs_manager.render();
+        self.renderer_2d.startFrame();
+        // self.ui_manager.renderFrame(&self.ecs_manager);
+        self.scene_manager.render(&self.ecs_manager);
+        // self.ecs_manager.render();
+        // self.ecs_manager.render();
     }
 }
 pub fn onEvent(self: *SandboxLayer, ev: Event) void {

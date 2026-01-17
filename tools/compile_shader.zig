@@ -76,10 +76,10 @@ pub fn runCmd(
         "-target",
         "spirv",
         "-fvk-use-entrypoint-name",
-        "-capability",
-        "vk_mem_model",
-        "-capability",
-        "spirv_1_0",
+        // "-capability",
+        // "vk_mem_model",
+        // "-capability",
+        // "spirv_1_0",
         // "-enable-experimental-dynamic-dispatch",
         "-o",
         output,
@@ -89,8 +89,8 @@ pub fn runCmd(
     const spirval_cmd = [_][]const u8{
         "spirv-val",
         output,
-        "--target-env",
-        "vulkan1.0",
+        // "--target-env",
+        // "vulkan1.0",
     };
 
     var cmd = std.process.Child.init(

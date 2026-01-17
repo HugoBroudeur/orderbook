@@ -4,6 +4,7 @@ const std = @import("std");
 const sdl = @import("sdl3");
 
 const Event = @import("../events/event.zig");
+const Display = @import("display.zig");
 
 const Window = @This();
 
@@ -15,8 +16,6 @@ pub const WindowProps = struct {
 };
 
 ptr: sdl.video.Window,
-// callback: ?Event.EventFn,
-callback: ?*const fn (ev: *Event) void,
 
 pub fn create(props: WindowProps) !Window {
     std.log.info("[Window] Creating window [\"{s}\"] ({}x{})", .{
@@ -28,33 +27,18 @@ pub fn create(props: WindowProps) !Window {
 
     const ptr = try sdl.video.Window.init(props.title, props.width, props.heigth, props.flags);
 
-    try ptr.setPosition(
-        .{ .centered = try ptr.getDisplayForWindow() },
-        .{ .centered = try ptr.getDisplayForWindow() },
-    );
-
-    std.log.info(
-        \\==================== Window created ====================
-        \\  Id:                : {}
-        // \\  VSync:             : {?}
-        // \\  Icc Profile:       : {s}
-    ,
-        .{
-            try ptr.getId(),
-            // try ptr.getSurfaceVSync(),
-            // try ptr.getIccProfile(),
-        },
-    );
-
-    return .{ .ptr = ptr, .callback = null };
+    return .{ .ptr = ptr };
 }
 
 pub fn deinit(self: *Window) void {
     self.ptr.deinit();
 }
 
-pub fn onUpdate(self: *Window) void {
-    _ = self;
+pub fn center(self: *Window, display: Display) void {
+    self.ptr.setPosition(
+        .{ .centered = display.current_ptr },
+        .{ .centered = display.current_ptr },
+    ) catch {};
 }
 
 pub fn getWidth(self: *Window) usize {
@@ -65,11 +49,6 @@ pub fn getWidth(self: *Window) usize {
 pub fn getHeigth(self: *Window) usize {
     const size = self.ptr.getSize() catch .{ 0, 0 };
     return size.@"1";
-}
-
-// pub fn setEventCallback(self: *Window, callback: Event.EventFn) void {
-pub fn setEventCallback(self: *Window, callback: *const fn (ev: *Event) void) void {
-    self.callback = callback;
 }
 
 pub fn setVSync(self: *Window, enabled: bool) void {

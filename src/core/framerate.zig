@@ -42,11 +42,7 @@ pub const Fixed = struct {
 
     pub fn on(self: *This) void {
         self.is_active = true;
-        const freq = sdl.timer.getPerformanceFrequency();
-        self.freq = freq;
-        self.max_accumulated = @intCast(freq / 2);
-        self.threshold = freq / @as(u64, self.target_fps);
-        self.last_tick = sdl.timer.getPerformanceCounter();
+        self.setTargetFps(self.target_fps);
     }
     pub fn off(self: *This) void {
         self.is_active = false;
@@ -54,6 +50,15 @@ pub const Fixed = struct {
 
     pub fn isOn(self: *This) bool {
         return self.is_active;
+    }
+
+    pub fn setTargetFps(self: *This, target_fps: u32) void {
+        const freq = sdl.timer.getPerformanceFrequency();
+        self.target_fps = target_fps;
+        self.freq = freq;
+        self.max_accumulated = @intCast(freq / 2);
+        self.threshold = freq / @as(u64, self.target_fps);
+        self.last_tick = sdl.timer.getPerformanceCounter();
     }
 
     pub fn shouldWait(self: *This) bool {

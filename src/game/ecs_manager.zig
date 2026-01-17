@@ -2,7 +2,6 @@ const std = @import("std");
 const DbManager = @import("db_manager.zig");
 // const RendererManager = @import("renderer_manager.zig");
 const Renderer2D = @import("../renderer/renderer_2d.zig");
-const UiManager = @import("ui_manager.zig");
 const MarketManager = @import("market_manager.zig");
 const SceneManager = @import("scene_manager.zig");
 const Ecs = @import("ecs/ecs.zig");
@@ -18,13 +17,12 @@ allocator: std.mem.Allocator,
 db_manager: *DbManager,
 // renderer_manager: *RendererManager,
 renderer_2d: *Renderer2D = undefined,
-ui_manager: *UiManager,
 market_manager: *MarketManager,
 scene_manager: *SceneManager,
 entities: zcs.Entities,
 cmd_buf: zcs.CmdBuf,
 
-pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, ui_manager: *UiManager, market_manager: *MarketManager, scene_manager: *SceneManager) !EcsManager {
+pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, market_manager: *MarketManager, scene_manager: *SceneManager) !EcsManager {
     var es = try zcs.Entities.init(.{ .gpa = allocator });
 
     const cb = try zcs.CmdBuf.init(.{
@@ -39,7 +37,6 @@ pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, ui_manager: *U
         // .renderer_manager = renderer_manager,
         // .renderer_2d = renderer_2d,
         .scene_manager = scene_manager,
-        .ui_manager = ui_manager,
         .market_manager = market_manager,
         .entities = es,
         .cmd_buf = cb,
@@ -93,7 +90,7 @@ pub fn render(self: *EcsManager) void {
     //
     // UI SYSTEM PASS
     //
-    self.ui_manager.renderFrame(self);
+    // self.ui_manager.renderFrame(self);
 
     //
     // DRAW FRAME

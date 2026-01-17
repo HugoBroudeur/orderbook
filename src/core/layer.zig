@@ -11,11 +11,16 @@ ptr: *anyopaque,
 vtable: *const VTable,
 
 pub const VTable = struct {
+    getLabel: *const fn (*anyopaque) []const u8,
     onAttach: *const fn (*anyopaque) anyerror!void,
     onUpdate: *const fn (*anyopaque) void,
     onEvent: *const fn (*anyopaque, ev: Event) void,
     deinit: *const fn (*anyopaque) void,
 };
+
+pub fn getLabel(self: Layer) []const u8 {
+    return self.vtable.getLabel(self.ptr);
+}
 
 pub fn onAttach(self: Layer) !void {
     return self.vtable.onAttach(self.ptr);
@@ -34,6 +39,10 @@ pub fn init(ptr: anytype) Layer {
     const T = @TypeOf(ptr);
     const ptr_info = @typeInfo(T);
     const Impl = struct {
+        fn getLabel(impl: *anyopaque) []const u8 {
+            const self: T = @ptrCast(@alignCast(impl));
+            return ptr_info.pointer.child.getLabel(self);
+        }
         fn onAttach(impl: *anyopaque) !void {
             const self: T = @ptrCast(@alignCast(impl));
             return ptr_info.pointer.child.onAttach(self);
@@ -55,6 +64,7 @@ pub fn init(ptr: anytype) Layer {
     return .{
         .ptr = ptr,
         .vtable = &.{
+            .getLabel = Impl.getLabel,
             .onAttach = Impl.onAttach,
             .onUpdate = Impl.onUpdate,
             .onEvent = Impl.onEvent,
