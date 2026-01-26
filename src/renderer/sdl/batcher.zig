@@ -3,11 +3,11 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const Quad = @import("data.zig").Quad;
-const Logger = @import("../core/log.zig").MaxLogs(50);
-const Cmd = @import("command.zig");
+const Quad = @import("../data.zig").Quad;
+const Logger = @import("../../core/log.zig").MaxLogs(50);
+const Cmd = @import("../command.zig");
 
-const DataStructure = @import("../data_structure.zig");
+const DataStructure = @import("../../data_structure.zig");
 
 pub const MAX_BATCHES: usize = 40; // Probably needs to be equal to the CPU count ?
 pub const BATCH_SIZE_QUADS: u32 = 10000;

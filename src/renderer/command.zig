@@ -4,9 +4,15 @@ const std = @import("std");
 
 const DataStructure = @import("../data_structure.zig");
 const Logger = @import("../core/log.zig").MaxLogs(50);
-const Batcher = @import("batcher.zig");
-const Texture = @import("texture.zig");
-const Renderer2D = @import("renderer_2d.zig");
+
+const Api = @import("backend.zig").Backend.default().Api();
+const Batcher = Api.Batcher;
+const Texture = Api.Texture;
+const Renderer2D = Api.Renderer2D;
+
+// const Batcher = @import("batcher.zig");
+// const Texture = @import("texture.zig");
+// const Renderer2D = @import("renderer_2d.zig");
 const Primitive = @import("../primitive.zig");
 const Clay = @import("zclay");
 const Rect = Primitive.Rect;

@@ -3,7 +3,7 @@ struct VertexUniformData {
   float2 Translate;
 };
 
-struct VS_Input {
+struct Vertex {
   float2 Position : POSITION;
   float2 TexCoord : TEXCOORD0;
   float4 Color : COLOR1;
@@ -15,19 +15,35 @@ struct PS_Input {
   float2 TexCoord : TEXCOORD0;
 };
 
+struct VertexBuffer {
+  StructuredBuffer<Vertex> vertices;
+};
+
+struct StorageBuffer {
+  VertexUniformData uniforms;
+  VertexBuffer vertexBuffer;
+}
+
+// This defines slot 0, space1 for the vertex stage
+// [[vk::push_constant]]
+ConstantBuffer<StorageBuffer> storageBuffer : register(b0, space1);
+
 Texture2D<float4> Texture : register(t0, space2);
 SamplerState Sampler : register(s0, space2);
 
 // This defines slot 0, space1 for the vertex stage
-ConstantBuffer<VertexUniformData> vu : register(b0, space1);
+// ConstantBuffer<VertexUniformData> vu : register(b0, space1);
 
 [shader("vertex")]
-PS_Input vertex(VS_Input input) {
+PS_Input vertex(uint vertex_index: SV_VertexID) {
+  Vertex input = storageBuffer.vertexBuffer.vertices[vertex_index];
   PS_Input output;
   output.TexCoord = input.TexCoord;
   output.Color = input.Color;
   // output.Position.xy = input.Position;
-  output.Position.xy = input.Position * vu.Scale + vu.Translate;
+  output.Position.xy = input.Position * storageBuffer.uniforms.Scale +
+                       storageBuffer.uniforms.Translate;
+  
   output.Position.zw = float2(0, 1);
   return output;
 }

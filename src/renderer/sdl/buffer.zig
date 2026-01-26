@@ -2,16 +2,16 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const sdl = @import("sdl3");
-const PipelineManager = @import("../game/pipeline_manager.zig");
+const PipelineManager = @import("../../game/pipeline_manager.zig");
 
-const Logger = @import("../core/log.zig").MaxLogs(50);
+const Logger = @import("../../core/log.zig").MaxLogs(50);
 const GPU = @import("gpu.zig");
-const DataStructure = @import("../data_structure.zig");
+const DataStructure = @import("../../data_structure.zig");
 const CopyPass = @import("pass.zig").CopyPass;
 const RenderPass = @import("pass.zig").RenderPass;
 const Shader = @import("shader.zig");
 const Texture = @import("texture.zig");
-const Platform = @import("../platforms/platform.zig");
+const Platform = @import("../../platforms/platform.zig");
 
 pub const VERTEX_BUFFER_SIZE = 64 * 1024; //64k vertices
 pub const INDEX_BUFFER_SIZE = 64 * 1024; //64k indices

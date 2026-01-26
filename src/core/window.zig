@@ -9,13 +9,14 @@ const Display = @import("display.zig");
 const Window = @This();
 
 pub const WindowProps = struct {
-    flags: sdl.video.Window.Flags = .{ .resizable = true, .hidden = false, .high_pixel_density = true },
+    flags: sdl.video.Window.Flags = .{ .resizable = true, .hidden = false, .high_pixel_density = true, .vulkan = true },
     title: [:0]const u8 = "Price is Power",
     width: u32 = 1920,
     heigth: u32 = 1060,
 };
 
 ptr: sdl.video.Window,
+title: [:0]const u8,
 
 pub fn create(props: WindowProps) !Window {
     std.log.info("[Window] Creating window [\"{s}\"] ({}x{})", .{
@@ -27,7 +28,7 @@ pub fn create(props: WindowProps) !Window {
 
     const ptr = try sdl.video.Window.init(props.title, props.width, props.heigth, props.flags);
 
-    return .{ .ptr = ptr };
+    return .{ .ptr = ptr, .title = props.title };
 }
 
 pub fn deinit(self: *Window) void {
@@ -41,12 +42,12 @@ pub fn center(self: *Window, display: Display) void {
     ) catch {};
 }
 
-pub fn getWidth(self: *Window) usize {
+pub fn getWidth(self: *const Window) usize {
     const size = self.ptr.getSize() catch .{ 0, 0 };
     return size.@"0";
 }
 
-pub fn getHeigth(self: *Window) usize {
+pub fn getHeight(self: *const Window) usize {
     const size = self.ptr.getSize() catch .{ 0, 0 };
     return size.@"1";
 }

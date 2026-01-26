@@ -104,6 +104,10 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
+    const dep_vulkan = b.dependency("vulkan", .{
+        .registry = b.dependency("vulkan_headers", .{}).path("registry/vk.xml"),
+    });
+
     // Generate Zig code from .proto
     // const gen_proto = b.step("gen-proto", "generate zig files from protocol buffer definitions");
     // const protoc_step = protobuf.RunProtocStep.create(dep_protobuf.*.builder, target, .{
@@ -124,6 +128,7 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addImport("zcs", dep_zcs.module("zcs"));
     exe.root_module.addImport("zclay", dep_zclay.module("zclay"));
     exe.root_module.addImport("zmath", dep_zmath.module("root"));
+    exe.root_module.addImport("vulkan", dep_vulkan.module("vulkan-zig"));
 
     exe.root_module.addImport("tracy", dep_tracy.module("tracy"));
     // Tracy (should be disable for Release)

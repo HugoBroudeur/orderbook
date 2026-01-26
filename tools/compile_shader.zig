@@ -86,13 +86,6 @@ pub fn runCmd(
         input,
     };
 
-    const spirval_cmd = [_][]const u8{
-        "spirv-val",
-        output,
-        // "--target-env",
-        // "vulkan1.0",
-    };
-
     var cmd = std.process.Child.init(
         &cmd_args,
         allocator,
@@ -130,12 +123,21 @@ pub fn runCmd(
     const term = try cmd.wait();
     const code = if (term == .Exited) term.Exited else 1;
 
-    var cmd_val = std.process.Child.init(
-        &spirval_cmd,
-        allocator,
-    );
-    try cmd_val.spawn();
-    _ = try cmd.wait();
+    const spirval_cmd = [_][]const u8{
+        "spirv-val",
+        output,
+        // "--target-env",
+        // "vulkan1.0",
+    };
+
+    {
+        var cmd_val = std.process.Child.init(
+            &spirval_cmd,
+            allocator,
+        );
+        try cmd_val.spawn();
+        _ = try cmd_val.wait();
+    }
 
     return .{
         .code = code,

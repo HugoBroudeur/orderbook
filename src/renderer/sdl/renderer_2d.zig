@@ -10,30 +10,31 @@ const tracy = @import("tracy");
 // const impl_sdlgpu3 = @import("impl_sdlgpu3");
 const zm = @import("zmath");
 
-const UiManager = @import("../game/ui_manager.zig");
-const EcsManager = @import("../game/ecs_manager.zig");
-const ClayManager = @import("../game/clay_manager.zig");
-const FontManager = @import("../game/font_manager.zig");
-const Ecs = @import("../game/ecs/ecs.zig");
-const Colors = @import("../game/colors.zig");
+const UiManager = @import("../../game/ui_manager.zig");
+const EcsManager = @import("../../game/ecs_manager.zig");
+const ClayManager = @import("../../game/clay_manager.zig");
+const FontManager = @import("../../game/font_manager.zig");
+const Ecs = @import("../../game/ecs/ecs.zig");
+const Colors = @import("../../game/colors.zig");
 
-const Api = @import("api.zig");
 const Asset = @import("asset.zig");
-const Batcher = @import("batcher.zig");
+const Backend = @import("../backend.zig").Sdl;
+const Pipeline = Backend.Pipeline;
+const Batcher = Backend.Batcher;
 const Buffer = @import("buffer.zig");
-const Camera = @import("camera.zig");
-const Command = @import("command.zig");
+const Camera = @import("../camera.zig");
+const Command = @import("../command.zig");
 const CopyPass = @import("pass.zig").CopyPass;
-const Logger = @import("../core/log.zig").MaxLogs(50);
+const Logger = @import("../../core/log.zig").MaxLogs(50);
 const RenderPass = @import("pass.zig").RenderPass;
-const Data = @import("data.zig");
+const Data = @import("../data.zig");
 const GPU = @import("gpu.zig");
-const GraphicCtx = @import("graphic_ctx.zig");
-const Pipeline = @import("pipeline.zig");
+const GraphicsContext = @import("../../core/graphics_context.zig");
+// const Pipeline = @import("pipeline.zig");
 const Sampler = @import("sampler.zig");
-const Stats = @import("stats.zig");
+const Stats = @import("../stats.zig");
+const Swapchain = @import("swapchain.zig");
 const Texture = @import("texture.zig");
-const Window = @import("../core/window.zig");
 
 const Renderer = @This();
 
@@ -60,15 +61,14 @@ const Uniforms = struct {
 allocator: std.mem.Allocator,
 stats: Stats,
 
-gpu: GPU = undefined,
-api: Api = undefined,
-
 font_manager: *FontManager = undefined,
 clay_manager: *ClayManager = undefined,
 
-ctx: GraphicCtx = undefined,
+ctx: *GraphicsContext,
 
 uniforms: Uniforms = undefined,
+
+swapchain: Swapchain = undefined,
 
 vertex_buffer: Buffer.VertexBuffer = undefined,
 index_buffer: Buffer.IndexBuffer(.u16) = undefined,
@@ -131,11 +131,12 @@ is_minimised: bool = false,
 
 pub const RenderCtx = struct {};
 
-pub fn init(allocator: std.mem.Allocator) !Renderer {
+pub fn init(allocator: std.mem.Allocator, ctx: *GraphicsContext) !Renderer {
     return .{
         .allocator = allocator,
         .stats = .init(),
         .batcher = try .init(allocator),
+        .ctx = ctx,
     };
 }
 
@@ -146,8 +147,6 @@ pub fn deinit(self: *Renderer) void {
     };
     // impl_sdl3.ImGui_ImplSDL3_Shutdown();
     // impl_sdlgpu3.ImGui_ImplSDLGPU3_Shutdown();
-
-    self.ctx.deinit();
 
     for (&self.pipelines.values) |*pipeline| {
         pipeline.deinit();
@@ -166,27 +165,22 @@ pub fn deinit(self: *Renderer) void {
     self.transfer_buffer_data.destroy();
     self.transfer_buffer_tex.destroy();
 
-    self.api.deinit();
     self.gpu.deinit();
     self.batcher.deinit();
 }
 
 pub fn setup(
     self: *Renderer,
-    window: *Window,
     font_manager: *FontManager,
     clay_manager: *ClayManager,
 ) !void {
     self.font_manager = font_manager;
     self.clay_manager = clay_manager;
 
-    self.ctx = Api.createGraphicCtx(window);
-
-    self.gpu = GPU.init(window) catch |err| {
+    self.gpu = GPU.init(&self.ctx.window) catch |err| {
         Logger.err("[GPU.init] {}: {?s}", .{ err, sdl.errors.get() });
         return err;
     };
-    self.api = Api.init(&self.gpu);
 
     try self.initImgui();
     self.initUniform();
@@ -359,8 +353,6 @@ fn drawDemo(self: *Renderer) void {
     };
 
     // Setup and start a render pass
-    // var render_pass = self.api.createRenderPass();
-    // render_pass.start(&.{gpu_target_info}, null);
     const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
     defer render_pass.end();
 
@@ -385,8 +377,6 @@ fn draw2D(self: *Renderer) void {
     };
 
     // Setup and start a render pass
-    // var render_pass = self.api.createRenderPass();
-    // render_pass.start(&.{gpu_target_info}, null);
     const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
     defer render_pass.end();
 

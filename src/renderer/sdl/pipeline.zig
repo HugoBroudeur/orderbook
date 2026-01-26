@@ -4,14 +4,13 @@ const std = @import("std");
 const sdl = @import("sdl3");
 const zm = @import("zmath");
 
+const Interfaces = @import("../interfaces.zig");
 const Buffer = @import("buffer.zig");
 const Shader = @import("shader.zig");
 const Texture = @import("texture.zig");
-const Data = @import("data.zig");
+const Data = @import("../data.zig");
 const GPU = @import("gpu.zig");
 const RenderPass = @import("pass.zig").RenderPass;
-
-const Pipeline = @This();
 
 const MAX_VERTEX_ATTRIBUTES = 20;
 
@@ -20,6 +19,8 @@ const CreateShaderParam = struct {
     uniforms: u32,
     samplers: u32,
 };
+
+const Pipeline = @This();
 
 gpu: *GPU,
 
@@ -41,13 +42,13 @@ pub fn deinit(self: *Pipeline) void {
     self.destroy();
 }
 
+pub fn interface(self: *Pipeline) Interfaces.Pipeline {
+    return Interfaces.Pipeline.interface(self);
+}
+
 pub fn destroy(self: *Pipeline) void {
     self.gpu.device.releaseGraphicsPipeline(self.ptr);
     self.ptr = undefined;
-}
-
-pub fn bind(self: *Pipeline, render_pass: RenderPass) void {
-    render_pass.ptr.?.bindGraphicsPipeline(self.ptr);
 }
 
 pub fn createDemoPipeline(gpu: *GPU, format: Texture.TextureFormat) !Pipeline {

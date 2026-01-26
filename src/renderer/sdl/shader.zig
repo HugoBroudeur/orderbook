@@ -56,7 +56,7 @@ pub fn create(gpu: *GPU, data: CreateShaderParam) !Shader {
         entrypoint_name = "fragment";
     }
 
-    if (stage == null) {
+    if (entrypoint_name) {
         std.log.err("[PipelineManager.createShader] Shader extension '{s}' not supported, only '.vert' and '.frag' are supported.", .{extention});
         return error.InvalidShaderExtension;
     }

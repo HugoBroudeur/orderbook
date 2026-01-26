@@ -2,7 +2,7 @@ const std = @import("std");
 const sdl = @import("sdl3");
 
 const Texture = @import("texture.zig");
-const Window = @import("../core/window.zig");
+const Window = @import("../../core/window.zig");
 
 const GPU = @This();
 

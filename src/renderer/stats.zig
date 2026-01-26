@@ -106,39 +106,6 @@ pub fn startFrame(self: *Stats) void {
 
     self.frame_index += 1;
 
-    // // === Update vertex / index stats ===
-    // updateStats(
-    //     self.frame_vertices,
-    //     &self.high_num_vertices_per_frame,
-    //     &self.low_num_vertices_per_frame,
-    //     &self.average_num_vertices_per_frame,
-    //     self.frame_index,
-    // );
-    //
-    // updateStats(
-    //     self.frame_indices,
-    //     &self.high_num_indices_per_frame,
-    //     &self.low_num_indices_per_frame,
-    //     &self.average_num_indices_per_frame,
-    //     self.frame_index,
-    // );
-    //
-    // // === Accumulate per-second ===
-    // self.sec_draw_calls += self.frame_draw_calls;
-    // self.sec_skipped_draws += self.frame_skipped_draws;
-    //
-    // const freq = sdl.timer.getPerformanceFrequency();
-    // const elapsed_ticks = now - self.sec_start_ticks;
-    //
-    // if (elapsed_ticks >= freq) {
-    //     self.draw_call_per_sec = self.sec_draw_calls;
-    //     self.skip_draw_per_sec = self.sec_skipped_draws;
-    //
-    //     self.sec_draw_calls = 0;
-    //     self.sec_skipped_draws = 0;
-    //     self.sec_start_ticks = now;
-    // }
-
     // === Reset per-frame counters ===
     self.frame_vertices = 0;
     self.frame_indices = 0;

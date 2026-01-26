@@ -1,7 +1,6 @@
 const std = @import("std");
 const DbManager = @import("db_manager.zig");
 // const RendererManager = @import("renderer_manager.zig");
-const Renderer2D = @import("../renderer/renderer_2d.zig");
 const MarketManager = @import("market_manager.zig");
 const SceneManager = @import("scene_manager.zig");
 const Ecs = @import("ecs/ecs.zig");
@@ -16,7 +15,6 @@ const EcsManager = @This();
 allocator: std.mem.Allocator,
 db_manager: *DbManager,
 // renderer_manager: *RendererManager,
-renderer_2d: *Renderer2D = undefined,
 market_manager: *MarketManager,
 scene_manager: *SceneManager,
 entities: zcs.Entities,
@@ -35,7 +33,6 @@ pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, market_manager
         .allocator = allocator,
         .db_manager = db_manager,
         // .renderer_manager = renderer_manager,
-        // .renderer_2d = renderer_2d,
         .scene_manager = scene_manager,
         .market_manager = market_manager,
         .entities = es,
@@ -79,7 +76,7 @@ pub fn render(self: *EcsManager) void {
     //
     // ALWAYS START WITH A BEGIN PASS
     //
-    self.renderer_2d.startFrame();
+    // self.renderer_2d.startFrame();
 
     //
     // ALWAYS START WITH A SOKOL PASS
