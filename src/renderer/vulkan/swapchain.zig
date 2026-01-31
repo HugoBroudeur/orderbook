@@ -293,7 +293,7 @@ fn initSwapchainImages(ctx: *const GraphicsContext, swapchain: vk.SwapchainKHR, 
 
 fn findSurfaceFormat(ctx: *const GraphicsContext, allocator: Allocator) !vk.SurfaceFormatKHR {
     const preferred = vk.SurfaceFormatKHR{
-        .format = .b8g8r8a8_srgb,
+        .format = .r16g16b16_sfloat,
         .color_space = .srgb_nonlinear_khr,
     };
 

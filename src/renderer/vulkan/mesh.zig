@@ -16,6 +16,7 @@ const Mesh = @This();
 pub const MeshBuffers = struct {
     index: ?Buffer = null,
     vertex: ?Buffer = null,
+    storage: ?Buffer = null,
 };
 
 pub const PushConstants2D = struct {
@@ -67,11 +68,20 @@ pub fn makeTriangleMesh(ctx: *const GraphicsContext, cmd_pool: *const CommandPoo
 
 pub fn setVertices(self: *Mesh, ctx: *const GraphicsContext, cmd_pool: *const CommandPool, vertices: []const u8) !void {
     self.buffers.vertex = try Buffer.create(ctx, @intCast(vertices.len), .{
-        .storage_buffer_bit = true,
+        .vertex_buffer_bit = true,
         .transfer_dst_bit = true,
         .shader_device_address_bit = true,
     }, .{ .device_local_bit = true });
     try self.buffers.vertex.?.fastTransfer(ctx, cmd_pool, vertices);
+}
+
+pub fn setStorageVertices(self: *Mesh, ctx: *const GraphicsContext, cmd_pool: *const CommandPool, vertices: []const u8) !void {
+    self.buffers.storage = try Buffer.create(ctx, @intCast(vertices.len), .{
+        .storage_buffer_bit = true,
+        .transfer_dst_bit = true,
+        .shader_device_address_bit = true,
+    }, .{ .device_local_bit = true });
+    try self.buffers.storage.?.fastTransfer(ctx, cmd_pool, vertices);
 }
 
 pub fn setIndices(self: *Mesh, ctx: *const GraphicsContext, cmd_pool: *const CommandPool, indices: []Data.Indice) !void {

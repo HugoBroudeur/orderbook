@@ -84,7 +84,7 @@ pub fn toShaderStageFlag(self: Shader) vk.ShaderStageFlags {
     return self.stage.toShaderStageFlag();
 }
 
-pub fn getPipelineShaderStageCreateInfo(self: *Shader) vk.PipelineShaderStageCreateInfo {
+pub fn getPipelineShaderStageCreateInfo(self: *const Shader) vk.PipelineShaderStageCreateInfo {
     return .{
         .stage = self.toShaderStageFlag(),
         .module = self.module,

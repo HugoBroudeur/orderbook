@@ -16,6 +16,7 @@ const required_device_extensions = [_][*:0]const u8{
     vk.extensions.khr_swapchain.name,
     vk.extensions.khr_buffer_device_address.name,
     vk.extensions.khr_shader_draw_parameters.name,
+    vk.extensions.khr_dynamic_rendering.name,
 };
 
 const required_extensions = [_]vk.ApiInfo{
@@ -64,6 +65,7 @@ props: vk.PhysicalDeviceProperties,
 mem_props: vk.PhysicalDeviceMemoryProperties,
 
 device: Device,
+device_found: bool = false,
 graphics_queue: Queue,
 present_queue: Queue,
 // memory: vk.DeviceMemory,
@@ -172,6 +174,7 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
     errdefer allocator.destroy(vkd);
     vkd.* = DeviceWrapper.load(dev, ctx.instance.wrapper.dispatch.vkGetDeviceProcAddr.?);
     ctx.device = Device.init(dev, vkd);
+    ctx.device_found = true;
     errdefer ctx.dev.destroyDevice(null);
 
     ctx.graphics_queue = Queue.init(ctx.device, candidate.queues.graphics_family);
@@ -183,10 +186,12 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
 }
 
 pub fn deinit(self: *GraphicsContext) void {
-    self.device.deviceWaitIdle() catch |err| {
-        std.log.err("[GraphicsContext.deinit] Error {}", .{err});
-    };
-    self.device.destroyDevice(null);
+    if (self.device_found) {
+        self.device.deviceWaitIdle() catch |err| {
+            std.log.err("[GraphicsContext.deinit] Error {}", .{err});
+        };
+        self.device.destroyDevice(null);
+    }
     self.window.deinit();
     sdl.quit(SDL_INIT_FLAGS);
 }

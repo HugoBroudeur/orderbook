@@ -40,6 +40,7 @@ pub fn createFromSurface(
     properties: vk.MemoryPropertyFlags,
 ) !Image {
     log.debug("Create from image. usage {f} properties {f}", .{ usage, properties });
+
     const image_info = vk.ImageCreateInfo{
         .flags = .{},
         .queue_family_index_count = 0,
@@ -168,4 +169,68 @@ fn toVulkanFormat(sdl_format: sdl.pixels.Format) vk.Format {
     return switch (sdl_format) {
         else => .undefined,
     };
+}
+
+pub fn transitionToLayout(self: *Image, ctx: *GraphicsContext, cmd: vk.CommandBuffer, old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) void {
+    const aspect_mask: vk.ImageAspectFlags = if (new_layout == .depth_attachment_optimal) .{ .depth_bit = true } else .{ .color_bit = true };
+
+    const barrier: vk.ImageMemoryBarrier2 = .{
+        .src_stage_mask = .{ .all_commands_bit = true },
+        .src_access_mask = .{ .memory_write_bit = true },
+        .dst_stage_mask = .{ .all_commands_bit = true },
+        .dst_access_mask = .{ .memory_write_bit = true, .memory_read_bit = true },
+        .old_layout = old_layout,
+        .new_layout = new_layout,
+        .image = self.vk_image,
+        .subresource_range = .{
+            .aspect_mask = aspect_mask,
+            .base_array_layer = 0,
+            .layer_count = vk.REMAINING_ARRAY_LAYERS,
+            .base_mip_level = 0,
+            .level_count = vk.REMAINING_MIP_LEVELS,
+        },
+    };
+
+    const dep_info: vk.DependencyInfo = .{
+        .image_memory_barrier_count = 1,
+        .p_image_memory_barriers = &barrier,
+    };
+
+    ctx.device.cmdPipelineBarrier2(cmd, &dep_info);
+}
+
+pub fn copyToImage(self: *Image, ctx: *GraphicsContext, cmd: vk.CommandBuffer, destination: *Image) void {
+    const blit_region: vk.ImageBlit2 = .{
+        .src_offsets = .{
+            .{ .x = 0, .y = 0, .z = 0 },
+            .{ .x = self.width, .y = self.heigth, .z = 1 },
+        },
+        .dst_offsets = .{
+            .{ .x = 0, .y = 0, .z = 0 },
+            .{ .x = destination.width, .y = destination.heigth, .z = 1 },
+        },
+        .src_subresource = .{
+            .aspect_mask = .{ .color_bit = true },
+            .base_array_layer = 0,
+            .layer_count = 1,
+            .mip_level = 0,
+        },
+        .dst_subresource = .{
+            .aspect_mask = .{ .color_bit = true },
+            .base_array_layer = 0,
+            .layer_count = 1,
+            .mip_level = 0,
+        },
+    };
+
+    const blit_info: vk.BlitImageInfo2 = .{
+        .dst_image = destination.vk_image,
+        .dst_image_layout = .transfer_dst_optimal,
+        .src_image = self.vk_image,
+        .filter = .linear,
+        .region_count = 1,
+        .p_regions = &blit_region,
+    };
+
+    ctx.device.cmdBlitImage2(cmd, &blit_info);
 }

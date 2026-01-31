@@ -13,6 +13,7 @@ On Open Suse
 sudo zypper install SDL3-devel SDL3_ttf-devel SDL3_image-devel
 sudo zypper install vulkan-tools vulkan-validationlayer
 sudo zypper install slangc
+sudo zypper install spirv-tools
 ```
 
 For Fish
