@@ -105,7 +105,7 @@ pub fn create(ctx: *const GraphicsContext, size: u32, usage: vk.BufferUsageFlags
 
     const memory_requirements = ctx.device.getBufferMemoryRequirements(vk_buffer);
 
-    const alloc_info = try ctx.createMemoryAllocateInfo(memory_requirements, properties);
+    const alloc_info = try ctx.createMemoryAllocateInfo(memory_requirements, properties, usage.shader_device_address_bit == true);
     const memory = try ctx.device.allocateMemory(&alloc_info, null);
 
     try ctx.device.bindBufferMemory(vk_buffer, memory, 0);
@@ -113,9 +113,8 @@ pub fn create(ctx: *const GraphicsContext, size: u32, usage: vk.BufferUsageFlags
     var address: ?u64 = null;
     if (usage.shader_device_address_bit == true) {
         // Disable that for now as I'm getting Vulkan errors
-        // const bdai: vk.BufferDeviceAddressInfo = .{ .s_type = .buffer_device_address_info, .buffer = vk_buffer };
-        // address = ctx.device.getBufferDeviceAddress(&bdai);
-        address = null;
+        const bdai: vk.BufferDeviceAddressInfo = .{ .s_type = .buffer_device_address_info, .buffer = vk_buffer };
+        address = ctx.device.getBufferDeviceAddress(&bdai);
     }
 
     return .{

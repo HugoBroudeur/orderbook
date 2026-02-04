@@ -351,6 +351,7 @@ pub const Builder = struct {
             .view_mask = 0,
             .depth_attachment_format = .undefined,
             .stencil_attachment_format = .undefined,
+            .p_color_attachment_formats = null,
         };
     }
 
@@ -381,6 +382,22 @@ pub const Builder = struct {
             .blend_constants = .{ 0, 0, 0, 0 },
         };
 
+        // const pipeline_layout = try createPipelineLayout(ctx);
+        // const pssci = [_]vk.PipelineShaderStageCreateInfo{
+        //     vert.getPipelineShaderStageCreateInfo(),
+        //     frag.getPipelineShaderStageCreateInfo(),
+        // };
+        //
+        // var vatds = try getVertexInputAttributeDescriptions(desc.layout);
+        // var vibds = getVertexInputBindingDescriptions(desc.layout);
+
+        // const pvisci = vk.PipelineVertexInputStateCreateInfo{
+        //     .vertex_binding_description_count = 1,
+        //     .p_vertex_binding_descriptions = @ptrCast(&vibds),
+        //     .vertex_attribute_description_count = @intCast(desc.layout.elements.len),
+        //     .p_vertex_attribute_descriptions = &vatds,
+        // };
+
         // vertex input (empty)
         var vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
             .vertex_binding_description_count = 0,
@@ -405,7 +422,6 @@ pub const Builder = struct {
 
         // graphics pipeline
         var pipeline_info = vk.GraphicsPipelineCreateInfo{
-            .s_type = .graphics_pipeline_create_info,
             .p_next = &self.render_info, // dynamic rendering
             .flags = .{},
             .stage_count = @intCast(self.shader_stages.items.len),
@@ -503,12 +519,14 @@ pub const Builder = struct {
     pub fn setColorAttachmentFormat(self: *Builder, format: vk.Format) void {
         self.color_attachment_format = format;
         self.render_info.color_attachment_count = 1;
-        self.render_info.p_color_attachment_formats = &self.color_attachment_format;
+        self.render_info.p_color_attachment_formats = @ptrCast(&self.color_attachment_format);
     }
 
     pub fn setDepthFormat(self: *Builder, format: vk.Format) void {
         self.render_info.depth_attachment_format = format;
     }
+
+    // pub fn setLayout(self: *Builder, layout: Buffer.BufferLayout) void {}
 
     pub fn disableDepthTest(self: *Builder) void {
         self.depth_stencil.depth_test_enable = vk.FALSE;

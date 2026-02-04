@@ -19,26 +19,27 @@ const Asset = @import("asset.zig");
 const Batcher = @import("batcher.zig");
 const Buffer = @import("buffer.zig");
 const Camera = @import("../camera.zig");
-const CommandPool = @import("command_pool.zig");
 const Command = @import("../command.zig");
+const CommandPool = @import("command_pool.zig");
+const Data = @import("../data.zig");
+const Descriptor = @import("descriptor.zig");
 const Framebuffer = @import("framebuffer.zig");
+const GraphicsContext = @import("../../core/graphics_context.zig");
+const Image = @import("image.zig");
 const Logger = @import("../../core/log.zig").MaxLogs(50);
 const Mesh = @import("mesh.zig");
-const RenderPass = @import("render_pass.zig");
-const Data = @import("../data.zig");
-const GraphicsContext = @import("../../core/graphics_context.zig");
-const Shader = @import("shader.zig");
 const Pipeline = @import("pipeline.zig");
+const RenderPass = @import("render_pass.zig");
 const Sampler = @import("sampler.zig");
-const Swapchain = @import("swapchain.zig").Swapchain;
+const Shader = @import("shader.zig");
 const Stats = @import("../stats.zig");
-const Image = @import("image.zig");
+const Swapchain = @import("swapchain.zig").Swapchain;
 
 const Renderer = @This();
 
 pub const DrawPassType = enum { demo, ui, shadow, ssao, sky, solid, raycast, transparent };
 pub const TransferBufferType = enum { atlas_buffer_data, atlas_texture_data };
-pub const TextureType = enum { atlas, swapchain };
+pub const ImageType = enum { atlas, draw };
 pub const SamplerType = enum { nearest, linear };
 pub const PipelineType = enum { demo, _2d };
 
@@ -92,12 +93,12 @@ ctx: *GraphicsContext,
 
 uniforms: Uniforms = undefined,
 
-passes: struct {
-    clear: RenderPass = undefined,
-    solid: RenderPass = undefined,
-} = .{},
+// passes: struct {
+//     clear: RenderPass = undefined,
+//     solid: RenderPass = undefined,
+// } = .{},
 swapchain: Swapchain = undefined,
-framebuffer: Framebuffer = undefined,
+// framebuffer: Framebuffer = undefined,
 
 cmd_pool: CommandPool = undefined,
 cmd_bufs: []vk.CommandBuffer = undefined,
@@ -109,9 +110,12 @@ uniform_buffer: Buffer = undefined,
 
 triangle_mesh: Mesh = undefined,
 
+// Global descriptors
+descriptor: Descriptor = undefined,
+
 // nearest_sampler: Sampler = undefined,
 pipelines: std.EnumArray(PipelineType, Pipeline) = .initUndefined(),
-images: std.EnumArray(TextureType, Image) = .initUndefined(),
+images: std.EnumArray(ImageType, Image) = .initUndefined(),
 
 // imgui_draw_data: *ig.ImDrawData = undefined,
 imgui_draw_data: *anyopaque = undefined,
@@ -148,14 +152,13 @@ pub fn deinit(self: *Renderer) void {
         pipeline.destroy(self.ctx);
     }
 
-    for (&self.images.values, 0..) |*image, i| {
-        const key: TextureType = @enumFromInt(i);
-        if (key != .swapchain) {
-            image.destroy(self.ctx);
-        }
+    for (&self.images.values) |*image| {
+        image.destroy(self.ctx);
     }
 
     // self.nearest_sampler.destroy(self.ctx);
+
+    self.descriptor.destroy(self.ctx);
 
     // self.triangle_buffer.destroy(self.ctx);
     self.triangle_mesh.destroy(self.ctx);
@@ -164,10 +167,10 @@ pub fn deinit(self: *Renderer) void {
     self.uniform_buffer.destroy(self.ctx);
     self.batcher.deinit();
 
-    self.framebuffer.destroy(self.ctx);
+    // self.framebuffer.destroy(self.ctx);
 
-    self.passes.clear.destroy(self.ctx);
-    self.passes.solid.destroy(self.ctx);
+    // self.passes.clear.destroy(self.ctx);
+    // self.passes.solid.destroy(self.ctx);
     self.swapchain.deinit();
 }
 
@@ -175,13 +178,47 @@ pub fn setup(self: *Renderer) !void {
     self.initUniform();
 
     self.swapchain = try Swapchain.init(self.ctx, self.allocator);
-    self.passes.clear = try RenderPass.create(self.ctx, self.swapchain, .{});
-    self.passes.solid = try RenderPass.create(self.ctx, self.swapchain, .{ .load_op = .load, .store_op = .store });
+    // self.passes.clear = try RenderPass.create(self.ctx, self.swapchain, .{});
+    // self.passes.solid = try RenderPass.create(self.ctx, self.swapchain, .{ .load_op = .load, .store_op = .store });
 
     self.cmd_pool = try CommandPool.create(self.ctx);
 
-    self.framebuffer = try Framebuffer.create(self.ctx, self.allocator, self.passes.clear, self.swapchain);
-    Logger.debug("[Renderer2D] Found {} framebuffers", .{self.framebuffer.vk_framebuffers.len});
+    const draw_image = try Image.create(
+        self.ctx,
+        .{
+            .transfer_src_bit = true,
+            .storage_bit = true,
+            .color_attachment_bit = true,
+        },
+        .{ .device_local_bit = true },
+        .{
+            .width = @intCast(self.ctx.window.getWidth()),
+            .height = @intCast(self.ctx.window.getHeight()),
+            .depth = 1,
+        },
+        .r16g16b16a16_sfloat,
+        // self.swapchain.surface_format.format,
+    );
+    self.images.set(.draw, draw_image);
+    self.descriptor = try Descriptor.create(self.allocator, self.ctx);
+    {
+        var img_info = draw_image.createDescriptorImageInfo();
+        const draw_image_write: vk.WriteDescriptorSet = .{
+            .descriptor_count = 1,
+            .descriptor_type = .storage_image,
+            .dst_binding = 0,
+            .dst_set = self.descriptor.vk_draw_image_descriptors,
+            .dst_array_element = 0,
+            .p_image_info = @ptrCast(&img_info), // Only 1 type of pointer can be used
+            .p_buffer_info = undefined,
+            .p_texel_buffer_view = undefined,
+        };
+
+        self.ctx.device.updateDescriptorSets(1, &.{draw_image_write}, 0, null);
+    }
+
+    // self.framebuffer = try Framebuffer.create(self.ctx, self.allocator, self.passes.clear, self.swapchain);
+    // Logger.debug("[Renderer2D] Found {} framebuffers", .{self.framebuffer.vk_framebuffers.len});
 
     const surface = try Image.loadImageAsset("assets/images/Background.jpg", .array_rgba_32);
     const image = try Image.createFromSurface(self.ctx, surface, .{ .transfer_dst_bit = true, .sampled_bit = true }, .{ .device_local_bit = true });
@@ -207,7 +244,8 @@ pub fn setup(self: *Renderer) !void {
     // try self.triangle_buffer.fastTransfer(self.ctx, &self.cmd_pool, &std.mem.toBytes(vertices));
 
     { // Create command buffers
-        self.cmd_bufs = try self.allocator.alloc(vk.CommandBuffer, self.framebuffer.vk_framebuffers.len);
+        // self.cmd_bufs = try self.allocator.alloc(vk.CommandBuffer, self.framebuffer.vk_framebuffers.len);
+        self.cmd_bufs = try self.allocator.alloc(vk.CommandBuffer, self.swapchain.swap_images.len);
         errdefer self.allocator.free(self.cmd_bufs);
 
         try self.ctx.device.allocateCommandBuffers(&.{
@@ -247,86 +285,90 @@ fn fillCommandBuffers(self: *Renderer) !void {
     self.stats.startClock(.render_passes);
     defer self.stats.tickClock(.render_passes);
 
-    const current_cmd_buf = self.cmd_bufs[self.swapchain.image_index];
-    const current_framebuffer = self.framebuffer.vk_framebuffers[self.swapchain.image_index];
-    if (false) {
-        try self.ctx.device.resetCommandBuffer(current_cmd_buf, .{});
-        try self.ctx.device.beginCommandBuffer(current_cmd_buf, &.{});
+    try self.swapchain.waitForAllFences();
+    // self.ctx.device.waitForFences(fence_count: u32, p_fences: [*]const Fence, wait_all: Bool32, timeout: u64)
 
-        self.ctx.device.cmdSetViewport(current_cmd_buf, 0, 1, @ptrCast(&self.frame_data.viewport));
-        self.ctx.device.cmdSetScissor(current_cmd_buf, 0, 1, @ptrCast(&self.frame_data.scissor));
+    const draw_image = self.images.getPtr(.draw);
+
+    for (self.cmd_bufs) |cmdbuf| {
+        try self.ctx.device.resetCommandBuffer(cmdbuf, .{});
+        try self.ctx.device.beginCommandBuffer(cmdbuf, &.{});
+
+        draw_image.transitionToLayout(self.ctx, cmdbuf, .undefined, .general);
 
         { // Demo
-            self.ctx.device.cmdBeginRenderPass(current_cmd_buf, &.{
-                .render_pass = self.passes.clear.vk_render_pass,
-                .framebuffer = current_framebuffer,
+            self.ctx.device.cmdBindPipeline(cmdbuf, .graphics, self.pipelines.get(.demo).vk_pipeline);
+            // self.ctx.device.cmdBindDescriptorSets(
+            //     cmdbuf,
+            //     .graphics,
+            //     self.pipelines.get(.demo).layout,
+            //     0,
+            //     1,
+            //     @ptrCast(&self.descriptor.vk_draw_image_descriptors),
+            //     0,
+            //     null,
+            // );
+            // const offset = [_]vk.DeviceSize{0};
+
+            // self.ctx.device.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast(&self.triangle_mesh.buffers.vertex), &offset);
+
+            const color_attachment: vk.RenderingAttachmentInfo = .{
+                .image_layout = .general,
+                .image_view = draw_image.view,
+                .resolve_mode = .{},
+                .resolve_image_layout = .general,
+                .load_op = .clear,
+                .store_op = .store,
+                .clear_value = .{ .color = .{
+                    .float_32 = [_]f32{ 1, 1, 0, 1 },
+                } },
+            };
+
+            const rendering_info: vk.RenderingInfo = .{
+                .layer_count = 1,
                 .render_area = self.frame_data.scissor,
-                .clear_value_count = 1,
-                .p_clear_values = @ptrCast(&self.frame_data.clear_color),
-            }, .@"inline");
-            defer self.ctx.device.cmdEndRenderPass(current_cmd_buf);
-
-            self.ctx.device.cmdBindPipeline(current_cmd_buf, .graphics, self.pipelines.get(.demo).vk_pipeline);
-
-            const offset = [_]vk.DeviceSize{0};
-
-            // std.debug.print("Drawing {} vertices\n", .{vertices.len});
-
-            self.ctx.device.cmdBindVertexBuffers(current_cmd_buf, 0, 1, @ptrCast(&self.triangle_mesh.buffers.vertex), &offset);
-            self.ctx.device.cmdDraw(current_cmd_buf, vertices.len, 1, 0, 0);
-        }
-        try self.ctx.device.endCommandBuffer(current_cmd_buf);
-    }
-
-    if (true) {
-        for (self.cmd_bufs, self.framebuffer.vk_framebuffers) |cmdbuf, framebuffer| {
-            try self.ctx.device.resetCommandBuffer(cmdbuf, .{});
-            try self.ctx.device.beginCommandBuffer(cmdbuf, &.{});
+                .view_mask = 0,
+                .color_attachment_count = 1,
+                .p_color_attachments = @ptrCast(&.{color_attachment}),
+            };
 
             self.ctx.device.cmdSetViewport(cmdbuf, 0, 1, @ptrCast(&self.frame_data.viewport));
             self.ctx.device.cmdSetScissor(cmdbuf, 0, 1, @ptrCast(&self.frame_data.scissor));
 
-            { // Demo
-                self.ctx.device.cmdBindPipeline(cmdbuf, .graphics, self.pipelines.get(.demo).vk_pipeline);
-                const offset = [_]vk.DeviceSize{0};
+            self.ctx.device.cmdBeginRendering(cmdbuf, &rendering_info);
+            defer self.ctx.device.cmdEndRendering(cmdbuf);
 
-                self.ctx.device.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast(&self.triangle_mesh.buffers.vertex), &offset);
-
-                const rendering_info: vk.RenderingInfo = .{ .layer_count = 1, .render_area = self.frame_data.scissor };
-                self.ctx.device.cmdBeginRendering(cmdbuf, &rendering_info);
-                defer self.ctx.device.cmdEndRendering(cmdbuf);
-
-                // self.ctx.device.cmdBeginRenderPass(cmdbuf, &.{
-                //     .render_pass = self.passes.clear.vk_render_pass,
-                //     .framebuffer = framebuffer,
-                //     .render_area = self.frame_data.scissor,
-                //     .clear_value_count = 1,
-                //     .p_clear_values = @ptrCast(&self.frame_data.clear_color),
-                // }, .@"inline");
-                // defer self.ctx.device.cmdEndRenderPass(cmdbuf);
-
-                self.ctx.device.cmdDraw(cmdbuf, vertices.len, 1, 0, 0);
-            }
-
-            // { // 2D
-            //     self.ctx.device.cmdBeginRenderPass(cmdbuf, &.{
-            //         .render_pass = self.passes.solid.vk_render_pass,
-            //         .framebuffer = framebuffer,
-            //         .render_area = self.frame_data.scissor,
-            //         .clear_value_count = 1,
-            //         .p_clear_values = @ptrCast(&self.frame_data.clear_color),
-            //     }, .@"inline");
-            //     defer self.ctx.device.cmdEndRenderPass(cmdbuf);
-            //
-            //     self.ctx.device.cmdBindPipeline(cmdbuf, .graphics, self.pipelines.get(._2d).vk_pipeline);
-            //
-            //     const offset = [_]vk.DeviceSize{0};
-            //     self.ctx.device.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast(&self.triangle_mesh.buffers.vertex), &offset);
-            //     self.ctx.device.cmdDraw(cmdbuf, vertices.len, 1, 0, 0);
-            // }
-
-            try self.ctx.device.endCommandBuffer(cmdbuf);
+            // self.ctx.device.cmdDraw(cmdbuf, vertices.len, 1, 0, 0);
+            self.ctx.device.cmdDraw(cmdbuf, 3, 1, 0, 0);
         }
+
+        draw_image.transitionToLayout(self.ctx, cmdbuf, .general, .transfer_src_optimal);
+        Image.vkTransitionToLayout(self.swapchain.currentImage(), self.ctx, cmdbuf, .undefined, .transfer_dst_optimal);
+
+        Image.vkCopyToImage(self.ctx, cmdbuf, draw_image.vk_image, self.swapchain.currentImage(), self.ctx.window.toExtend2D(), self.swapchain.extent);
+
+        Image.vkTransitionToLayout(self.swapchain.currentImage(), self.ctx, cmdbuf, .transfer_dst_optimal, .color_attachment_optimal);
+
+        Image.vkTransitionToLayout(self.swapchain.currentImage(), self.ctx, cmdbuf, .color_attachment_optimal, .present_src_khr);
+
+        // { // 2D
+        //     self.ctx.device.cmdBeginRenderPass(cmdbuf, &.{
+        //         .render_pass = self.passes.solid.vk_render_pass,
+        //         .framebuffer = framebuffer,
+        //         .render_area = self.frame_data.scissor,
+        //         .clear_value_count = 1,
+        //         .p_clear_values = @ptrCast(&self.frame_data.clear_color),
+        //     }, .@"inline");
+        //     defer self.ctx.device.cmdEndRenderPass(cmdbuf);
+        //
+        //     self.ctx.device.cmdBindPipeline(cmdbuf, .graphics, self.pipelines.get(._2d).vk_pipeline);
+        //
+        //     const offset = [_]vk.DeviceSize{0};
+        //     self.ctx.device.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast(&self.triangle_mesh.buffers.vertex), &offset);
+        //     self.ctx.device.cmdDraw(cmdbuf, vertices.len, 1, 0, 0);
+        // }
+
+        try self.ctx.device.endCommandBuffer(cmdbuf);
     }
 }
 
@@ -598,8 +640,8 @@ pub fn reset(self: *Renderer) !void {
         self.frame_data.previous_frame_window_size = .{ .width = @intCast(self.ctx.window.getWidth()), .height = @intCast(self.ctx.window.getHeight()) };
         self.uniforms.time.time = @floatFromInt(sdl.timer.getMillisecondsSinceInit() / 1000); // convert to seconds
 
-        self.framebuffer.destroy(self.ctx);
-        self.framebuffer = try Framebuffer.create(self.ctx, self.allocator, self.passes.clear, self.swapchain);
+        // self.framebuffer.destroy(self.ctx);
+        // self.framebuffer = try Framebuffer.create(self.ctx, self.allocator, self.passes.clear, self.swapchain);
 
         // DEBUG: Print viewport/scissor
         std.debug.print("Viewport: {}x{}\n", .{
@@ -617,7 +659,8 @@ pub fn reset(self: *Renderer) !void {
 }
 
 pub fn createCommandBuffers(self: *Renderer) !void {
-    self.cmd_bufs = try self.allocator.alloc(vk.CommandBuffer, self.framebuffer.vk_framebuffers.len);
+    // self.cmd_bufs = try self.allocator.alloc(vk.CommandBuffer, self.framebuffer.vk_framebuffers.len);
+    self.cmd_bufs = try self.allocator.alloc(vk.CommandBuffer, self.swapchain.swap_images.len);
     errdefer self.allocator.free(self.cmd_bufs);
 
     try self.ctx.device.allocateCommandBuffers(&.{
@@ -649,14 +692,17 @@ fn createDemoPipeline(self: *Renderer) !void {
 
     var pipeline_builder = try Pipeline.Builder.init(self.allocator);
     try pipeline_builder.setShaders(&vert, &frag);
+    pipeline_builder.setColorAttachmentFormat(.r16g16b16a16_sfloat);
+
+    pipeline_builder.pipeline_layout = try self.ctx.device.createPipelineLayout(&.{
+        .set_layout_count = 0,
+        .p_set_layouts = null,
+        .push_constant_range_count = 0,
+        .p_push_constant_ranges = null,
+    }, null);
+
     const pipeline = try pipeline_builder.buildPipeline(self.ctx);
 
-    // const pipeline = try Pipeline.create(self.ctx, .{
-    //     .vert = "demo.spv",
-    //     .frag = "demo.spv",
-    //     .layout = layout,
-    //     .config = .{},
-    // }, self.passes.clear);
     self.pipelines.set(.demo, pipeline);
 }
 

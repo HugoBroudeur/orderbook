@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const sdl = @import("sdl3");
+const vk = @import("vulkan");
 
 const Event = @import("../events/event.zig");
 const Display = @import("display.zig");
@@ -83,4 +84,8 @@ pub fn setIcon(self: *Window, icon_path: [:0]const u8) !void {
     const window_icon = try sdl.image.loadIcoIo(icon_stream);
     defer window_icon.deinit();
     try self.ptr.setIcon(window_icon);
+}
+
+pub fn toExtend2D(self: *Window) vk.Extent2D {
+    return .{ .width = @intCast(self.getWidth()), .height = @intCast(self.getHeight()) };
 }

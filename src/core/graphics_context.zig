@@ -17,6 +17,8 @@ const required_device_extensions = [_][*:0]const u8{
     vk.extensions.khr_buffer_device_address.name,
     vk.extensions.khr_shader_draw_parameters.name,
     vk.extensions.khr_dynamic_rendering.name,
+    vk.extensions.khr_shader_atomic_int_64.name,
+    vk.extensions.khr_synchronization_2.name,
 };
 
 const required_extensions = [_]vk.ApiInfo{
@@ -25,6 +27,23 @@ const required_extensions = [_]vk.ApiInfo{
     // see https://github.com/glfw/glfw/issues/2335
     vk.extensions.khr_portability_enumeration,
     vk.extensions.khr_get_physical_device_properties_2,
+};
+
+var featurev1_3: vk.PhysicalDeviceVulkan13Features = .{
+    .dynamic_rendering = .true,
+    .synchronization_2 = .true,
+};
+var featurev1_2: vk.PhysicalDeviceVulkan12Features = .{
+    .p_next = @ptrCast(&featurev1_3),
+    .buffer_device_address = .true,
+};
+var featurev1_1: vk.PhysicalDeviceVulkan11Features = .{
+    .p_next = @ptrCast(&featurev1_2),
+    .shader_draw_parameters = .true,
+};
+const featurev1_0: vk.PhysicalDeviceFeatures2 = .{
+    .p_next = @ptrCast(&featurev1_1),
+    .features = .{ .shader_int_64 = .true },
 };
 
 // There are 3 levels of bindings in vulkan-zig:
@@ -112,6 +131,10 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
         return error.MissingLayer;
     }
 
+    if (!try checkLayerExtensionSupport(&ctx.vkb, &required_layer_names, allocator)) {
+        return error.MissingLayerExtension;
+    }
+
     var extension_names: std.ArrayList([*:0]const u8) = .empty;
     defer extension_names.deinit(allocator);
     for (required_extensions) |extension| {
@@ -128,7 +151,7 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
             .application_version = @bitCast(vk.makeApiVersion(0, 0, 0, 0)),
             .p_engine_name = ctx.window.title,
             .engine_version = @bitCast(vk.makeApiVersion(0, 0, 0, 0)),
-            .api_version = @bitCast(vk.API_VERSION_1_4),
+            .api_version = @bitCast(vk.API_VERSION_1_3),
         },
         .enabled_layer_count = required_layer_names.len,
         .pp_enabled_layer_names = @ptrCast(&required_layer_names),
@@ -285,7 +308,9 @@ fn initializeCandidate(instance: Instance, candidate: DeviceCandidate) !vk.Devic
     for (required_device_extensions) |extension| {
         std.log.debug("[GraphicsContext] Loading Vulkan extension: {s}", .{extension});
     }
+
     return try instance.createDevice(candidate.pdev, &.{
+        .p_next = @ptrCast(&featurev1_0),
         .queue_create_info_count = queue_count,
         .p_queue_create_infos = &qci,
         .enabled_extension_count = required_device_extensions.len,
@@ -426,10 +451,33 @@ fn checkExtensionSupport(
     return true;
 }
 
-pub fn createMemoryAllocateInfo(self: *const GraphicsContext, memory_requirements: vk.MemoryRequirements, properties: vk.MemoryPropertyFlags) !vk.MemoryAllocateInfo {
+fn checkLayerExtensionSupport(
+    vkb: *const BaseWrapper,
+    layer_names: []const [*:0]const u8,
+    allocator: std.mem.Allocator,
+) !bool {
+    for (layer_names) |layer_name| {
+        const propsv = try vkb.enumerateInstanceExtensionPropertiesAlloc(layer_name, allocator);
+        defer allocator.free(propsv);
+
+        for (propsv) |extension| {
+            std.log.debug("[GraphicsContext] Avaiblable Layer Extension: {s}", .{extension.extension_name});
+        }
+    }
+
+    return true;
+}
+
+pub fn createMemoryAllocateInfo(self: *const GraphicsContext, memory_requirements: vk.MemoryRequirements, properties: vk.MemoryPropertyFlags, with_device_address_bit: bool) !vk.MemoryAllocateInfo {
+    const flag_info: vk.MemoryAllocateFlagsInfo = .{
+        .flags = .{ .device_address_bit = true },
+        .device_mask = 0,
+    };
+
     return vk.MemoryAllocateInfo{
         .allocation_size = memory_requirements.size,
         .memory_type_index = try self.findMemoryTypeIndex(memory_requirements, properties),
+        .p_next = if (with_device_address_bit) @ptrCast(&flag_info) else null,
     };
 }
 
