@@ -41,7 +41,9 @@ pub const DrawPassType = enum { demo, ui, shadow, ssao, sky, solid, raycast, tra
 pub const TransferBufferType = enum { atlas_buffer_data, atlas_texture_data };
 pub const ImageType = enum { atlas, draw };
 pub const SamplerType = enum { nearest, linear };
-pub const PipelineType = enum { demo, _2d };
+pub const PipelineType = enum { demo, compute };
+
+pub const FRAME_OVERLAP = 2;
 
 const Uniforms = struct {
     transform: struct {
@@ -65,24 +67,87 @@ const FrameData = struct {
     viewport: vk.Viewport = .{ .x = 0, .y = 0, .width = 0, .height = 0, .min_depth = 0, .max_depth = 1 },
     scissor: vk.Rect2D = .{ .offset = .{ .x = 0, .y = 0 }, .extent = .{ .height = 0, .width = 0 } },
 
-    cmd: vk.CommandBuffer = .null_handle,
+    cmd_pool: CommandPool = undefined,
+    cmd_buf: vk.CommandBuffer = undefined,
+
     fence: vk.Fence = .null_handle,
     image_available: vk.Semaphore = .null_handle,
     render_finished: vk.Semaphore = .null_handle,
 
+    pub fn setup(self: *FrameData, ctx: *GraphicsContext) !void {
+        self.cmd_pool = try CommandPool.create(ctx);
+        try self.createCommandBuffer(ctx);
+    }
+
+    pub fn createCommandBuffer(self: *FrameData, ctx: *GraphicsContext) !void {
+        try ctx.device.allocateCommandBuffers(&.{
+            .command_pool = self.cmd_pool.vk_cmd_pool,
+            .level = .primary,
+            .command_buffer_count = 1,
+        }, @ptrCast(&self.cmd_buf));
+        errdefer ctx.devive.freeCommandBuffers(self.cmd_pool.vk_cmd_pool, 1, @ptrCast(&self.cmd_buf));
+    }
+
     pub fn shouldReset(self: *FrameData, ctx: *const GraphicsContext) bool {
-        // log.debug("Should reset: swap {}, height {}, width {}", .{
-        //     self.swapchain_state == .suboptimal,
-        //     self.previous_frame_window_size.height != ctx.window.getHeight(),
-        //     self.previous_frame_window_size.width != ctx.window.getWidth(),
-        // });
         if (self.swapchain_state == .suboptimal) return true;
 
-        // Test if the window has been resized
         if (self.previous_frame_window_size.height != ctx.window.getHeight()) return true;
         if (self.previous_frame_window_size.width != ctx.window.getWidth()) return true;
 
         return false;
+    }
+
+    pub fn reset(self: *FrameData, ctx: *GraphicsContext, extent: vk.Extent2D) !void {
+
+        // Set Viewport + scisors
+        self.viewport.width = @floatFromInt(extent.width);
+        self.viewport.height = @floatFromInt(extent.height);
+        self.scissor.extent = extent;
+        self.previous_frame_window_size = .{ .width = @intCast(ctx.window.getWidth()), .height = @intCast(ctx.window.getHeight()) };
+
+        try self.createCommandBuffer(ctx);
+    }
+
+    pub fn destroy(self: *FrameData, ctx: *GraphicsContext) void {
+        self.cmd_pool.destroy(ctx);
+    }
+};
+
+const GlobalDescriptor = struct {
+
+    // Create a descriptor pool that will hold 10 sets with 1 image each
+    const MAX_SETS = 10;
+
+    global_allocator: Descriptor.Allocator,
+
+    // Used in the Compute Shader
+    vk_draw_image_descriptors: vk.DescriptorSet,
+    vk_draw_image_descriptor_layout: vk.DescriptorSetLayout,
+
+    pub fn create(allocator: std.mem.Allocator, ctx: *GraphicsContext) !GlobalDescriptor {
+        var ratio = [_]Descriptor.Allocator.PoolSizeRatio{.{ .vk_type = .storage_image, .ratio = 1 }};
+
+        var desc_allocator = Descriptor.Allocator.init(allocator);
+        try desc_allocator.createPool(ctx, &ratio, MAX_SETS);
+
+        var builder: Descriptor.LayoutBuilder = try .init(allocator);
+        defer builder.deinit();
+
+        try builder.addBinding(0, .storage_image);
+
+        const vk_draw_image_descriptor_layout = try builder.build(ctx, .{ .compute_bit = true }, .{}, null);
+        const vk_draw_image_descriptors = try desc_allocator.allocate(ctx, vk_draw_image_descriptor_layout);
+
+        return .{
+            .global_allocator = desc_allocator,
+            .vk_draw_image_descriptor_layout = vk_draw_image_descriptor_layout,
+            .vk_draw_image_descriptors = vk_draw_image_descriptors,
+        };
+    }
+
+    pub fn destroy(self: *GlobalDescriptor, ctx: *GraphicsContext) void {
+        self.global_allocator.destroyPool(ctx);
+        ctx.device.destroyDescriptorSetLayout(self.vk_draw_image_descriptor_layout, null);
     }
 };
 
@@ -100,9 +165,6 @@ uniforms: Uniforms = undefined,
 swapchain: Swapchain = undefined,
 // framebuffer: Framebuffer = undefined,
 
-cmd_pool: CommandPool = undefined,
-cmd_bufs: []vk.CommandBuffer = undefined,
-
 // triangle_buffer: Buffer = undefined,
 batcher_buffer: Buffer = undefined,
 text_buffer: Buffer = undefined,
@@ -111,7 +173,7 @@ uniform_buffer: Buffer = undefined,
 triangle_mesh: Mesh = undefined,
 
 // Global descriptors
-descriptor: Descriptor = undefined,
+descriptor: GlobalDescriptor = undefined,
 
 // nearest_sampler: Sampler = undefined,
 pipelines: std.EnumArray(PipelineType, Pipeline) = .initUndefined(),
@@ -123,7 +185,8 @@ imgui_draw_data: *anyopaque = undefined,
 batcher: Batcher,
 is_minimised: bool = false,
 
-frame_data: FrameData = .{},
+frame_number: u64 = 0,
+frame_data: [FRAME_OVERLAP]FrameData = [2]FrameData{ .{}, .{} },
 
 const vertices = [_]Data.Quad.Vertex{
     .{ .pos = .{ 0, -0.5 }, .uv = .{ 0.5, 0 }, .col = .{ 1, 0, 0, 1 } },
@@ -146,10 +209,12 @@ pub fn deinit(self: *Renderer) void {
         unreachable;
     };
 
-    self.cmd_pool.destroy(self.ctx);
-
     for (&self.pipelines.values) |*pipeline| {
         pipeline.destroy(self.ctx);
+    }
+
+    for (&self.frame_data) |*fd| {
+        fd.destroy(self.ctx);
     }
 
     for (&self.images.values) |*image| {
@@ -181,12 +246,15 @@ pub fn setup(self: *Renderer) !void {
     // self.passes.clear = try RenderPass.create(self.ctx, self.swapchain, .{});
     // self.passes.solid = try RenderPass.create(self.ctx, self.swapchain, .{ .load_op = .load, .store_op = .store });
 
-    self.cmd_pool = try CommandPool.create(self.ctx);
+    for (&self.frame_data) |*fd| {
+        try fd.setup(self.ctx);
+    }
 
     const draw_image = try Image.create(
         self.ctx,
         .{
             .transfer_src_bit = true,
+            .transfer_dst_bit = true,
             .storage_bit = true,
             .color_attachment_bit = true,
         },
@@ -199,8 +267,7 @@ pub fn setup(self: *Renderer) !void {
         .r16g16b16a16_sfloat,
         // self.swapchain.surface_format.format,
     );
-    self.images.set(.draw, draw_image);
-    self.descriptor = try Descriptor.create(self.allocator, self.ctx);
+    self.descriptor = try GlobalDescriptor.create(self.allocator, self.ctx);
     {
         var img_info = draw_image.createDescriptorImageInfo();
         const draw_image_write: vk.WriteDescriptorSet = .{
@@ -216,9 +283,7 @@ pub fn setup(self: *Renderer) !void {
 
         self.ctx.device.updateDescriptorSets(1, &.{draw_image_write}, 0, null);
     }
-
-    // self.framebuffer = try Framebuffer.create(self.ctx, self.allocator, self.passes.clear, self.swapchain);
-    // Logger.debug("[Renderer2D] Found {} framebuffers", .{self.framebuffer.vk_framebuffers.len});
+    self.images.set(.draw, draw_image);
 
     const surface = try Image.loadImageAsset("assets/images/Background.jpg", .array_rgba_32);
     const image = try Image.createFromSurface(self.ctx, surface, .{ .transfer_dst_bit = true, .sampled_bit = true }, .{ .device_local_bit = true });
@@ -234,27 +299,15 @@ pub fn setup(self: *Renderer) !void {
     self.text_buffer = try Buffer.create(self.ctx, @intCast(self.images.get(.atlas).size), .{ .transfer_dst_bit = true }, .{ .device_local_bit = true });
 
     // const quad_mesh = try Mesh.makeQuadMesh(self.ctx, &self.cmd_pool, quad_vertices, indices: [6]u16)
-    self.triangle_mesh = try Mesh.makeTriangleMesh(self.ctx, &self.cmd_pool, vertices);
+    self.triangle_mesh = try Mesh.makeTriangleMesh(self.ctx, &self.getCurrentFrame().cmd_pool, vertices);
 
     // Create Pipelines
     try self.createDemoPipeline();
     // try self.create2DPipeline();
+    try self.createComputePipeline();
 
-    try self.text_buffer.fastTransfer(self.ctx, &self.cmd_pool, surface.getPixels().?);
+    try self.text_buffer.fastTransfer(self.ctx, &self.getCurrentFrame().cmd_pool, surface.getPixels().?);
     // try self.triangle_buffer.fastTransfer(self.ctx, &self.cmd_pool, &std.mem.toBytes(vertices));
-
-    { // Create command buffers
-        // self.cmd_bufs = try self.allocator.alloc(vk.CommandBuffer, self.framebuffer.vk_framebuffers.len);
-        self.cmd_bufs = try self.allocator.alloc(vk.CommandBuffer, self.swapchain.swap_images.len);
-        errdefer self.allocator.free(self.cmd_bufs);
-
-        try self.ctx.device.allocateCommandBuffers(&.{
-            .command_pool = self.cmd_pool.vk_cmd_pool,
-            .level = .primary,
-            .command_buffer_count = @intCast(self.cmd_bufs.len),
-        }, self.cmd_bufs.ptr);
-        errdefer self.ctx.devive.freeCommandBuffers(self.cmd_pool.vk_cmd_pool, @intCast(self.cmd_bufs.len), self.cmd_bufs.ptr);
-    }
 }
 
 pub fn initUniform(self: *Renderer) void {
@@ -281,95 +334,123 @@ pub fn initUniform(self: *Renderer) void {
     };
 }
 
+pub fn getCurrentFrame(self: *Renderer) *FrameData {
+    return &self.frame_data[self.frame_number % FRAME_OVERLAP];
+}
+
 fn fillCommandBuffers(self: *Renderer) !void {
     self.stats.startClock(.render_passes);
     defer self.stats.tickClock(.render_passes);
 
     try self.swapchain.waitForAllFences();
-    // self.ctx.device.waitForFences(fence_count: u32, p_fences: [*]const Fence, wait_all: Bool32, timeout: u64)
 
     const draw_image = self.images.getPtr(.draw);
+    const current_frame = self.getCurrentFrame();
+    const cmdbuf = current_frame.cmd_buf;
 
-    for (self.cmd_bufs) |cmdbuf| {
-        try self.ctx.device.resetCommandBuffer(cmdbuf, .{});
-        try self.ctx.device.beginCommandBuffer(cmdbuf, &.{});
+    const cmd_begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .one_time_submit_bit = true } };
+    try self.ctx.device.resetCommandBuffer(cmdbuf, .{});
+    try self.ctx.device.beginCommandBuffer(cmdbuf, &cmd_begin_info);
 
-        draw_image.transitionToLayout(self.ctx, cmdbuf, .undefined, .general);
+    draw_image.transitionToLayout(self.ctx, cmdbuf, .undefined, .general);
 
-        { // Demo
-            self.ctx.device.cmdBindPipeline(cmdbuf, .graphics, self.pipelines.get(.demo).vk_pipeline);
-            // self.ctx.device.cmdBindDescriptorSets(
-            //     cmdbuf,
-            //     .graphics,
-            //     self.pipelines.get(.demo).layout,
-            //     0,
-            //     1,
-            //     @ptrCast(&self.descriptor.vk_draw_image_descriptors),
-            //     0,
-            //     null,
-            // );
-            // const offset = [_]vk.DeviceSize{0};
+    self.draw_background(cmdbuf);
 
-            // self.ctx.device.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast(&self.triangle_mesh.buffers.vertex), &offset);
+    draw_image.transitionToLayout(self.ctx, cmdbuf, .general, .color_attachment_optimal);
 
-            const color_attachment: vk.RenderingAttachmentInfo = .{
-                .image_layout = .general,
-                .image_view = draw_image.view,
-                .resolve_mode = .{},
-                .resolve_image_layout = .general,
-                .load_op = .clear,
-                .store_op = .store,
-                .clear_value = .{ .color = .{
-                    .float_32 = [_]f32{ 1, 1, 0, 1 },
-                } },
-            };
+    self.draw_demo(cmdbuf);
 
-            const rendering_info: vk.RenderingInfo = .{
-                .layer_count = 1,
-                .render_area = self.frame_data.scissor,
-                .view_mask = 0,
-                .color_attachment_count = 1,
-                .p_color_attachments = @ptrCast(&.{color_attachment}),
-            };
+    draw_image.transitionToLayout(self.ctx, cmdbuf, .color_attachment_optimal, .transfer_src_optimal);
+    Image.vkTransitionToLayout(self.swapchain.currentImage(), self.ctx, cmdbuf, .undefined, .transfer_dst_optimal);
 
-            self.ctx.device.cmdSetViewport(cmdbuf, 0, 1, @ptrCast(&self.frame_data.viewport));
-            self.ctx.device.cmdSetScissor(cmdbuf, 0, 1, @ptrCast(&self.frame_data.scissor));
+    Image.vkCopyImageToImage(self.ctx, cmdbuf, draw_image.vk_image, self.swapchain.currentImage(), self.ctx.window.toExtend2D(), self.swapchain.extent);
 
-            self.ctx.device.cmdBeginRendering(cmdbuf, &rendering_info);
-            defer self.ctx.device.cmdEndRendering(cmdbuf);
+    Image.vkTransitionToLayout(self.swapchain.currentImage(), self.ctx, cmdbuf, .transfer_dst_optimal, .color_attachment_optimal);
 
-            // self.ctx.device.cmdDraw(cmdbuf, vertices.len, 1, 0, 0);
-            self.ctx.device.cmdDraw(cmdbuf, 3, 1, 0, 0);
-        }
+    Image.vkTransitionToLayout(self.swapchain.currentImage(), self.ctx, cmdbuf, .color_attachment_optimal, .present_src_khr);
 
-        draw_image.transitionToLayout(self.ctx, cmdbuf, .general, .transfer_src_optimal);
-        Image.vkTransitionToLayout(self.swapchain.currentImage(), self.ctx, cmdbuf, .undefined, .transfer_dst_optimal);
+    // { // 2D
+    //     self.ctx.device.cmdBeginRenderPass(cmdbuf, &.{
+    //         .render_pass = self.passes.solid.vk_render_pass,
+    //         .framebuffer = framebuffer,
+    //         .render_area = self.frame_data.scissor,
+    //         .clear_value_count = 1,
+    //         .p_clear_values = @ptrCast(&self.frame_data.clear_color),
+    //     }, .@"inline");
+    //     defer self.ctx.device.cmdEndRenderPass(cmdbuf);
+    //
+    //     self.ctx.device.cmdBindPipeline(cmdbuf, .graphics, self.pipelines.get(._2d).vk_pipeline);
+    //
+    //     const offset = [_]vk.DeviceSize{0};
+    //     self.ctx.device.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast(&self.triangle_mesh.buffers.vertex), &offset);
+    //     self.ctx.device.cmdDraw(cmdbuf, vertices.len, 1, 0, 0);
+    // }
 
-        Image.vkCopyToImage(self.ctx, cmdbuf, draw_image.vk_image, self.swapchain.currentImage(), self.ctx.window.toExtend2D(), self.swapchain.extent);
+    try self.ctx.device.endCommandBuffer(cmdbuf);
+}
 
-        Image.vkTransitionToLayout(self.swapchain.currentImage(), self.ctx, cmdbuf, .transfer_dst_optimal, .color_attachment_optimal);
+pub fn draw_demo(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
+    const draw_image = self.images.getPtr(.draw);
+    const current_frame = self.getCurrentFrame();
 
-        Image.vkTransitionToLayout(self.swapchain.currentImage(), self.ctx, cmdbuf, .color_attachment_optimal, .present_src_khr);
+    self.ctx.device.cmdBindPipeline(cmdbuf, .graphics, self.pipelines.get(.demo).vk_pipeline);
+    // const offset = [_]vk.DeviceSize{0};
 
-        // { // 2D
-        //     self.ctx.device.cmdBeginRenderPass(cmdbuf, &.{
-        //         .render_pass = self.passes.solid.vk_render_pass,
-        //         .framebuffer = framebuffer,
-        //         .render_area = self.frame_data.scissor,
-        //         .clear_value_count = 1,
-        //         .p_clear_values = @ptrCast(&self.frame_data.clear_color),
-        //     }, .@"inline");
-        //     defer self.ctx.device.cmdEndRenderPass(cmdbuf);
-        //
-        //     self.ctx.device.cmdBindPipeline(cmdbuf, .graphics, self.pipelines.get(._2d).vk_pipeline);
-        //
-        //     const offset = [_]vk.DeviceSize{0};
-        //     self.ctx.device.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast(&self.triangle_mesh.buffers.vertex), &offset);
-        //     self.ctx.device.cmdDraw(cmdbuf, vertices.len, 1, 0, 0);
-        // }
+    // self.ctx.device.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast(&self.triangle_mesh.buffers.vertex), &offset);
 
-        try self.ctx.device.endCommandBuffer(cmdbuf);
-    }
+    const color_attachment: vk.RenderingAttachmentInfo = .{
+        .image_layout = .color_attachment_optimal,
+        .image_view = draw_image.view,
+        .resolve_mode = .{},
+        .resolve_image_layout = .color_attachment_optimal,
+        .load_op = .load,
+        .store_op = .store,
+        .clear_value = .{
+            .color = .{
+                .float_32 = [_]f32{ 0, 0, 0, 0 }, // 0,0,0,0 transparent
+            },
+        },
+    };
+
+    const rendering_info: vk.RenderingInfo = .{
+        .layer_count = 1,
+        .render_area = current_frame.scissor,
+        .view_mask = 0,
+        .color_attachment_count = 1,
+        .p_color_attachments = @ptrCast(&.{color_attachment}),
+    };
+
+    self.ctx.device.cmdBeginRendering(cmdbuf, &rendering_info);
+    defer self.ctx.device.cmdEndRendering(cmdbuf);
+
+    self.ctx.device.cmdSetViewport(cmdbuf, 0, 1, @ptrCast(&current_frame.viewport));
+    self.ctx.device.cmdSetScissor(cmdbuf, 0, 1, @ptrCast(&current_frame.scissor));
+
+    // self.ctx.device.cmdDraw(cmdbuf, vertices.len, 1, 0, 0);
+    self.ctx.device.cmdDraw(cmdbuf, 3, 1, 0, 0);
+}
+
+pub fn draw_background(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
+    // const draw_image = self.images.getPtr(.draw);
+    // const current_frame = self.getCurrentFrame();
+
+    self.ctx.device.cmdBindPipeline(cmdbuf, .compute, self.pipelines.get(.compute).vk_pipeline);
+    self.ctx.device.cmdBindDescriptorSets(
+        cmdbuf,
+        .compute,
+        self.pipelines.get(.compute).layout,
+        0,
+        1,
+        @ptrCast(&self.descriptor.vk_draw_image_descriptors),
+        0,
+        null,
+    );
+
+    // Dispatch (16x16 workgroup size, so divide image size by 16)
+    const group_count_x: u32 = @intCast((self.ctx.window.getWidth()) / 16); // Round up
+    const group_count_y: u32 = @intCast((self.ctx.window.getHeight()) / 16); // Round up
+
+    self.ctx.device.cmdDispatch(cmdbuf, group_count_x, group_count_y, 1);
 }
 
 pub fn flush(self: *Renderer, draw_queue: *Command.DrawQueue) void {
@@ -401,6 +482,7 @@ pub fn flush(self: *Renderer, draw_queue: *Command.DrawQueue) void {
 
 pub fn draw(self: *Renderer, batches: []Batcher.Batch) !void {
     Logger.info("[Renderer2D.draw] Drawing {} batches", .{batches.len});
+    var current_frame = self.getCurrentFrame();
 
     self.stats.startFrame();
     self.stats.startClock(.frame);
@@ -425,255 +507,37 @@ pub fn draw(self: *Renderer, batches: []Batcher.Batch) !void {
         total_vertices += @intCast(batch.vertices.cur_pos);
     }
 
-    // Second pass: upload with cumulative offsets
-    // var current_vertex_offset: u32 = 0;
-    // var current_index_offset: u32 = 0;
-
-    {
-        self.stats.startClock(.transfer);
-        defer self.stats.tickClock(.transfer);
-
-        // TODO I will need to calculate the right transfer buffer size
-        // for (batches, 0..) |*batch, i| {
-        //     const data = batch.toBytes();
-        //     const cycle = i != 0; // Cycle on first the one only
-        //     self.transfer_buffer_data.transferToGpu(&self.gpu, cycle, data.vertices, current_vertex_offset) catch {
-        //         Logger.err("[Renderer2D.draw] Error while transfering vertices data to GPU: {?s}", .{sdl.errors.get()});
-        //         self.stats.addSkippedDraw();
-        //         return;
-        //     };
-        //     self.transfer_buffer_data.transferToGpu(&self.gpu, true, data.indices, total_vertex_bytes + current_index_offset) catch {
-        //         Logger.err("[Renderer2D.draw] Error while transfering indices data to GPU: {?s}", .{sdl.errors.get()});
-        //         self.stats.addSkippedDraw();
-        //         return;
-        //     };
-        //
-        //     // Logger.info("[Renderer2D.draw] Batch uploaded - vertex offset: {}, index offset: {}", .{ current_vertex_offset, total_vertex_bytes + current_index_offset });
-        //
-        //     // Accumulate offsets for next batch
-        //     current_vertex_offset += @intCast(data.vertices.len);
-        //     current_index_offset += @intCast(data.indices.len);
-        // }
-    }
-
-    {
-        self.stats.startClock(.acquire_cmd_buf);
-        defer self.stats.tickClock(.acquire_cmd_buf);
-
-        const cmd_buf = self.cmd_bufs[self.swapchain.image_index];
-
-        self.reset() catch {
-            self.frame_data.swapchain_state = .suboptimal;
-            self.stats.addSkippedDraw();
-            return;
-        };
-
-        // We are drawing in all the framebuffers.
-        // TODO: improve for triple buffering and draw over 3 frames
-        // TODO: in the triangle example the buffers are filled once on setup, then only when the self.reset() is triggered (window resize or error during last frame)
-        self.fillCommandBuffers() catch {
-            self.frame_data.swapchain_state = .suboptimal;
-            self.stats.addSkippedDraw();
-            return;
-        };
-
-        {
-            self.stats.startClock(.acquire_texture);
-            defer self.stats.tickClock(.acquire_texture);
-
-            // const swtext = self.gpu.acquireSwapchainTexture() catch {
-            //     // self.gpu.command_buffer.cancel() catch {};
-            //     submit_cmd = true;
-            //     Logger.err("[Renderer2D.draw] Failed acquiring SwapchainTexture: {?s}", .{sdl.errors.get()});
-            //     self.stats.addSkippedDraw();
-            //     return;
-            // };
-            //
-            // const swapchain_texture = swtext orelse {
-            //     // self.gpu.command_buffer.cancel() catch {};
-            //     submit_cmd = true;
-            //     // Logger.err("[Renderer2D.draw] SwapchainTexture Null: {?s}", .{sdl.errors.get()});
-            //     self.stats.addSkippedDraw();
-            //     return;
-            // };
-            // self.images.set(.swapchain, swapchain_texture);
-        }
-
-        {
-            self.stats.startClock(.copy_pass);
-            defer self.stats.tickClock(.copy_pass);
-
-            // const copy_pass = self.gpu.command_buffer.beginCopyPass();
-            //
-            // // Upload vertices: pass explicit size
-            // // Logger.info("[Renderer2D.draw] Copying {} vertex bytes from offset 0", .{total_vertex_bytes});
-            // self.batcher_buffer.upload(copy_pass, &self.transfer_buffer_data, 0, total_vertex_bytes, true);
-            //
-            // // Upload indices: pass explicit size
-            // // Logger.info("[Renderer2D.draw] Copying {} index bytes from offset {}", .{ total_index_bytes, total_vertex_bytes });
-            // self.index_buffer.upload(copy_pass, &self.transfer_buffer_data, total_vertex_bytes, total_index_bytes, true);
-            //
-            // // self.vertex_buffer.upload(copy_pass, &self.transfer_buffer_data, 0);
-            // // // self.index_buffer.upload(copy_pass, &self.transfer_buffer_data, @intCast(batch.vertices.sizeInBytes()));
-            // // self.index_buffer.upload(copy_pass, &self.transfer_buffer_data, 0,total_vertex_data_in_bytes);
-            //
-            // copy_pass.end();
-        }
-
-        // const swapchain_texture = self.textures.get(.swapchain);
-        {
-            self.stats.startClock(.render_passes);
-            defer self.stats.tickClock(.render_passes);
-
-            // { // RenderPass Debug Triangle
-            //     self.stats.startClock(.render_pass_triangle);
-            //     defer self.stats.tickClock(.render_pass_triangle);
-            //     const gpu_target_info: sdl.gpu.ColorTargetInfo = .{
-            //         // .load = if (i == 0) .clear else .load,
-            //         .load = .clear,
-            //         .clear_color = Colors.Black.toSdl(),
-            //         .store = .store,
-            //         .texture = swapchain_texture.ptr,
-            //     };
-            //
-            //     // Setup and start a render pass
-            //     const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
-            //     defer render_pass.end();
-            //
-            //     const pipeline = self.pipelines.get(.demo);
-            //     render_pass.bindGraphicsPipeline(pipeline.vk_pipeline);
-            //     // TODO viewport
-            //     // TODO scisor
-            //     const mvp_bytes = std.mem.toBytes(self.uniforms.mvp.proj_matrix);
-            //
-            //     self.gpu.command_buffer.pushVertexUniformData(0, &mvp_bytes);
-            //
-            //     self.stats.addDrawCall(3, 1);
-            //     render_pass.drawPrimitives(3, 1, 0, 0);
-            // }
-
-            // { // RenderPass Quad 2D solid with text
-            //     self.stats.startClock(.render_pass_2d);
-            //     defer self.stats.tickClock(.render_pass_2d);
-            //
-            //     const gpu_target_info: sdl.gpu.ColorTargetInfo = .{
-            //         .store = .store,
-            //         .load = .load,
-            //         .texture = swapchain_texture.ptr,
-            //     };
-            //
-            //     const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
-            //     defer render_pass.end();
-            //
-            //     const pipeline = self.pipelines.get(._2d);
-            //     render_pass.bindGraphicsPipeline(pipeline.ptr);
-            //
-            //     const transform_bytes = std.mem.toBytes(self.uniforms.transform);
-            //
-            //     self.gpu.command_buffer.pushVertexUniformData(0, &transform_bytes);
-            //
-            //     render_pass.bindVertexBuffers(0, &.{.{ .buffer = self.batcher_buffer.vk_buffer, .offset = 0 }});
-            //     render_pass.bindIndexBuffer(.{ .buffer = self.index_buffer.ptr, .offset = 0 }, .indices_16bit);
-            //     const texture = self.textures.get(.atlas);
-            //     // render_pass.bindTexture(texture, self.data.nearest_sampler);
-            //     render_pass.bindFragmentSamplers(0, &.{.{ .texture = texture.ptr, .sampler = self.nearest_sampler.ptr }});
-            //
-            //     { // Debug to ensure we are good
-            //         const expected_index_bytes = total_indices * @sizeOf(u16);
-            //         assert(total_index_bytes == expected_index_bytes);
-            //     }
-            //
-            //     self.stats.addDrawCall(total_vertices, total_indices);
-            //     render_pass.drawIndexedPrimitives(total_indices, 1, 0, 0, 0);
-            //
-            //     // render_pass.drawIndexedPrimitives(0, 1, 0, 0, 0);
-            // }
-
-            // { // RenderPass UI (CIMGUI)
-            //     self.stats.startClock(.render_pass_ui);
-            //     defer self.stats.tickClock(.render_pass_ui);
-            //
-            //     const gpu_target_info: sdl.gpu.ColorTargetInfo = .{
-            //         .store = .store,
-            //         .load = .load,
-            //         .texture = swapchain_texture.ptr,
-            //     };
-            //
-            //     impl_sdlgpu3.ImGui_ImplSDLGPU3_PrepareDrawData(@ptrCast(self.imgui_draw_data), @ptrCast(self.gpu.command_buffer.value));
-            //
-            //     const render_pass = self.gpu.command_buffer.beginRenderPass(&.{gpu_target_info}, null);
-            //     defer render_pass.end();
-            //
-            //     // TODO
-            //     // self.clay_manager.renderCommands(draw_data.clay_render_cmds);
-            //
-            //     impl_sdlgpu3.ImGui_ImplSDLGPU3_RenderDrawData(@ptrCast(self.imgui_draw_data), @ptrCast(self.gpu.command_buffer.value), @ptrCast(render_pass.value), null);
-            // }
-        }
-
-        self.frame_data.swapchain_state = self.swapchain.present(cmd_buf) catch |err| blk: {
-            self.stats.addSkippedDraw();
-            std.debug.print("Present failed: {}\n", .{err});
-            break :blk switch (err) {
-                error.OutOfDateKHR => Swapchain.PresentState.suboptimal,
-                else => |narrow| return narrow,
-            };
-        };
-        // std.debug.print("Present state: {}\n", .{self.frame_data.swapchain_state});
-    }
-}
-
-pub fn reset(self: *Renderer) !void {
-    if (self.frame_data.shouldReset(self.ctx)) {
-
-        // Set Swapchain + Viewport + scisors + uniform time
+    if (current_frame.shouldReset(self.ctx)) {
         self.swapchain.recreate(.{
             .width = @intCast(self.ctx.window.getWidth()),
             .height = @intCast(self.ctx.window.getHeight()),
         }) catch {
+            current_frame.swapchain_state = .suboptimal;
             self.stats.addSkippedDraw();
             return;
         };
-        self.frame_data.viewport.width = @floatFromInt(self.swapchain.extent.width);
-        self.frame_data.viewport.height = @floatFromInt(self.swapchain.extent.height);
-        self.frame_data.scissor.extent = self.swapchain.extent;
-        self.frame_data.previous_frame_window_size = .{ .width = @intCast(self.ctx.window.getWidth()), .height = @intCast(self.ctx.window.getHeight()) };
-        self.uniforms.time.time = @floatFromInt(sdl.timer.getMillisecondsSinceInit() / 1000); // convert to seconds
-
-        // self.framebuffer.destroy(self.ctx);
-        // self.framebuffer = try Framebuffer.create(self.ctx, self.allocator, self.passes.clear, self.swapchain);
-
-        // DEBUG: Print viewport/scissor
-        std.debug.print("Viewport: {}x{}\n", .{
-            self.frame_data.viewport.width,
-            self.frame_data.viewport.height,
-        });
-        std.debug.print("Scissor: {}x{}\n", .{
-            self.frame_data.scissor.extent.width,
-            self.frame_data.scissor.extent.height,
-        });
-
-        self.resetCommandBuffers();
-        try self.createCommandBuffers();
+        current_frame.reset(self.ctx, self.swapchain.extent) catch {
+            self.stats.addSkippedDraw();
+            return;
+        };
     }
-}
 
-pub fn createCommandBuffers(self: *Renderer) !void {
-    // self.cmd_bufs = try self.allocator.alloc(vk.CommandBuffer, self.framebuffer.vk_framebuffers.len);
-    self.cmd_bufs = try self.allocator.alloc(vk.CommandBuffer, self.swapchain.swap_images.len);
-    errdefer self.allocator.free(self.cmd_bufs);
+    self.fillCommandBuffers() catch {
+        current_frame.swapchain_state = .suboptimal;
+        self.stats.addSkippedDraw();
+        return;
+    };
 
-    try self.ctx.device.allocateCommandBuffers(&.{
-        .command_pool = self.cmd_pool.vk_cmd_pool,
-        .level = .primary,
-        .command_buffer_count = @intCast(self.cmd_bufs.len),
-    }, self.cmd_bufs.ptr);
-    errdefer self.ctx.devive.freeCommandBuffers(self.cmd_pool.vk_cmd_pool, @intCast(self.cmd_bufs.len), self.cmd_bufs.ptr);
-}
+    current_frame.swapchain_state = self.swapchain.present(current_frame.cmd_buf) catch |err| blk: {
+        self.stats.addSkippedDraw();
+        std.debug.print("Present failed: {}\n", .{err});
+        break :blk switch (err) {
+            error.OutOfDateKHR => Swapchain.PresentState.suboptimal,
+            else => |narrow| return narrow,
+        };
+    };
 
-pub fn resetCommandBuffers(self: *Renderer) void {
-    self.ctx.device.freeCommandBuffers(self.cmd_pool.vk_cmd_pool, @truncate(self.cmd_bufs.len), self.cmd_bufs.ptr);
-    self.allocator.free(self.cmd_bufs);
+    self.frame_number += 1;
 }
 
 fn createDemoPipeline(self: *Renderer) !void {
@@ -713,12 +577,50 @@ fn create2DPipeline(self: *Renderer) !void {
         Buffer.BufferElement.new(.Float4, "Color"),
     };
     const layout: Buffer.BufferLayout = .init(&elements);
+    _ = layout;
 
-    const pipeline = try Pipeline.create(self.ctx, .{
-        .vert = "2d.spv",
-        .frag = "2d.spv",
-        .layout = layout,
-        .config = .{ .num_push_constant = 1, .num_layouts = 1 },
-    }, self.passes.clear);
+    var vert = try Shader.create(self.ctx, .{ .name = "2d.spv", .stage = .vertex });
+    defer vert.destroy(self.ctx);
+    var frag = try Shader.create(self.ctx, .{ .name = "2d.spv", .stage = .fragment });
+    defer frag.destroy(self.ctx);
+
+    var pipeline_builder = try Pipeline.Builder.init(self.allocator);
+    try pipeline_builder.setShaders(&vert, &frag);
+    pipeline_builder.setColorAttachmentFormat(.r16g16b16a16_sfloat);
+
+    var desc_builder = try Descriptor.LayoutBuilder.init(self.allocator);
+    defer desc_builder.deinit();
+    try desc_builder.addBinding(0, .storage_buffer);
+    const pipeline_layout = try desc_builder.build(self.ctx, .{ .vertex_bit = true }, .{}, null);
+    pipeline_builder.pipeline_layout = try self.ctx.device.createPipelineLayout(&.{
+        .set_layout_count = 1,
+        .p_set_layouts = @ptrCast(&pipeline_layout),
+        .push_constant_range_count = 0,
+        .p_push_constant_ranges = null,
+    }, null);
+
+    const pipeline = try pipeline_builder.buildPipeline(self.ctx);
+
     self.pipelines.set(._2d, pipeline);
+}
+
+fn createComputePipeline(self: *Renderer) !void {
+    // var compute = try Shader.create(self.ctx, .{ .name = "compute.spv", .stage = .compute });
+    var compute = try Shader.create(self.ctx, .{ .name = "sky.spv", .stage = .compute });
+    defer compute.destroy(self.ctx);
+
+    // self.descriptor
+    // const pipeline = try Pipeline.createComputePipeline(self.ctx, compute, try Pipeline.createPipelineLayout(self.ctx));
+
+    const pipeline_layout = try self.ctx.device.createPipelineLayout(&.{
+        .flags = .{},
+        .set_layout_count = 1,
+        .p_set_layouts = @ptrCast(&self.descriptor.vk_draw_image_descriptor_layout),
+        .push_constant_range_count = 0,
+        .p_push_constant_ranges = undefined,
+    }, null);
+
+    const pipeline = try Pipeline.createComputePipeline(self.ctx, compute, pipeline_layout);
+
+    self.pipelines.set(.compute, pipeline);
 }

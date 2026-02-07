@@ -85,6 +85,7 @@ mem_props: vk.PhysicalDeviceMemoryProperties,
 
 device: Device,
 device_found: bool = false,
+compute_queue: Queue,
 graphics_queue: Queue,
 present_queue: Queue,
 // memory: vk.DeviceMemory,
@@ -200,6 +201,7 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
     ctx.device_found = true;
     errdefer ctx.dev.destroyDevice(null);
 
+    ctx.compute_queue = Queue.init(ctx.device, candidate.queues.compute_family);
     ctx.graphics_queue = Queue.init(ctx.device, candidate.queues.graphics_family);
     ctx.present_queue = Queue.init(ctx.device, candidate.queues.present_family);
 
@@ -327,6 +329,7 @@ const DeviceCandidate = struct {
 const QueueAllocation = struct {
     graphics_family: u32,
     present_family: u32,
+    compute_family: u32,
 };
 
 fn debugUtilsMessengerCallback(severity: vk.DebugUtilsMessageSeverityFlagsEXT, msg_type: vk.DebugUtilsMessageTypeFlagsEXT, callback_data: ?*const vk.DebugUtilsMessengerCallbackDataEXT, _: ?*anyopaque) callconv(.c) vk.Bool32 {
@@ -389,12 +392,17 @@ fn allocateQueues(instance: Instance, pdev: vk.PhysicalDevice, allocator: std.me
 
     var graphics_family: ?u32 = null;
     var present_family: ?u32 = null;
+    var compute_family: ?u32 = null;
 
     for (families, 0..) |properties, i| {
         const family: u32 = @intCast(i);
 
         if (graphics_family == null and properties.queue_flags.graphics_bit) {
             graphics_family = family;
+        }
+
+        if (compute_family == null and properties.queue_flags.compute_bit) {
+            compute_family = family;
         }
 
         if (present_family == null and (try instance.getPhysicalDeviceSurfaceSupportKHR(pdev, family, surface)) == .true) {
@@ -406,6 +414,7 @@ fn allocateQueues(instance: Instance, pdev: vk.PhysicalDevice, allocator: std.me
         return QueueAllocation{
             .graphics_family = graphics_family.?,
             .present_family = present_family.?,
+            .compute_family = compute_family.?,
         };
     }
 

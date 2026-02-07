@@ -284,7 +284,7 @@ pub fn copyToImage(self: *Image, ctx: *GraphicsContext, cmd: vk.CommandBuffer, d
     ctx.device.cmdBlitImage2(cmd, &blit_info);
 }
 
-pub fn vkCopyToImage(ctx: *GraphicsContext, cmd: vk.CommandBuffer, src_img: vk.Image, dst_img: vk.Image, src_size: vk.Extent2D, dst_size: vk.Extent2D) void {
+pub fn vkCopyImageToImage(ctx: *GraphicsContext, cmd: vk.CommandBuffer, src_img: vk.Image, dst_img: vk.Image, src_size: vk.Extent2D, dst_size: vk.Extent2D) void {
     const blit_region: vk.ImageBlit2 = .{
         .src_offsets = .{
             .{ .x = 0, .y = 0, .z = 0 },

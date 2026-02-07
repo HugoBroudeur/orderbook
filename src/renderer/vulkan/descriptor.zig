@@ -5,43 +5,7 @@ const GraphicsContext = @import("../../core/graphics_context.zig");
 
 const Descriptor = @This();
 
-// Create a descriptor pool that will hold 10 sets with 1 image each
-const MAX_SETS = 10;
-
-global_allocator: DescriptorAllocator,
-
-// Used in the Compute Shader
-vk_draw_image_descriptors: vk.DescriptorSet,
-vk_draw_image_descriptor_layout: vk.DescriptorSetLayout,
-
-// TODO: make this more generic ? At the moment it is tailor made for my need
-pub fn create(allocator: std.mem.Allocator, ctx: *GraphicsContext) !Descriptor {
-    var ratio = [_]DescriptorAllocator.PoolSizeRatio{.{ .vk_type = .storage_image, .ratio = 1 }};
-
-    var desc_allocator = DescriptorAllocator.init(allocator);
-    try desc_allocator.createPool(ctx, &ratio, MAX_SETS);
-
-    var builder: DescriptorLayoutBuilder = try .init(allocator);
-    defer builder.deinit();
-
-    try builder.addBinding(0, .storage_image);
-
-    const vk_draw_image_descriptor_layout = try builder.build(ctx, .{ .compute_bit = true }, .{}, null);
-    const vk_draw_image_descriptors = try desc_allocator.allocate(ctx, vk_draw_image_descriptor_layout);
-
-    return .{
-        .global_allocator = desc_allocator,
-        .vk_draw_image_descriptor_layout = vk_draw_image_descriptor_layout,
-        .vk_draw_image_descriptors = vk_draw_image_descriptors,
-    };
-}
-
-pub fn destroy(self: *Descriptor, ctx: *GraphicsContext) void {
-    self.global_allocator.destroyPool(ctx);
-    ctx.device.destroyDescriptorSetLayout(self.vk_draw_image_descriptor_layout, null);
-}
-
-pub const DescriptorAllocator = struct {
+pub const Allocator = struct {
     pub const PoolSizeRatio = struct {
         vk_type: vk.DescriptorType,
         ratio: f32,
@@ -49,17 +13,18 @@ pub const DescriptorAllocator = struct {
 
     allocator: std.mem.Allocator,
     vk_pool: vk.DescriptorPool,
-    // vk_descriptor: vk.DescriptorSet,
+    vk_descriptor_set: vk.DescriptorSet,
 
-    pub fn init(allocator: std.mem.Allocator) DescriptorAllocator {
+    pub fn init(allocator: std.mem.Allocator) Allocator {
         return .{
             .allocator = allocator,
             .vk_pool = undefined,
+            .vk_descriptor_set = undefined,
         };
     }
 
     pub fn createPool(
-        self: *DescriptorAllocator,
+        self: *Allocator,
         ctx: *GraphicsContext,
         ratios: []PoolSizeRatio,
         max_sets: u32,
@@ -83,7 +48,7 @@ pub const DescriptorAllocator = struct {
         self.vk_pool = try ctx.device.createDescriptorPool(&dpci, null);
     }
 
-    pub fn allocate(self: *DescriptorAllocator, ctx: *GraphicsContext, layout: vk.DescriptorSetLayout) !vk.DescriptorSet {
+    pub fn allocate(self: *Allocator, ctx: *GraphicsContext, layout: vk.DescriptorSetLayout) !vk.DescriptorSet {
         const alloc_info: vk.DescriptorSetAllocateInfo = .{
             .p_next = null,
             .descriptor_pool = self.vk_pool,
@@ -91,38 +56,37 @@ pub const DescriptorAllocator = struct {
             .p_set_layouts = &.{layout},
         };
 
-        var ds: vk.DescriptorSet = undefined;
-        try ctx.device.allocateDescriptorSets(&alloc_info, @ptrCast(&ds));
+        try ctx.device.allocateDescriptorSets(&alloc_info, @ptrCast(&self.vk_descriptor_set));
 
-        return ds;
+        return self.vk_descriptor_set;
     }
 
-    pub fn clearDescriptors(self: *DescriptorAllocator, ctx: *GraphicsContext) void {
+    pub fn clearDescriptors(self: *Allocator, ctx: *GraphicsContext) void {
         ctx.device.resetDescriptorPool(self.vk_pool, .{});
     }
 
-    pub fn destroyPool(self: *DescriptorAllocator, ctx: *GraphicsContext) void {
+    pub fn destroyPool(self: *Allocator, ctx: *GraphicsContext) void {
         ctx.device.destroyDescriptorPool(self.vk_pool, null);
     }
 };
 
-pub const DescriptorLayoutBuilder = struct {
+pub const LayoutBuilder = struct {
     allocator: std.mem.Allocator,
     bindings: std.ArrayList(vk.DescriptorSetLayoutBinding),
 
-    pub fn init(allocator: std.mem.Allocator) !DescriptorLayoutBuilder {
+    pub fn init(allocator: std.mem.Allocator) !LayoutBuilder {
         return .{ .allocator = allocator, .bindings = try .initCapacity(allocator, 0) };
     }
 
-    pub fn deinit(self: *DescriptorLayoutBuilder) void {
+    pub fn deinit(self: *LayoutBuilder) void {
         self.bindings.deinit(self.allocator);
     }
 
-    pub fn clear(self: *DescriptorLayoutBuilder) void {
+    pub fn clear(self: *LayoutBuilder) void {
         self.bindings.clearAndFree(self.allocator);
     }
 
-    pub fn addBinding(self: *DescriptorLayoutBuilder, binding: u32, descriptor_type: vk.DescriptorType) !void {
+    pub fn addBinding(self: *LayoutBuilder, binding: u32, descriptor_type: vk.DescriptorType) !void {
         const new_binding: vk.DescriptorSetLayoutBinding = .{
             .binding = binding,
             .descriptor_count = 1,
@@ -134,7 +98,7 @@ pub const DescriptorLayoutBuilder = struct {
     }
 
     pub fn build(
-        self: *DescriptorLayoutBuilder,
+        self: *LayoutBuilder,
         ctx: *GraphicsContext,
         stages: vk.ShaderStageFlags,
         flags: vk.DescriptorSetLayoutCreateFlags,

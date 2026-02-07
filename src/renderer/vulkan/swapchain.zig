@@ -130,6 +130,7 @@ pub const Swapchain = struct {
         const gc = self.ctx;
         const allocator = self.allocator;
         const old_handle = self.handle;
+        try self.currentSwapImage().waitForFence(self.ctx);
         self.deinitExceptSwapchain();
         // set current handle to NULL_HANDLE to signal that the current swapchain does no longer need to be
         // de-initialized if we fail to recreate it.
@@ -177,21 +178,24 @@ pub const Swapchain = struct {
         try self.ctx.device.resetFences(1, @ptrCast(&current.frame_fence));
 
         // Step 2: Submit the command buffer
-        const wait_stage = [_]vk.PipelineStageFlags{
-            .{ .top_of_pipe_bit = true },
-            .{ .color_attachment_output_bit = true },
-        };
-        try self.ctx.device.queueSubmit(self.ctx.graphics_queue.handle, 1, &[_]vk.SubmitInfo{.{
-            .wait_semaphore_count = 1,
-            .p_wait_semaphores = @ptrCast(&current.image_acquired),
-            .p_wait_dst_stage_mask = &wait_stage,
-            .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast(&cmdbuf),
-            .signal_semaphore_count = 1,
-            .p_signal_semaphores = @ptrCast(&current.render_finished),
-        }}, current.frame_fence);
+        var wait_info = Swapchain.createSemaphoreSubmitInfo(.{ .color_attachment_output_bit = true }, current.image_acquired);
+        var signal_info = Swapchain.createSemaphoreSubmitInfo(.{ .all_graphics_bit = true }, current.render_finished);
+        var cmd_info: vk.CommandBufferSubmitInfo = .{ .command_buffer = cmdbuf, .device_mask = 0 };
+        const submit_info = Swapchain.createSubmitInfo(&cmd_info, &wait_info, &signal_info);
+
+        // submit command buffer to the queue and execute it.
+        // current.frame_fence will now block until the graphic commands finish execution
+        try self.ctx.device.queueSubmit2(
+            self.ctx.graphics_queue.handle,
+            1,
+            &[_]vk.SubmitInfo2{submit_info},
+            current.frame_fence,
+        );
 
         // Step 3: Present the current frame
+        // this will put the image we just rendered to into the visible window.
+        // we want to wait on the current.render_finished semaphore for that,
+        // as its necessary that drawing commands have finished before the image is displayed to the user
         _ = try self.ctx.device.queuePresentKHR(self.ctx.present_queue.handle, &.{
             .wait_semaphore_count = 1,
             .p_wait_semaphores = @ptrCast(&current.render_finished),
@@ -215,6 +219,21 @@ pub const Swapchain = struct {
             .success => .optimal,
             .suboptimal_khr => .suboptimal,
             else => unreachable,
+        };
+    }
+
+    pub fn createSemaphoreSubmitInfo(stage_mask: vk.PipelineStageFlags2, semaphore: vk.Semaphore) vk.SemaphoreSubmitInfo {
+        return .{ .device_index = 0, .semaphore = semaphore, .stage_mask = stage_mask, .value = 1 };
+    }
+
+    pub fn createSubmitInfo(cmd: *vk.CommandBufferSubmitInfo, wait_semaphore: *vk.SemaphoreSubmitInfo, signal_semaphore: *vk.SemaphoreSubmitInfo) vk.SubmitInfo2 {
+        return .{
+            .wait_semaphore_info_count = 1,
+            .p_wait_semaphore_infos = @ptrCast(wait_semaphore),
+            .command_buffer_info_count = 1,
+            .p_command_buffer_infos = @ptrCast(cmd),
+            .signal_semaphore_info_count = 1,
+            .p_signal_semaphore_infos = @ptrCast(signal_semaphore),
         };
     }
 };
@@ -293,7 +312,8 @@ fn initSwapchainImages(ctx: *const GraphicsContext, swapchain: vk.SwapchainKHR, 
 
 fn findSurfaceFormat(ctx: *const GraphicsContext, allocator: Allocator) !vk.SurfaceFormatKHR {
     const preferred = vk.SurfaceFormatKHR{
-        .format = .r16g16b16_sfloat,
+        // .format = .r16g16b16a16_sfloat,
+        .format = .r8g8b8a8_unorm,
         .color_space = .srgb_nonlinear_khr,
     };
 

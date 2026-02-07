@@ -23,16 +23,16 @@ PS_Input vertex(uint vertexID: SV_VertexID) {
 
   // Force triangle to specific positions (ignore input)
   if (vertexID == 0) {
-    output.Position = float4(0, -0.5, 0.5, 1);
+    output.Position = float4(-0.5, 0.5, 0.5, 1);
     output.Color = float4(1, 0, 0, 1);
   } else if (vertexID == 1) {
-    output.Position = float4(-0.5, 0.5, 0.5, 1);
+    output.Position = float4(0, -0.5, 0.5, 1);
     output.Color = float4(0, 1, 0, 1);
   } else {
     output.Position = float4(0.5, 0.5, 0.5, 1);
     output.Color = float4(0, 0, 1, 1);
   }
-  output.TexCoord = float2(0, 1);
+  output.TexCoord = float2(0,     1);
 
   return output;
 }
@@ -40,6 +40,6 @@ PS_Input vertex(uint vertexID: SV_VertexID) {
 [shader("fragment")]
 float4 fragment(PS_Input input) : SV_Target {
 
-  return float4(1, 0, 0, 1); // Debug show red
+  return float4(input.Color); // Debug show red
   // return input.Color;
 }

@@ -10,7 +10,10 @@ const CommandPool = @This();
 vk_cmd_pool: vk.CommandPool,
 
 pub fn create(ctx: *const GraphicsContext) !CommandPool {
-    const cpci: vk.CommandPoolCreateInfo = .{ .queue_family_index = ctx.graphics_queue.family, .flags = .{ .reset_command_buffer_bit = true } };
+    const cpci: vk.CommandPoolCreateInfo = .{
+        .queue_family_index = ctx.graphics_queue.family,
+        .flags = .{ .reset_command_buffer_bit = true },
+    };
 
     const vk_cmd_pool = try ctx.device.createCommandPool(&cpci, null);
 

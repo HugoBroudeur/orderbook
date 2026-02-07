@@ -18,10 +18,12 @@ const CreateShaderParam = struct {
 pub const ShaderStage = enum {
     vertex,
     fragment,
+    compute,
     pub fn toShaderStageFlag(self: ShaderStage) vk.ShaderStageFlags {
         return switch (self) {
             .vertex => .{ .vertex_bit = true },
             .fragment => .{ .fragment_bit = true },
+            .compute => .{ .compute_bit = true },
         };
     }
 };

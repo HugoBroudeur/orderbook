@@ -40,14 +40,16 @@ pub fn compileSlangShaders(args: GenerateShaderArgs) !void {
             args.allocator,
             filename,
         );
+        const file = std.fs.path.stem(filename);
 
         if (result.code > 0) {
             std.log.err("Slang command exited with code {}", .{result.code});
+            std.log.err("slangc -target spirv -fvk-use-entrypoint-name -o {s}/{s}.spv {s}/{s}.slang", .{ shader_folder, file, shader_folder, file });
             std.log.err("{s}", .{result.stderr});
         } else {
             const output = std.fmt.allocPrint(args.allocator, "{s}/{s}.spv", .{
                 shader_folder,
-                std.fs.path.stem(filename),
+                file,
             }) catch unreachable;
             std.log.info("[CompileShader] Compile Shader {s}", .{output});
         }
@@ -76,11 +78,6 @@ pub fn runCmd(
         "-target",
         "spirv",
         "-fvk-use-entrypoint-name",
-        // "-capability",
-        // "vk_mem_model",
-        // "-capability",
-        // "spirv_1_0",
-        // "-enable-experimental-dynamic-dispatch",
         "-o",
         output,
         input,
@@ -123,21 +120,19 @@ pub fn runCmd(
     const term = try cmd.wait();
     const code = if (term == .Exited) term.Exited else 1;
 
-    const spirval_cmd = [_][]const u8{
-        "spirv-val",
-        output,
-        // "--target-env",
-        // "vulkan1.0",
-    };
-
-    {
-        var cmd_val = std.process.Child.init(
-            &spirval_cmd,
-            allocator,
-        );
-        try cmd_val.spawn();
-        _ = try cmd_val.wait();
-    }
+    // const spirval_cmd = [_][]const u8{
+    //     "spirv-val",
+    //     output,
+    // };
+    //
+    // {
+    //     var cmd_val = std.process.Child.init(
+    //         &spirval_cmd,
+    //         allocator,
+    //     );
+    //     try cmd_val.spawn();
+    //     _ = try cmd_val.wait();
+    // }
 
     return .{
         .code = code,

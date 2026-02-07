@@ -212,7 +212,7 @@ pub fn create(ctx: *GraphicsContext, desc: CreatePipelineDesc, render_pass: Rend
     // return .{ .gpu = gpu, .ptr = ptr };
 }
 
-fn createPipelineLayout(ctx: *GraphicsContext) !vk.PipelineLayout {
+pub fn createPipelineLayout(ctx: *GraphicsContext) !vk.PipelineLayout {
     return try ctx.device.createPipelineLayout(&.{
         .flags = .{},
         .set_layout_count = 0,
@@ -242,6 +242,19 @@ fn getVertexInputAttributeDescriptions(layout: Buffer.BufferLayout) ![MAX_VERTEX
 
 fn getVertexInputBindingDescriptions(layout: Buffer.BufferLayout) vk.VertexInputBindingDescription {
     return .{ .binding = 0, .input_rate = .vertex, .stride = layout.stride };
+}
+
+pub fn createComputePipeline(
+    ctx: *GraphicsContext,
+    shader: Shader,
+    layout: vk.PipelineLayout,
+) !Pipeline {
+    const pssci = shader.getPipelineShaderStageCreateInfo();
+    const info: vk.ComputePipelineCreateInfo = .{ .base_pipeline_index = 0, .stage = pssci, .layout = layout };
+
+    var pipeline: vk.Pipeline = undefined;
+    _ = try ctx.device.createComputePipelines(.null_handle, 1, @ptrCast(&info), null, @ptrCast(&pipeline));
+    return .{ .layout = layout, .vk_pipeline = pipeline };
 }
 
 pub const Builder = struct {

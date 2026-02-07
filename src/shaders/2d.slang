@@ -77,7 +77,7 @@ PS_Input vertex(uint vertex_index: SV_VertexID) {
 // Actual frament shader, using array for layered textured (atlas)
 [shader("fragment")]
 float4 fragment(PS_Input input) : SV_Target {
-  return input.Color * Texture.Sample(Sampler, input.TexCoord);
+  // return input.Color * Texture.Sample(Sampler, input.TexCoord);
   // return float4(1, 0, 0, 1); // Debug show red
-  // return input.Color;
+  return input.Color;
 }
