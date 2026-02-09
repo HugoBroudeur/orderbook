@@ -121,6 +121,9 @@ pub fn init(allocator: std.mem.Allocator) !Batcher {
 }
 
 pub fn deinit(self: *Batcher) void {
+    for (self.batches.items) |*batch| {
+        batch.deinit();
+    }
     self.batches.deinit(self.allocator);
 }
 

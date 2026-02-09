@@ -29,6 +29,7 @@ vk_memory_property: vk.MemoryPropertyFlags,
 sampler: Sampler,
 view: vk.ImageView,
 usage: vk.ImageUsageFlags,
+format: vk.Format,
 width: u32 = 0,
 height: u32 = 0,
 size: usize = 0,
@@ -92,6 +93,7 @@ pub fn create(
         .usage = usage,
         .width = extent.width,
         .height = extent.height,
+        .format = format,
         // .size = extent.width * extent.height *
     };
 }

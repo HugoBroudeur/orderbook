@@ -46,6 +46,20 @@ const featurev1_0: vk.PhysicalDeviceFeatures2 = .{
     .features = .{ .shader_int_64 = .true },
 };
 
+pub const QueueFamily = enum {
+    graphic,
+    compute,
+    present,
+
+    pub fn getQueue(self: QueueFamily, ctx: *const GraphicsContext) vk.Queue {
+        return switch (self) {
+            .graphic => ctx.graphics_queue.handle,
+            .compute => ctx.compute_queue.handle,
+            .present => ctx.present_queue.handle,
+        };
+    }
+};
+
 // There are 3 levels of bindings in vulkan-zig:
 /// - The Dispatch types (vk.BaseDispatch, vk.InstanceDispatch, vk.DeviceDispatch)
 ///   are "plain" structs which just contain the function pointers for a particular
@@ -75,6 +89,8 @@ framerate: Framerate,
 window: Window,
 
 vkb: BaseWrapper,
+vkd: *DeviceWrapper,
+vki: *InstanceWrapper,
 
 instance: Instance,
 debug_messenger: vk.DebugUtilsMessengerEXT,
@@ -163,10 +179,10 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
         .flags = .{ .enumerate_portability_bit_khr = true },
     }, null);
 
-    const vki = try allocator.create(InstanceWrapper);
-    errdefer allocator.destroy(vki);
-    vki.* = InstanceWrapper.load(instance, ctx.vkb.dispatch.vkGetInstanceProcAddr.?);
-    ctx.instance = Instance.init(instance, vki);
+    ctx.vki = try allocator.create(InstanceWrapper);
+    errdefer allocator.destroy(ctx.vki);
+    ctx.vki.* = InstanceWrapper.load(instance, ctx.vkb.dispatch.vkGetInstanceProcAddr.?);
+    ctx.instance = Instance.init(instance, ctx.vki);
     errdefer ctx.instance.destroyInstance(null);
 
     ctx.debug_messenger = try ctx.instance.createDebugUtilsMessengerEXT(&.{
@@ -194,10 +210,10 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
 
     const dev = try initializeCandidate(ctx.instance, candidate);
 
-    const vkd = try allocator.create(DeviceWrapper);
-    errdefer allocator.destroy(vkd);
-    vkd.* = DeviceWrapper.load(dev, ctx.instance.wrapper.dispatch.vkGetDeviceProcAddr.?);
-    ctx.device = Device.init(dev, vkd);
+    ctx.vkd = try allocator.create(DeviceWrapper);
+    errdefer allocator.destroy(ctx.vkd);
+    ctx.vkd.* = DeviceWrapper.load(dev, ctx.instance.wrapper.dispatch.vkGetDeviceProcAddr.?);
+    ctx.device = Device.init(dev, ctx.vkd);
     ctx.device_found = true;
     errdefer ctx.dev.destroyDevice(null);
 
@@ -216,6 +232,8 @@ pub fn deinit(self: *GraphicsContext) void {
             std.log.err("[GraphicsContext.deinit] Error {}", .{err});
         };
         self.device.destroyDevice(null);
+        self.allocator.destroy(self.vkd);
+        self.allocator.destroy(self.vki);
     }
     self.window.deinit();
     sdl.quit(SDL_INIT_FLAGS);

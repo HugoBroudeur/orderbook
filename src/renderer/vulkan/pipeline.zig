@@ -289,7 +289,7 @@ pub const Builder = struct {
     }
 
     pub fn deinit(self: *Builder) void {
-        self.shader_stages.deinit();
+        self.shader_stages.deinit(self.allocator);
     }
 
     pub fn clear(self: *Builder) void {
@@ -395,22 +395,6 @@ pub const Builder = struct {
             .blend_constants = .{ 0, 0, 0, 0 },
         };
 
-        // const pipeline_layout = try createPipelineLayout(ctx);
-        // const pssci = [_]vk.PipelineShaderStageCreateInfo{
-        //     vert.getPipelineShaderStageCreateInfo(),
-        //     frag.getPipelineShaderStageCreateInfo(),
-        // };
-        //
-        // var vatds = try getVertexInputAttributeDescriptions(desc.layout);
-        // var vibds = getVertexInputBindingDescriptions(desc.layout);
-
-        // const pvisci = vk.PipelineVertexInputStateCreateInfo{
-        //     .vertex_binding_description_count = 1,
-        //     .p_vertex_binding_descriptions = @ptrCast(&vibds),
-        //     .vertex_attribute_description_count = @intCast(desc.layout.elements.len),
-        //     .p_vertex_attribute_descriptions = &vatds,
-        // };
-
         // vertex input (empty)
         var vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
             .vertex_binding_description_count = 0,
@@ -476,7 +460,7 @@ pub const Builder = struct {
 
     pub fn setInputTopology(self: *Builder, topology: vk.PrimitiveTopology) void {
         self.input_assembly.topology = topology;
-        self.input_assembly.primitive_restart_enable = vk.FALSE;
+        self.input_assembly.primitive_restart_enable = .false;
     }
 
     pub fn setPolygonMode(self: *Builder, mode: vk.PolygonMode) void {
@@ -494,22 +478,22 @@ pub const Builder = struct {
     }
 
     pub fn setMultisamplingNone(self: *Builder) void {
-        self.multisampling.sample_shading_enable = vk.FALSE;
-        self.multisampling.rasterization_samples = .@"1_bit";
+        self.multisampling.sample_shading_enable = .false;
+        self.multisampling.rasterization_samples = .{ .@"1_bit" = true };
         self.multisampling.min_sample_shading = 1.0;
         self.multisampling.p_sample_mask = null;
-        self.multisampling.alpha_to_coverage_enable = vk.FALSE;
-        self.multisampling.alpha_to_one_enable = vk.FALSE;
+        self.multisampling.alpha_to_coverage_enable = .false;
+        self.multisampling.alpha_to_one_enable = .false;
     }
 
     pub fn disableBlending(self: *Builder) void {
         self.color_blend_attachment.color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true };
-        self.color_blend_attachment.blend_enable = vk.FALSE;
+        self.color_blend_attachment.blend_enable = .false;
     }
 
     pub fn enableBlendingAdditive(self: *Builder) void {
         self.color_blend_attachment.color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true };
-        self.color_blend_attachment.blend_enable = vk.TRUE;
+        self.color_blend_attachment.blend_enable = .true;
         self.color_blend_attachment.src_color_blend_factor = .src_alpha;
         self.color_blend_attachment.dst_color_blend_factor = .one;
         self.color_blend_attachment.color_blend_op = .add;
@@ -520,7 +504,7 @@ pub const Builder = struct {
 
     pub fn enableBlendingAlphablend(self: *Builder) void {
         self.color_blend_attachment.color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true };
-        self.color_blend_attachment.blend_enable = vk.TRUE;
+        self.color_blend_attachment.blend_enable = .true;
         self.color_blend_attachment.src_color_blend_factor = .src_alpha;
         self.color_blend_attachment.dst_color_blend_factor = .one_minus_src_alpha;
         self.color_blend_attachment.color_blend_op = .add;
@@ -542,13 +526,29 @@ pub const Builder = struct {
     // pub fn setLayout(self: *Builder, layout: Buffer.BufferLayout) void {}
 
     pub fn disableDepthTest(self: *Builder) void {
-        self.depth_stencil.depth_test_enable = vk.FALSE;
-        self.depth_stencil.depth_write_enable = vk.FALSE;
+        self.depth_stencil.depth_test_enable = .false;
+        self.depth_stencil.depth_write_enable = .false;
         self.depth_stencil.depth_compare_op = .never;
-        self.depth_stencil.depth_bounds_test_enable = vk.FALSE;
-        self.depth_stencil.stencil_test_enable = vk.FALSE;
-        self.depth_stencil.front = .{};
-        self.depth_stencil.back = .{};
+        self.depth_stencil.depth_bounds_test_enable = .false;
+        self.depth_stencil.stencil_test_enable = .false;
+        self.depth_stencil.front = .{
+            .compare_op = .never,
+            .pass_op = .zero,
+            .fail_op = .zero,
+            .depth_fail_op = .zero,
+            .compare_mask = 0,
+            .reference = 0,
+            .write_mask = 0,
+        };
+        self.depth_stencil.back = .{
+            .compare_op = .never,
+            .pass_op = .zero,
+            .fail_op = .zero,
+            .depth_fail_op = .zero,
+            .compare_mask = 0,
+            .reference = 0,
+            .write_mask = 0,
+        };
         self.depth_stencil.min_depth_bounds = 0.0;
         self.depth_stencil.max_depth_bounds = 1.0;
     }
@@ -558,13 +558,29 @@ pub const Builder = struct {
         depth_write: vk.Bool32,
         op: vk.CompareOp,
     ) void {
-        self.depth_stencil.depth_test_enable = vk.TRUE;
+        self.depth_stencil.depth_test_enable = .true;
         self.depth_stencil.depth_write_enable = depth_write;
         self.depth_stencil.depth_compare_op = op;
-        self.depth_stencil.depth_bounds_test_enable = vk.FALSE;
-        self.depth_stencil.stencil_test_enable = vk.FALSE;
-        self.depth_stencil.front = .{};
-        self.depth_stencil.back = .{};
+        self.depth_stencil.depth_bounds_test_enable = .false;
+        self.depth_stencil.stencil_test_enable = .false;
+        self.depth_stencil.front = .{
+            .compare_op = .false,
+            .pass_op = .zero,
+            .fail_op = .zero,
+            .depth_fail_op = .zero,
+            .compare_mask = 0,
+            .reference = 0,
+            .write_mask = 0,
+        };
+        self.depth_stencil.back = .{
+            .compare_op = .never,
+            .pass_op = .zero,
+            .fail_op = .zero,
+            .depth_fail_op = .zero,
+            .compare_mask = 0,
+            .reference = 0,
+            .write_mask = 0,
+        };
         self.depth_stencil.min_depth_bounds = 0.0;
         self.depth_stencil.max_depth_bounds = 1.0;
     }

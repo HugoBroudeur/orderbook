@@ -60,6 +60,7 @@ pub fn deinit(self: *SandboxLayer) void {
     // self.ui_manager.deinit();
     self.font_manager.deinit();
     self.scene_manager.deinit();
+    self.clay_manager.deinit();
 }
 
 pub fn interface(self: *SandboxLayer) Layer {

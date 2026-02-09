@@ -1,5 +1,6 @@
 // The Buffers are for the Vulkan implementation
 const std = @import("std");
+const log = std.log.scoped(.buffer);
 const assert = std.debug.assert;
 const vk = @import("vulkan");
 
@@ -89,7 +90,7 @@ sharing_mode: vk.SharingMode,
 memory: vk.DeviceMemory,
 usage: vk.BufferUsageFlags,
 properties: vk.MemoryPropertyFlags,
-address: ?u64,
+address: ?vk.DeviceAddress,
 
 pub fn create(ctx: *const GraphicsContext, size: u32, usage: vk.BufferUsageFlags, properties: vk.MemoryPropertyFlags) !Buffer {
     Logger.debug("[Buffer.create] {} bytes", .{size});
@@ -110,11 +111,12 @@ pub fn create(ctx: *const GraphicsContext, size: u32, usage: vk.BufferUsageFlags
 
     try ctx.device.bindBufferMemory(vk_buffer, memory, 0);
 
-    var address: ?u64 = null;
+    var address: ?vk.DeviceAddress = null;
     if (usage.shader_device_address_bit == true) {
         // Disable that for now as I'm getting Vulkan errors
-        const bdai: vk.BufferDeviceAddressInfo = .{ .s_type = .buffer_device_address_info, .buffer = vk_buffer };
+        const bdai: vk.BufferDeviceAddressInfo = .{ .buffer = vk_buffer };
         address = ctx.device.getBufferDeviceAddress(&bdai);
+        log.info("Create buffer size {} with address bit {?}", .{ size, address });
     }
 
     return .{
@@ -133,19 +135,18 @@ pub fn destroy(self: *Buffer, ctx: *const GraphicsContext) void {
     ctx.device.destroyBuffer(self.vk_buffer, null);
 }
 
-pub fn copyInto(self: *Buffer, ctx: *const GraphicsContext, data: []const u8) !void {
-    const offset: vk.DeviceSize = 0;
+pub fn copyInto(self: *Buffer, ctx: *const GraphicsContext, data: []const u8, offset: u64) !void {
     assert(self.size >= data.len + offset);
     assert(self.hasBindedMemory());
 
     var map: [*]u8 = @ptrCast(try ctx.device.mapMemory(self.memory, offset, data.len, .{}));
     defer ctx.device.unmapMemory(self.memory);
 
-    std.mem.copyForwards(u8, map[offset .. offset + data.len], data);
+    std.mem.copyForwards(u8, map[0..data.len], data);
 }
 
-pub fn transfer(self: *Buffer, ctx: *const GraphicsContext, cmd_pool: *const CommandPool, dst: *Buffer) !void {
-    assert(dst.size >= self.size);
+pub fn transfer(self: *Buffer, ctx: *const GraphicsContext, cmd_pool: *const CommandPool, dst: *Buffer, src_offset: u64, dst_offset: u64) !void {
+    assert(dst.size - dst_offset >= self.size - src_offset);
     assert(self.hasBindedMemory() and dst.hasBindedMemory());
     assert(dst.usage.transfer_dst_bit == true);
 
@@ -168,8 +169,8 @@ pub fn transfer(self: *Buffer, ctx: *const GraphicsContext, cmd_pool: *const Com
         try ctx.device.beginCommandBuffer(command_buffer, &begin_info);
 
         const copy_region = [_]vk.BufferCopy{.{
-            .src_offset = 0,
-            .dst_offset = 0,
+            .src_offset = src_offset,
+            .dst_offset = dst_offset,
             .size = self.size,
         }};
         ctx.device.cmdCopyBuffer(command_buffer, self.vk_buffer, dst.vk_buffer, 1, &copy_region);
@@ -203,8 +204,24 @@ pub fn fastTransfer(self: *Buffer, ctx: *const GraphicsContext, cmd_pool: *const
     );
     defer staging_buffer.destroy(ctx);
 
-    try staging_buffer.copyInto(ctx, data);
-    try staging_buffer.transfer(ctx, cmd_pool, self);
+    try staging_buffer.copyInto(ctx, data, 0);
+    try staging_buffer.transfer(ctx, cmd_pool, self, 0, 0);
+}
+
+// Fast Transfer creates a staging buffer and destroy it immediatly after
+// Not recommended to use in loops
+pub fn fastTransferOffset(self: *Buffer, ctx: *const GraphicsContext, cmd_pool: *const CommandPool, data: []const u8, src_offset: u64, dst_offset: u64) !void {
+    assert(data.len <= std.math.maxInt(u32));
+    var staging_buffer = try Buffer.create(
+        ctx,
+        @intCast(data.len),
+        .{ .transfer_src_bit = true },
+        .{ .host_visible_bit = true, .host_coherent_bit = true },
+    );
+    defer staging_buffer.destroy(ctx);
+
+    try staging_buffer.copyInto(ctx, data, src_offset);
+    try staging_buffer.transfer(ctx, cmd_pool, self, src_offset, dst_offset);
 }
 
 fn hasBindedMemory(self: *Buffer) bool {

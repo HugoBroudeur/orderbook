@@ -44,7 +44,16 @@ pub fn compileSlangShaders(args: GenerateShaderArgs) !void {
 
         if (result.code > 0) {
             std.log.err("Slang command exited with code {}", .{result.code});
-            std.log.err("slangc -target spirv -fvk-use-entrypoint-name -o {s}/{s}.spv {s}/{s}.slang", .{ shader_folder, file, shader_folder, file });
+
+            const cmd_args = try getCmd(args.allocator, filename);
+            defer args.allocator.free(cmd_args);
+
+            const joined = try std.mem.join(args.allocator, " ", cmd_args);
+            defer args.allocator.free(joined);
+
+            std.log.err("{s}", .{joined});
+
+            // std.log.err("{s}", .{try getCmd(args.allocator, filename)});
             std.log.err("{s}", .{result.stderr});
         } else {
             const output = std.fmt.allocPrint(args.allocator, "{s}/{s}.spv", .{
@@ -56,13 +65,10 @@ pub fn compileSlangShaders(args: GenerateShaderArgs) !void {
     }
 }
 
-pub fn runCmd(
-    mutex: *std.Thread.Mutex,
+fn getCmd(
     allocator: std.mem.Allocator,
     filename: []const u8,
-) !CmdResult {
-    mutex.lock();
-    defer mutex.unlock();
+) ![]const []const u8 {
     const input = std.fmt.allocPrint(allocator, "{s}/{s}", .{
         shader_folder,
         filename,
@@ -72,19 +78,53 @@ pub fn runCmd(
         std.fs.path.stem(filename),
     }) catch unreachable;
 
-    // std.debug.print("Generating sokol zig shader for: {s}", .{input});
-    const cmd_args = [_][]const u8{
+    const args = [_][]const u8{
         "slangc",
         "-target",
         "spirv",
         "-fvk-use-entrypoint-name",
+        "-capability",
+        "GL_EXT_buffer_reference",
+        "-capability",
+        "SPV_EXT_physical_storage_buffer",
         "-o",
         output,
         input,
     };
 
+    const cmd_args = try allocator.alloc([]const u8, args.len);
+    for (args, 0..) |arg, i| {
+        cmd_args[i] = arg;
+    }
+
+    return cmd_args;
+
+    // std.debug.print("Generating sokol zig shader for: {s}", .{input});
+    // return .{
+    //     "slangc",
+    //     "-target",
+    //     "spirv",
+    //     "-fvk-use-entrypoint-name",
+    //     "-capacity",
+    //     "GL_EXT_buffer_reference",
+    //     "-o",
+    //     output,
+    //     input,
+    // };
+}
+
+pub fn runCmd(
+    mutex: *std.Thread.Mutex,
+    allocator: std.mem.Allocator,
+    filename: []const u8,
+) !CmdResult {
+    mutex.lock();
+    defer mutex.unlock();
+
+    // std.debug.print("Generating sokol zig shader for: {s}", .{input});
+    const cmd_args = try getCmd(allocator, filename);
     var cmd = std.process.Child.init(
-        &cmd_args,
+        cmd_args,
         allocator,
     );
 

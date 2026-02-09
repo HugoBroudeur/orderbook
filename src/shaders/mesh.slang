@@ -26,21 +26,39 @@ struct MaterialData {
 };
 
 // struct VertexBuffer {
-//   StructuredBuffer<Vertex> vertices;
+//   StructuredBuffer<Vertex, Std430DataLayout> vertices;
 // };
+
+struct VertexBuffer {
+  Vertex *vertices;
+};
 
 struct StorageBuffer {
   VertexUniformData uniforms;
   // VertexBuffer vertexBuffer;
-  uint64_t vertexBufferAddress;
+  // VertexBuffer *vertexBuffer;
+  // uint64_t vertexBuffer;
+  Vertex *vertexBuffer;
+  // ConstBufferPointer<VertexBuffer> vertexBuffer;
+  // ConstBufferPointer<Vertex *> vertexBuffer;
 }
 
-// This defines slot 0, space1 for the vertex stage
-// [[vk::push_constant]]
-ConstantBuffer<StorageBuffer> storageBuffer : register(b0, space1);
+// uniform float3* ptr_vec3;
+// uniform float4* ptr_vec4;
+//
+// [shader("compute")]
+// [numthreads(1,1,1)]
+// void computeMain(uint3 threadId : SV_DispatchThreadID) {
+//     ptr_vec3[1] = float3(0);
+//     ptr_vec4[1] = float4(0);
 
-// Texture2D<float4> Texture : register(t0, space2);
-// SamplerState Sampler : register(s0, space2);
+// This defines slot 0, space1 for the vertex stage
+// ConstantBuffer<StorageBuffer> storageBuffer : register(b0, space1);
+[[vk::push_constant]]
+ConstantBuffer<StorageBuffer> storageBuffer;
+
+Texture2D<float4> Texture : register(t0, space2);
+SamplerState Sampler : register(s0, space2);
 
 // Descriptor bindings (replace with your actual set/binding)
 // [[vk::binding(0, 0)]]
@@ -50,27 +68,22 @@ ConstantBuffer<StorageBuffer> storageBuffer : register(b0, space1);
 // ConstantBuffer<MaterialData> materialData;
 
 // This defines slot 0, space1 for the vertex stage
-// ConstantBuffer<VertexUniformData> vu : register(b0, space1);
+// ConstantBuffer<StorageBuffer> storageBuffer : register(b0, space1);
 
 [shader("vertex")]
-PS_Input vertex(uint vertex_index: SV_VertexID) {
+PS_Input vertex(uint vertexID: SV_VertexID) {
+  Vertex input = storageBuffer.vertexBuffer[vertexID];
 
-  // Create pointer from device address
-  Vertex *vertexBuffer =
-      reinterpret<Vertex *>(storageBuffer.vertexBufferAddress);
-
-  // Load vertex data
-  Vertex input = vertexBuffer[vertex_index];
-
-  // Vertex input = storageBuffer.vertexBuffer.vertices[vertex_index];
   PS_Input output;
-  output.TexCoord = input.TexCoord;
-  output.Color = input.Color;
-  // output.Position.xy = input.Position;
+
   output.Position.xy = input.Position * storageBuffer.uniforms.Scale +
                        storageBuffer.uniforms.Translate;
+  output.Position.zw = float2(0.0, 1.0);
 
-  output.Position.zw = float2(0, 1);
+  output.Color = input.Color;
+
+  output.TexCoord = float2(0, 0);
+
   return output;
 }
 
@@ -78,6 +91,5 @@ PS_Input vertex(uint vertex_index: SV_VertexID) {
 [shader("fragment")]
 float4 fragment(PS_Input input) : SV_Target {
   // return input.Color * Texture.Sample(Sampler, input.TexCoord);
-  // return float4(1, 0, 0, 1); // Debug show red
   return input.Color;
 }

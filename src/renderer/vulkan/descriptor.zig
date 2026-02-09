@@ -1,72 +1,137 @@
 const std = @import("std");
 const vk = @import("vulkan");
 
+const Buffer = @import("buffer.zig");
+const Image = @import("image.zig");
 const GraphicsContext = @import("../../core/graphics_context.zig");
 
 const Descriptor = @This();
 
 pub const Allocator = struct {
+    pub const MAX_SETS_PER_POOL = 4092;
+
     pub const PoolSizeRatio = struct {
         vk_type: vk.DescriptorType,
         ratio: f32,
     };
 
     allocator: std.mem.Allocator,
-    vk_pool: vk.DescriptorPool,
-    vk_descriptor_set: vk.DescriptorSet,
 
-    pub fn init(allocator: std.mem.Allocator) Allocator {
-        return .{
+    ratios: std.ArrayList(PoolSizeRatio),
+    full_pools: std.ArrayList(vk.DescriptorPool),
+    ready_pools: std.ArrayList(vk.DescriptorPool),
+    sets_per_pool: u32,
+
+    pub fn init(allocator: std.mem.Allocator, ctx: *GraphicsContext, max_sets: u32, pool_ratios: []const PoolSizeRatio) !Allocator {
+        var desc_alloc: Allocator = .{
             .allocator = allocator,
-            .vk_pool = undefined,
-            .vk_descriptor_set = undefined,
+            .sets_per_pool = max_sets,
+            .ratios = .init(allocator, pool_ratios.len),
+            .full_pools = .init(allocator, 0),
+            .ready_pools = .initCapacity(allocator, 1),
         };
+
+        try desc_alloc.ready_pools.appendAssumeCapacity(try desc_alloc.createPool(ctx, pool_ratios, max_sets));
+        for (pool_ratios) |ratio| {
+            desc_alloc.ratios.appendAssumeCapacity(ratio);
+        }
+
+        desc_alloc.sets_per_pool = max_sets * 1.5; //grow it next allocation
+        return desc_alloc;
     }
 
     pub fn createPool(
         self: *Allocator,
-        ctx: *GraphicsContext,
-        ratios: []PoolSizeRatio,
-        max_sets: u32,
-    ) !void {
+        ctx: *const GraphicsContext,
+        set_count: u32,
+        ratios: []const PoolSizeRatio,
+    ) !vk.DescriptorPool {
         var pool_sizes = try std.ArrayList(vk.DescriptorPoolSize).initCapacity(self.allocator, ratios.len);
+        defer pool_sizes.deinit(self.allocator);
 
         for (ratios) |ratio| {
             pool_sizes.appendAssumeCapacity(.{
                 .type = ratio.vk_type,
-                .descriptor_count = @as(u32, @intFromFloat(ratio.ratio)) * max_sets,
+                .descriptor_count = @as(u32, @intFromFloat(ratio.ratio)) * set_count,
             });
         }
 
         const dpci: vk.DescriptorPoolCreateInfo = .{
             .flags = .{},
-            .max_sets = max_sets,
+            .max_sets = set_count,
             .pool_size_count = @intCast(pool_sizes.items.len),
             .p_pool_sizes = @ptrCast(pool_sizes.items),
         };
 
-        self.vk_pool = try ctx.device.createDescriptorPool(&dpci, null);
+        return try ctx.device.createDescriptorPool(&dpci, null);
     }
 
-    pub fn allocate(self: *Allocator, ctx: *GraphicsContext, layout: vk.DescriptorSetLayout) !vk.DescriptorSet {
-        const alloc_info: vk.DescriptorSetAllocateInfo = .{
-            .p_next = null,
-            .descriptor_pool = self.vk_pool,
+    pub fn getPool(self: *Allocator, ctx: *const GraphicsContext) !vk.DescriptorPool {
+        const new_pool: vk.DescriptorPool = undefined;
+
+        if (self.ready_pools.items.len) {
+            new_pool = self.ready_pools.pop();
+        } else {
+            new_pool = try self.createPool(ctx, self.sets_per_pool, self.ratios.items);
+
+            self.sets_per_pool = self.sets_per_pool * 1.5;
+            if (self.sets_per_pool > MAX_SETS_PER_POOL) {
+                self.sets_per_pool = MAX_SETS_PER_POOL;
+            }
+        }
+
+        return new_pool;
+    }
+
+    pub fn allocate(
+        self: *Allocator,
+        ctx: *const GraphicsContext,
+        layout: vk.DescriptorSetLayout,
+        p_next: *const anyopaque,
+    ) !vk.DescriptorSet {
+        var pool = try self.getPool(ctx);
+
+        var alloc_info: vk.DescriptorSetAllocateInfo = .{
+            .p_next = p_next,
+            .descriptor_pool = pool,
             .descriptor_set_count = 1,
-            .p_set_layouts = &.{layout},
+            .p_set_layouts = @ptrCast(&layout),
         };
 
-        try ctx.device.allocateDescriptorSets(&alloc_info, @ptrCast(&self.vk_descriptor_set));
+        var ds: vk.DescriptorSet = undefined;
+        ctx.device.allocateDescriptorSets(&alloc_info, @ptrCast(&ds)) catch {
+            // Allocation failed, try again
+            try self.full_pools.append(self.allocator, pool);
+            pool = try self.getPool(ctx);
+            alloc_info.descriptor_pool = pool;
+            try ctx.device.allocateDescriptorSets(&alloc_info, @ptrCast(&ds));
+        };
 
-        return self.vk_descriptor_set;
+        try self.ready_pools.append(self.allocator, pool);
+        return ds;
     }
 
-    pub fn clearDescriptors(self: *Allocator, ctx: *GraphicsContext) void {
-        ctx.device.resetDescriptorPool(self.vk_pool, .{});
+    pub fn clearPools(self: *Allocator, ctx: *const GraphicsContext) void {
+        for (self.ready_pools.items) |pool| {
+            ctx.device.resetDescriptorPool(pool, .{});
+        }
+        try self.ready_pools.ensureTotalCapacity(self, self.ready_pools.items.len + self.full_pools.items.len);
+        for (self.full_pools.items) |pool| {
+            ctx.device.resetDescriptorPool(pool, .{});
+            self.ready_pools.appendAssumeCapacity(pool);
+        }
+        self.full_pools.clearRetainingCapacity();
     }
 
-    pub fn destroyPool(self: *Allocator, ctx: *GraphicsContext) void {
-        ctx.device.destroyDescriptorPool(self.vk_pool, null);
+    pub fn destroyPools(self: *Allocator, ctx: *const GraphicsContext) void {
+        for (self.ready_pools.items) |pool| {
+            ctx.device.destroyDescriptorPool(pool, null);
+        }
+        self.ready_pools.deinit(self.allocator);
+        for (self.full_pools.items) |pool| {
+            ctx.device.destroyDescriptorPool(pool, null);
+        }
+        self.full_pools.deinit(self.allocator);
     }
 };
 
@@ -116,5 +181,103 @@ pub const LayoutBuilder = struct {
         };
 
         return try ctx.device.createDescriptorSetLayout(&info, null);
+    }
+};
+
+pub const DescriptorWriter = struct {
+    allocator: std.mem.Allocator,
+
+    image_infos: std.ArrayList(vk.DescriptorImageInfo),
+    buffer_infos: std.ArrayList(vk.DescriptorBufferInfo),
+    writes: std.ArrayList(vk.WriteDescriptorSet),
+
+    pub fn init(allocator: std.mem.Allocator) !DescriptorWriter {
+        return .{
+            .image_infos = try .init(allocator),
+            .buffer_infos = try .init(allocator),
+            .writes = try .init(allocator),
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *DescriptorWriter) void {
+        self.image_infos.deinit(self.allocator);
+        self.buffer_infos.deinit(self.allocator);
+        self.writes.deinit(self.allocator);
+    }
+
+    pub fn writeImage(
+        self: *DescriptorWriter,
+        binding: u32,
+        image: Image,
+        layout: vk.ImageLayout,
+        descriptor_type: vk.DescriptorType,
+    ) !void {
+        const image_info = vk.DescriptorImageInfo{
+            .sampler = image.sampler.vk_sampler,
+            .image_view = image.view,
+            .image_layout = layout,
+        };
+        try self.image_infos.append(self.allocator, image_info);
+
+        const write = vk.WriteDescriptorSet{
+            .dst_binding = binding,
+            .dst_set = .null_handle, // Will be set in updateSet
+            .dst_array_element = 0,
+            .descriptor_count = 1,
+            .descriptor_type = descriptor_type,
+            .p_image_info = @ptrCast(&self.image_infos.items[self.image_infos.items.len - 1]),
+            .p_buffer_info = undefined,
+            .p_texel_buffer_view = undefined,
+        };
+        try self.writes.append(self.allocator, write);
+    }
+
+    pub fn writeBuffer(
+        self: *DescriptorWriter,
+        binding: u32,
+        buffer: Buffer,
+        size: vk.DeviceSize,
+        offset: vk.DeviceSize,
+        descriptor_type: vk.DescriptorType,
+    ) !void {
+        const buffer_info = vk.DescriptorBufferInfo{
+            .buffer = buffer.vk_buffer,
+            .offset = offset,
+            .range = size,
+        };
+        try self.buffer_infos.append(self.allocator, buffer_info);
+
+        const write = vk.WriteDescriptorSet{
+            .dst_binding = binding,
+            .dst_set = .null_handle, // Will be set in updateSet
+            .dst_array_element = 0,
+            .descriptor_count = 1,
+            .descriptor_type = descriptor_type,
+            .p_image_info = undefined,
+            .p_buffer_info = @ptrCast(&self.buffer_infos.items[self.buffer_infos.items.len - 1]),
+            .p_texel_buffer_view = undefined,
+        };
+        try self.writes.append(self.allocator, write);
+    }
+
+    pub fn clear(self: *DescriptorWriter) void {
+        self.image_infos.clearRetainingCapacity();
+        self.buffer_infos.clearRetainingCapacity();
+        self.writes.clearRetainingCapacity();
+    }
+
+    pub fn updateSet(self: *DescriptorWriter, ctx: *const GraphicsContext, set: vk.DescriptorSet) void {
+        // Update all writes to point to the target set
+        for (self.writes.items) |*write| {
+            write.dst_set = set;
+        }
+
+        ctx.device.updateDescriptorSets(
+            @intCast(self.writes.items.len),
+            self.writes.items.ptr,
+            0,
+            undefined,
+        );
     }
 };
