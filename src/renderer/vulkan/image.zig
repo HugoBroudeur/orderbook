@@ -7,6 +7,7 @@ const log = std.log.scoped(.image);
 const GraphicsContext = @import("../../core/graphics_context.zig");
 const Buffer = @import("buffer.zig");
 const Sampler = @import("sampler.zig");
+const CommandPool = @import("command_pool.zig");
 
 const Image = @This();
 
@@ -66,13 +67,18 @@ pub fn create(
     const image_memory = try ctx.device.allocateMemory(&alloc_info, null);
     try ctx.device.bindImageMemory(vk_image, image_memory, 0);
 
+    var aspect_flag: vk.ImageAspectFlags = .{ .color_bit = true };
+    if (format == .d32_sfloat) {
+        aspect_flag = .{ .depth_bit = true };
+    }
+
     const view_info = vk.ImageViewCreateInfo{
         .image = vk_image,
         .view_type = .@"2d",
         .format = format,
         .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
         .subresource_range = .{
-            .aspect_mask = .{ .color_bit = true },
+            .aspect_mask = aspect_flag,
             .base_mip_level = 0,
             .base_array_layer = 0,
             .layer_count = 1,
@@ -100,19 +106,28 @@ pub fn create(
 
 pub fn createFromSurface(
     ctx: *const GraphicsContext,
+    cmd_pool: *const CommandPool,
     surface: sdl.surface.Surface,
     usage: vk.ImageUsageFlags,
     properties: vk.MemoryPropertyFlags,
 ) !Image {
+    var _usage = usage;
+    _usage.transfer_src_bit = true;
+    _usage.transfer_dst_bit = true;
+
     var image = try create(
         ctx,
-        usage,
+        _usage,
         properties,
         .{ .width = @intCast(surface.getWidth()), .height = @intCast(surface.getHeight()), .depth = 1 },
         toVulkanFormat(surface.getFormat().?),
     );
 
     image.size = surface.getPixels().?.len;
+
+    var cmd = try TransferToGpuCmd.create(&image, surface.getPixels().?, ctx);
+    defer cmd.destroy();
+    try cmd_pool.immediateSubmit(ctx, .graphic, &.{cmd.interface()});
 
     return image;
 }
@@ -122,15 +137,6 @@ pub fn destroy(self: *Image, ctx: *const GraphicsContext) void {
     ctx.device.freeMemory(self.vk_image_memory, null);
     ctx.device.destroyImageView(self.view, null);
     self.sampler.destroy(ctx);
-}
-
-pub fn upload(self: *Image, copy_pass: sdl.gpu.CopyPass, tb: Buffer.TransferBuffer) void {
-    copy_pass.uploadToTexture(.{ .transfer_buffer = tb.ptr, .offset = 0 }, .{
-        .texture = self.ptr,
-        .width = @intCast(self.surface.?.getWidth()),
-        .height = @intCast(self.surface.?.getHeight()),
-        .depth = 1,
-    }, false);
 }
 
 pub fn bind(self: *Image, render_pass: sdl.gpu.RenderPass, sampler: Sampler) void {
@@ -189,7 +195,7 @@ fn toVulkanFormat(sdl_format: sdl.pixels.Format) vk.Format {
     };
 }
 
-pub fn transitionToLayout(self: *Image, ctx: *GraphicsContext, cmd: vk.CommandBuffer, old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) void {
+pub fn transitionToLayout(self: *const Image, ctx: *const GraphicsContext, cmd: vk.CommandBuffer, old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) void {
     const aspect_mask: vk.ImageAspectFlags = if (new_layout == .depth_attachment_optimal) .{ .depth_bit = true } else .{ .color_bit = true };
 
     const barrier: vk.ImageMemoryBarrier2 = .{
@@ -326,3 +332,73 @@ pub fn vkCopyImageToImage(ctx: *GraphicsContext, cmd: vk.CommandBuffer, src_img:
 pub fn createDescriptorImageInfo(self: *const Image) vk.DescriptorImageInfo {
     return .{ .image_layout = .general, .image_view = self.view, .sampler = self.sampler.vk_sampler };
 }
+
+pub const TransferToGpuCmd = struct {
+    staging_buffer: Buffer,
+    ctx: *const GraphicsContext,
+    image: *const Image,
+    pixels: []const u8,
+
+    pub fn create(image: *const Image, pixels: []const u8, ctx: *const GraphicsContext) !TransferToGpuCmd {
+        var staging_buffer = try Buffer.create(
+            ctx,
+            @intCast(pixels.len),
+            .{ .transfer_src_bit = true },
+            .{ .host_visible_bit = true, .host_coherent_bit = true },
+        );
+
+        try staging_buffer.copyInto(ctx, pixels, 0);
+
+        return .{
+            .ctx = ctx,
+            .staging_buffer = staging_buffer,
+            .pixels = pixels,
+            .image = image,
+        };
+    }
+
+    pub fn destroy(self: *TransferToGpuCmd) void {
+        self.staging_buffer.destroy(self.ctx);
+    }
+
+    pub fn execute(self: *TransferToGpuCmd, cmd: vk.CommandBuffer) void {
+        self.image.transitionToLayout(self.ctx, cmd, .undefined, .transfer_dst_optimal);
+
+        const copy_region: vk.BufferImageCopy = .{
+            .buffer_offset = 0,
+            .buffer_row_length = 0,
+            .buffer_image_height = 0,
+            .image_subresource = .{
+                .aspect_mask = .{ .color_bit = true },
+                .mip_level = 0,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+            .image_extent = .{
+                .depth = 1,
+                .width = self.image.width,
+                .height = self.image.height,
+            },
+            .image_offset = .{
+                .x = 0,
+                .y = 0,
+                .z = 0,
+            },
+        };
+
+        self.ctx.device.cmdCopyBufferToImage(
+            cmd,
+            self.staging_buffer.vk_buffer,
+            self.image.vk_image,
+            .transfer_dst_optimal,
+            1,
+            @ptrCast(&copy_region),
+        );
+
+        self.image.transitionToLayout(self.ctx, cmd, .transfer_dst_optimal, .shader_read_only_optimal);
+    }
+
+    pub fn interface(self: *TransferToGpuCmd) CommandPool.GpuCommand {
+        return CommandPool.GpuCommand.interface(self);
+    }
+};

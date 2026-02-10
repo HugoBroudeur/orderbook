@@ -3,6 +3,7 @@ const vk = @import("vulkan");
 
 const Buffer = @import("buffer.zig");
 const Image = @import("image.zig");
+const Sampler = @import("sampler.zig");
 const GraphicsContext = @import("../../core/graphics_context.zig");
 
 const Descriptor = @This();
@@ -22,21 +23,21 @@ pub const Allocator = struct {
     ready_pools: std.ArrayList(vk.DescriptorPool),
     sets_per_pool: u32,
 
-    pub fn init(allocator: std.mem.Allocator, ctx: *GraphicsContext, max_sets: u32, pool_ratios: []const PoolSizeRatio) !Allocator {
+    pub fn init(allocator: std.mem.Allocator, ctx: *const GraphicsContext, max_sets: u32, pool_ratios: []const PoolSizeRatio) !Allocator {
         var desc_alloc: Allocator = .{
             .allocator = allocator,
             .sets_per_pool = max_sets,
-            .ratios = .init(allocator, pool_ratios.len),
-            .full_pools = .init(allocator, 0),
-            .ready_pools = .initCapacity(allocator, 1),
+            .ratios = try .initCapacity(allocator, pool_ratios.len),
+            .full_pools = try .initCapacity(allocator, 0),
+            .ready_pools = try .initCapacity(allocator, 1),
         };
 
-        try desc_alloc.ready_pools.appendAssumeCapacity(try desc_alloc.createPool(ctx, pool_ratios, max_sets));
+        desc_alloc.ready_pools.appendAssumeCapacity(try desc_alloc.createPool(ctx, max_sets, pool_ratios));
         for (pool_ratios) |ratio| {
             desc_alloc.ratios.appendAssumeCapacity(ratio);
         }
 
-        desc_alloc.sets_per_pool = max_sets * 1.5; //grow it next allocation
+        desc_alloc.sets_per_pool = max_sets * 3 / 2; //grow it next allocation
         return desc_alloc;
     }
 
@@ -67,14 +68,14 @@ pub const Allocator = struct {
     }
 
     pub fn getPool(self: *Allocator, ctx: *const GraphicsContext) !vk.DescriptorPool {
-        const new_pool: vk.DescriptorPool = undefined;
+        var new_pool: vk.DescriptorPool = undefined;
 
-        if (self.ready_pools.items.len) {
-            new_pool = self.ready_pools.pop();
+        if (self.ready_pools.items.len > 0) {
+            new_pool = self.ready_pools.pop().?;
         } else {
             new_pool = try self.createPool(ctx, self.sets_per_pool, self.ratios.items);
 
-            self.sets_per_pool = self.sets_per_pool * 1.5;
+            self.sets_per_pool = self.sets_per_pool * 3 / 2;
             if (self.sets_per_pool > MAX_SETS_PER_POOL) {
                 self.sets_per_pool = MAX_SETS_PER_POOL;
             }
@@ -87,7 +88,7 @@ pub const Allocator = struct {
         self: *Allocator,
         ctx: *const GraphicsContext,
         layout: vk.DescriptorSetLayout,
-        p_next: *const anyopaque,
+        p_next: ?*const anyopaque,
     ) !vk.DescriptorSet {
         var pool = try self.getPool(ctx);
 
@@ -111,13 +112,13 @@ pub const Allocator = struct {
         return ds;
     }
 
-    pub fn clearPools(self: *Allocator, ctx: *const GraphicsContext) void {
+    pub fn clearPools(self: *Allocator, ctx: *const GraphicsContext) !void {
         for (self.ready_pools.items) |pool| {
-            ctx.device.resetDescriptorPool(pool, .{});
+            try ctx.device.resetDescriptorPool(pool, .{});
         }
-        try self.ready_pools.ensureTotalCapacity(self, self.ready_pools.items.len + self.full_pools.items.len);
+        try self.ready_pools.ensureTotalCapacity(self.allocator, self.ready_pools.items.len + self.full_pools.items.len);
         for (self.full_pools.items) |pool| {
-            ctx.device.resetDescriptorPool(pool, .{});
+            try ctx.device.resetDescriptorPool(pool, .{});
             self.ready_pools.appendAssumeCapacity(pool);
         }
         self.full_pools.clearRetainingCapacity();
@@ -164,7 +165,7 @@ pub const LayoutBuilder = struct {
 
     pub fn build(
         self: *LayoutBuilder,
-        ctx: *GraphicsContext,
+        ctx: *const GraphicsContext,
         stages: vk.ShaderStageFlags,
         flags: vk.DescriptorSetLayoutCreateFlags,
         p_next: ?*const anyopaque,
@@ -193,9 +194,9 @@ pub const DescriptorWriter = struct {
 
     pub fn init(allocator: std.mem.Allocator) !DescriptorWriter {
         return .{
-            .image_infos = try .init(allocator),
-            .buffer_infos = try .init(allocator),
-            .writes = try .init(allocator),
+            .image_infos = try .initCapacity(allocator, 0),
+            .buffer_infos = try .initCapacity(allocator, 0),
+            .writes = try .initCapacity(allocator, 0),
             .allocator = allocator,
         };
     }
