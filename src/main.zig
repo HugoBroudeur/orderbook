@@ -42,3 +42,9 @@ pub fn main() !void {
 
     app.run();
 }
+
+test {
+    _ = @import("core/app.zig");
+    _ = @import("data_structure.zig");
+    _ = @import("renderer/vulkan/mesh.zig");
+}

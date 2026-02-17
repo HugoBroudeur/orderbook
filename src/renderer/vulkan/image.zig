@@ -8,6 +8,7 @@ const GraphicsContext = @import("../../core/graphics_context.zig");
 const Buffer = @import("buffer.zig");
 const Sampler = @import("sampler.zig");
 const CommandPool = @import("command_pool.zig");
+const Primitive = @import("../../primitive.zig");
 
 const Image = @This();
 
@@ -27,7 +28,7 @@ pub const ImageFormat = enum {
 vk_image: vk.Image,
 vk_image_memory: vk.DeviceMemory,
 vk_memory_property: vk.MemoryPropertyFlags,
-sampler: Sampler,
+sampler: *const Sampler,
 view: vk.ImageView,
 usage: vk.ImageUsageFlags,
 format: vk.Format,
@@ -41,6 +42,7 @@ pub fn create(
     properties: vk.MemoryPropertyFlags,
     extent: vk.Extent3D,
     format: vk.Format,
+    sampler: *const Sampler,
 ) !Image {
     log.debug("Create from image. usage {f} properties {f}", .{ usage, properties });
 
@@ -88,8 +90,6 @@ pub fn create(
     // Must be call after ctx.device.bindImageMemory(vk_image, image_memory, 0);
     const view = try ctx.device.createImageView(&view_info, null);
 
-    const sampler = try Sampler.create(ctx, .linear);
-
     return .{
         .vk_image = vk_image,
         .vk_image_memory = image_memory,
@@ -110,6 +110,7 @@ pub fn createFromSurface(
     surface: sdl.surface.Surface,
     usage: vk.ImageUsageFlags,
     properties: vk.MemoryPropertyFlags,
+    sampler: *const Sampler,
 ) !Image {
     var _usage = usage;
     _usage.transfer_src_bit = true;
@@ -121,6 +122,7 @@ pub fn createFromSurface(
         properties,
         .{ .width = @intCast(surface.getWidth()), .height = @intCast(surface.getHeight()), .depth = 1 },
         toVulkanFormat(surface.getFormat().?),
+        sampler,
     );
 
     image.size = surface.getPixels().?.len;
@@ -132,15 +134,59 @@ pub fn createFromSurface(
     return image;
 }
 
+pub fn createFromColor(
+    ctx: *const GraphicsContext,
+    cmd_pool: *const CommandPool,
+    color: Primitive.Color,
+    size: vk.Extent3D,
+    format: vk.Format,
+    usage: vk.ImageUsageFlags,
+    properties: vk.MemoryPropertyFlags,
+    sampler: *const Sampler,
+) !Image {
+    var _usage = usage;
+    _usage.transfer_src_bit = true;
+    _usage.transfer_dst_bit = true;
+
+    var image = try create(ctx, _usage, properties, size, format, sampler);
+
+    image.size = size.width * size.height;
+
+    var cmd = try TransferToGpuCmd.create(&image, &color.toBytes(), ctx);
+    defer cmd.destroy();
+    try cmd_pool.immediateSubmit(ctx, .graphic, &.{cmd.interface()});
+
+    return image;
+}
+
+pub fn createFromBytes(
+    ctx: *const GraphicsContext,
+    cmd_pool: *const CommandPool,
+    data: []const u8,
+    size: vk.Extent3D,
+    format: vk.Format,
+    usage: vk.ImageUsageFlags,
+    properties: vk.MemoryPropertyFlags,
+    sampler: *const Sampler,
+) !Image {
+    var _usage = usage;
+    _usage.transfer_src_bit = true;
+    _usage.transfer_dst_bit = true;
+
+    var image = try create(ctx, _usage, properties, size, format, sampler);
+    image.size = size.width * size.height;
+
+    var cmd = try TransferToGpuCmd.create(&image, data, ctx);
+    defer cmd.destroy();
+    try cmd_pool.immediateSubmit(ctx, .graphic, &.{cmd.interface()});
+
+    return image;
+}
+
 pub fn destroy(self: *Image, ctx: *const GraphicsContext) void {
     ctx.device.destroyImage(self.vk_image, null);
     ctx.device.freeMemory(self.vk_image_memory, null);
     ctx.device.destroyImageView(self.view, null);
-    self.sampler.destroy(ctx);
-}
-
-pub fn bind(self: *Image, render_pass: sdl.gpu.RenderPass, sampler: Sampler) void {
-    render_pass.bindFragmentSamplers(0, &.{.{ .texture = self.ptr, .sampler = sampler.ptr }});
 }
 
 pub fn loadImageAsset(image_path: []const u8, pixel_format: sdl.pixels.Format) !sdl.surface.Surface {
@@ -225,7 +271,7 @@ pub fn transitionToLayout(self: *const Image, ctx: *const GraphicsContext, cmd: 
     ctx.device.cmdPipelineBarrier2(cmd, &dep_info);
 }
 
-pub fn vkTransitionToLayout(img: vk.Image, ctx: *GraphicsContext, cmd: vk.CommandBuffer, old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) void {
+pub fn vkTransitionToLayout(img: vk.Image, ctx: *const GraphicsContext, cmd: vk.CommandBuffer, old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) void {
     const aspect_mask: vk.ImageAspectFlags = if (new_layout == .depth_attachment_optimal) .{ .depth_bit = true } else .{ .color_bit = true };
 
     const barrier: vk.ImageMemoryBarrier2 = .{
@@ -255,7 +301,7 @@ pub fn vkTransitionToLayout(img: vk.Image, ctx: *GraphicsContext, cmd: vk.Comman
     ctx.device.cmdPipelineBarrier2(cmd, &dep_info);
 }
 
-pub fn copyToImage(self: *Image, ctx: *GraphicsContext, cmd: vk.CommandBuffer, destination: *Image) void {
+pub fn copyToImage(self: *Image, ctx: *const GraphicsContext, cmd: vk.CommandBuffer, destination: *Image) void {
     const blit_region: vk.ImageBlit2 = .{
         .src_offsets = .{
             .{ .x = 0, .y = 0, .z = 0 },
@@ -292,7 +338,7 @@ pub fn copyToImage(self: *Image, ctx: *GraphicsContext, cmd: vk.CommandBuffer, d
     ctx.device.cmdBlitImage2(cmd, &blit_info);
 }
 
-pub fn vkCopyImageToImage(ctx: *GraphicsContext, cmd: vk.CommandBuffer, src_img: vk.Image, dst_img: vk.Image, src_size: vk.Extent2D, dst_size: vk.Extent2D) void {
+pub fn vkCopyImageToImage(ctx: *const GraphicsContext, cmd: vk.CommandBuffer, src_img: vk.Image, dst_img: vk.Image, src_size: vk.Extent2D, dst_size: vk.Extent2D) void {
     const blit_region: vk.ImageBlit2 = .{
         .src_offsets = .{
             .{ .x = 0, .y = 0, .z = 0 },

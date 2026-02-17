@@ -5,16 +5,7 @@ const blib = @import("./build_lib.zig");
 
 const protobuf_files = &.{ "proto", "proto/all.proto", "proto/orderbook/v1/orderbook.proto" };
 
-// Shaders
-// const shaders = .{
-//     // "src/shaders/2d.vert.zig",
-//     // "src/shaders/quad.frag.zig",
-//     "src/shaders/triangle.frag.zig",
-//     "src/shaders/triangle.vert.zig",
-// };
-
 pub fn build(b: *std.Build) !void {
-    // const target = b.standardTargetOptions(.{});
     const target = b.standardTargetOptions(.{ .default_target = .{
         .cpu_arch = .x86_64,
         .os_tag = .linux,
@@ -107,6 +98,10 @@ pub fn build(b: *std.Build) !void {
     const dep_vulkan = b.dependency("vulkan", .{
         .registry = b.dependency("vulkan_headers", .{}).path("registry/vk.xml"),
     });
+    const dep_zgltf = b.dependency("zgltf", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
     // Generate Zig code from .proto
     // const gen_proto = b.step("gen-proto", "generate zig files from protocol buffer definitions");
@@ -129,6 +124,7 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addImport("zclay", dep_zclay.module("zclay"));
     exe.root_module.addImport("zmath", dep_zmath.module("root"));
     exe.root_module.addImport("vulkan", dep_vulkan.module("vulkan-zig"));
+    exe.root_module.addImport("zgltf", dep_zgltf.module("zgltf"));
 
     exe.root_module.addImport("tracy", dep_tracy.module("tracy"));
     // Tracy (should be disable for Release)
@@ -282,6 +278,32 @@ pub fn build(b: *std.Build) !void {
     }
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+
+    { // tests
+        const mod_tests = b.addTest(.{
+            .root_module = main_mod,
+        });
+
+        // A run step that will run the test executable.
+        const run_mod_tests = b.addRunArtifact(mod_tests);
+
+        // Creates an executable that will run `test` blocks from the executable's
+        // root module. Note that test executables only test one module at a time,
+        // hence why we have to create two separate ones.
+        const exe_tests = b.addTest(.{
+            .root_module = exe.root_module,
+        });
+
+        // A run step that will run the second test executable.
+        const run_exe_tests = b.addRunArtifact(exe_tests);
+
+        // A top level step for running all tests. dependOn can be called multiple
+        // times and since the two run steps do not depend on one another, this will
+        // make the two of them run in parallel.
+        const test_step = b.step("test", "Run tests");
+        test_step.dependOn(&run_mod_tests.step);
+        test_step.dependOn(&run_exe_tests.step);
+    }
 }
 
 fn compileShader(

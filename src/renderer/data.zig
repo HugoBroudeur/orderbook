@@ -17,8 +17,6 @@ pub const D2Vertex = packed struct {
     col: zm.F32x4,
 };
 
-pub const Indice = u16;
-
 pub const ViewProj = struct {
     view: zm.Mat,
     proj: zm.Mat,
@@ -41,35 +39,28 @@ pub const Quad = struct {
     pub const Indice = u16; // type of indice
 };
 
-pub const Vertex = struct {
-    // const binding_description = vk.VertexInputBindingDescription{
-    //     .binding = 0,
-    //     .stride = @sizeOf(Vertex),
-    //     .input_rate = .vertex,
-    // };
-    //
-    // const attribute_description = [_]vk.VertexInputAttributeDescription{
-    //     .{
-    //         .binding = 0,
-    //         .location = 0,
-    //         .format = .r32g32_sfloat,
-    //         .offset = @offsetOf(Vertex, "pos"),
-    //     },
-    //     .{
-    //         .binding = 0,
-    //         .location = 1,
-    //         .format = .r32g32_sfloat,
-    //         .offset = @offsetOf(Vertex, "uv"),
-    //     },
-    //     .{
-    //         .binding = 0,
-    //         .location = 2,
-    //         .format = .r32g32b32a32_sfloat,
-    //         .offset = @offsetOf(Vertex, "col"),
-    //     },
-    // };
+pub const triangle_vertices = [_]Quad.Vertex{
+    .{ .pos = .{ 0, -0.5 }, .uv = .{ 0.5, 0 }, .col = .{ 1, 0, 0, 1 } },
+    .{ .pos = .{ 0.5, 0.5 }, .uv = .{ 1, 1 }, .col = .{ 0, 1, 0, 1 } },
+    .{ .pos = .{ -0.5, 0.5 }, .uv = .{ 0, 1 }, .col = .{ 0, 0, 1, 1 } },
+};
+pub const quad_vertices = [_]Quad.Vertex{
+    .{ .pos = .{ 0.5, -0.5 }, .uv = .{ 1, 0 }, .col = .{ 1, 0, 0, 1 } },
+    .{ .pos = .{ 0.5, 0.5 }, .uv = .{ 1, 1 }, .col = .{ 0.5, 0.5, 0.5, 1 } },
+    .{ .pos = .{ -0.5, -0.5 }, .uv = .{ 0, 0 }, .col = .{ 0, 0, 1, 1 } },
+    .{ .pos = .{ -0.5, 0.5 }, .uv = .{ 0, 1 }, .col = .{ 0, 1, 0, 1 } },
+};
+pub const quad_indices = [_]Quad.Indice{
+    0, 1, 2,
+    2, 1, 3,
+};
 
-    pos: @Vector(2, f32),
-    uv: @Vector(2, f32),
-    col: zm.F32x4,
+pub const Indice = u16;
+// Global 3D
+pub const Vertex = packed struct {
+    pos: @Vector(3, f32),
+    uv_x: f32,
+    normal: @Vector(3, f32),
+    uv_y: f32,
+    col: @Vector(4, f32),
 };

@@ -2,7 +2,6 @@
 
 const Backend = @import("../backend.zig").Backend;
 
-pub const Asset = @import("asset.zig");
 pub const Batcher = @import("batcher.zig");
 pub const Buffer = @import("buffer.zig");
 pub const GPU = @import("gpu.zig");

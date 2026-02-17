@@ -93,7 +93,7 @@ properties: vk.MemoryPropertyFlags,
 address: ?vk.DeviceAddress,
 
 pub fn create(ctx: *const GraphicsContext, size: u32, usage: vk.BufferUsageFlags, properties: vk.MemoryPropertyFlags) !Buffer {
-    Logger.debug("[Buffer.create] {} bytes", .{size});
+    log.info("[Buffer.create] {} bytes", .{size});
 
     const sharing_mode: vk.SharingMode = .exclusive;
 

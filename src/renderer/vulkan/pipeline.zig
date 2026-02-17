@@ -32,7 +32,7 @@ pub const GraphicPipelineInfo = struct {
     index_size: u32,
 };
 
-pub fn destroy(self: *Pipeline, ctx: *GraphicsContext) void {
+pub fn destroy(self: *Pipeline, ctx: *const GraphicsContext) void {
     ctx.device.destroyPipelineLayout(self.layout, null);
     ctx.device.destroyPipeline(self.vk_pipeline, null);
 }
@@ -50,169 +50,7 @@ pub const PipelineConfig = struct {
     num_sampler: u32 = 0,
 };
 
-pub fn create(ctx: *GraphicsContext, desc: CreatePipelineDesc, render_pass: RenderPass) !Pipeline {
-    log.debug("Create pipeline for shader {s} / {s}", .{ desc.vert, desc.frag });
-    const pipeline_layout = try createPipelineLayout(ctx);
-
-    var vert = try Shader.create(ctx, .{ .name = desc.vert, .stage = .vertex });
-    defer vert.destroy(ctx);
-    var frag = try Shader.create(ctx, .{ .name = desc.frag, .stage = .fragment });
-    defer frag.destroy(ctx);
-
-    const pssci = [_]vk.PipelineShaderStageCreateInfo{
-        vert.getPipelineShaderStageCreateInfo(),
-        frag.getPipelineShaderStageCreateInfo(),
-    };
-
-    var vatds = try getVertexInputAttributeDescriptions(desc.layout);
-    var vibds = getVertexInputBindingDescriptions(desc.layout);
-
-    const pvisci = vk.PipelineVertexInputStateCreateInfo{
-        .vertex_binding_description_count = 1,
-        .p_vertex_binding_descriptions = @ptrCast(&vibds),
-        .vertex_attribute_description_count = @intCast(desc.layout.elements.len),
-        .p_vertex_attribute_descriptions = &vatds,
-    };
-
-    const piasci = vk.PipelineInputAssemblyStateCreateInfo{
-        .topology = .triangle_list,
-        .primitive_restart_enable = .false,
-    };
-
-    const pvsci = vk.PipelineViewportStateCreateInfo{
-        .viewport_count = 1,
-        .p_viewports = undefined, // set in createCommandBuffers with cmdSetViewport
-        .scissor_count = 1,
-        .p_scissors = undefined, // set in createCommandBuffers with cmdSetScissor
-    };
-
-    const prsci = vk.PipelineRasterizationStateCreateInfo{
-        .depth_clamp_enable = .false,
-        .rasterizer_discard_enable = .false,
-        .polygon_mode = .fill,
-        .cull_mode = .{ .back_bit = true },
-        .front_face = .clockwise,
-        .depth_bias_enable = .false,
-        .depth_bias_constant_factor = 0,
-        .depth_bias_clamp = 0,
-        .depth_bias_slope_factor = 0,
-        .line_width = 1,
-    };
-
-    const pmsci = vk.PipelineMultisampleStateCreateInfo{
-        .rasterization_samples = .{ .@"1_bit" = true },
-        .sample_shading_enable = if (desc.config.num_sampler == 0) .false else .true,
-        .min_sample_shading = 1,
-        .alpha_to_coverage_enable = .false,
-        .alpha_to_one_enable = .false,
-    };
-
-    const pcbas = vk.PipelineColorBlendAttachmentState{
-        .blend_enable = .false,
-        .src_color_blend_factor = .one,
-        .dst_color_blend_factor = .zero,
-        .color_blend_op = .add,
-        .src_alpha_blend_factor = .one,
-        .dst_alpha_blend_factor = .zero,
-        .alpha_blend_op = .add,
-        .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
-    };
-
-    const pcbsci = vk.PipelineColorBlendStateCreateInfo{
-        .logic_op_enable = .false,
-        .logic_op = .copy,
-        .attachment_count = 1,
-        .p_attachments = @ptrCast(&pcbas),
-        .blend_constants = [_]f32{ 0, 0, 0, 0 },
-    };
-
-    const dynstate = [_]vk.DynamicState{ .viewport, .scissor };
-    const pdsci = vk.PipelineDynamicStateCreateInfo{
-        .flags = .{},
-        .dynamic_state_count = dynstate.len,
-        .p_dynamic_states = &dynstate,
-    };
-
-    const gpci = vk.GraphicsPipelineCreateInfo{
-        .flags = .{},
-        .stage_count = 2,
-        .p_stages = &pssci,
-        .p_vertex_input_state = &pvisci,
-        .p_input_assembly_state = &piasci,
-        .p_tessellation_state = null,
-        .p_viewport_state = &pvsci,
-        .p_rasterization_state = &prsci,
-        .p_multisample_state = &pmsci,
-        .p_depth_stencil_state = null,
-        .p_color_blend_state = &pcbsci,
-        .p_dynamic_state = &pdsci,
-        .layout = pipeline_layout,
-        .render_pass = render_pass.vk_render_pass,
-        .subpass = 0,
-        .base_pipeline_handle = .null_handle,
-        .base_pipeline_index = -1,
-    };
-
-    var pipeline: vk.Pipeline = undefined;
-    _ = try ctx.device.createGraphicsPipelines(
-        .null_handle,
-        1,
-        @ptrCast(&gpci),
-        null,
-        @ptrCast(&pipeline),
-    );
-
-    return .{ .layout = pipeline_layout, .vk_pipeline = pipeline };
-
-    // ---------------------------------------------------------------------
-
-    // var pipeline_create_info: sdl.gpu.GraphicsPipelineCreateInfo = .{
-    //     .vertex_shader = desc.vertex_shader.ptr,
-    //     .fragment_shader = desc.fragment_shader.ptr,
-    //     .primitive_type = .triangle_list,
-    //     .target_info = .{
-    //         .color_target_descriptions = &.{.{ .format = desc.texture_format.ptr }},
-    //     },
-    // };
-    //
-    // if (desc.vertex_input_state) |vis| {
-    //     pipeline_create_info.vertex_input_state = vis;
-    // }
-    //
-    // if (desc.layout) |layout| {
-    //     var attributes: [MAX_VERTEX_ATTRIBUTES]sdl.gpu.VertexAttribute = undefined;
-    //     var count: u32 = 0;
-    //
-    //     for (layout.getElements(), 0..) |el, i| {
-    //         if (i >= MAX_VERTEX_ATTRIBUTES) return error.TooManyVertexAttributes;
-    //         if (el.data_type.toSdl()) |format| {
-    //             attributes[count] = .{
-    //                 .buffer_slot = 0,
-    //                 .format = format,
-    //                 .location = count,
-    //                 .offset = el.offset,
-    //             };
-    //             count += 1;
-    //         }
-    //     }
-    //
-    //     pipeline_create_info.vertex_input_state = .{
-    //         .vertex_buffer_descriptions = &[_]sdl.gpu.VertexBufferDescription{
-    //             .{
-    //                 .slot = 0,
-    //                 .pitch = layout.getStride(),
-    //                 .input_rate = .vertex,
-    //             },
-    //         },
-    //         .vertex_attributes = attributes[0..count],
-    //     };
-    // }
-    //
-    // const ptr = try gpu.device.createGraphicsPipeline(pipeline_create_info);
-    // return .{ .gpu = gpu, .ptr = ptr };
-}
-
-pub fn createPipelineLayout(ctx: *GraphicsContext) !vk.PipelineLayout {
+pub fn createPipelineLayout(ctx: *const GraphicsContext) !vk.PipelineLayout {
     return try ctx.device.createPipelineLayout(&.{
         .flags = .{},
         .set_layout_count = 0,
@@ -245,7 +83,7 @@ fn getVertexInputBindingDescriptions(layout: Buffer.BufferLayout) vk.VertexInput
 }
 
 pub fn createComputePipeline(
-    ctx: *GraphicsContext,
+    ctx: *const GraphicsContext,
     shader: Shader,
     layout: vk.PipelineLayout,
 ) !Pipeline {

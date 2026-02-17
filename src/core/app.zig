@@ -124,3 +124,7 @@ pub fn pushOverlay(layer: Layer) !void {
         return err;
     };
 }
+
+test "app" {
+    try std.testing.expectEqual(true, true);
+}

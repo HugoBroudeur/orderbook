@@ -57,8 +57,9 @@ struct StorageBuffer {
 [[vk::push_constant]]
 ConstantBuffer<StorageBuffer> storageBuffer;
 
-Texture2D<float4> Texture : register(t0, space0);
-SamplerState Sampler : register(s0, space0);
+// Texture and sampler
+Sampler2D uvTexture : register(s0, space0);
+Sampler2D checkerTexture : register(s1, space0);
 
 // Descriptor bindings (replace with your actual set/binding)
 // [[vk::binding(0, 0)]]
@@ -90,7 +91,13 @@ PS_Input vertex(uint vertexID: SV_VertexID) {
 // Actual frament shader, using array for layered textured (atlas)
 [shader("fragment")]
 float4 fragment(PS_Input input) : SV_Target {
-  return input.Color * Texture.Sample(Sampler, input.TexCoord);
+  // return input.Color * Texture.Sample(Sampler, input.TexCoord);
+
+  return input.Color * uvTexture.Sample(input.TexCoord);
+
+  // The checker texture works, can be used for debug
+  return input.Color * checkerTexture.Sample(input.TexCoord);
+
   // return input.Color;
-  // return float4(input.TexCoord, 0, 1);
+   //  return float4(input.TexCoord, 0, 1);
 }

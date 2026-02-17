@@ -37,12 +37,12 @@ bytecode: []const u8,
 
 module: vk.ShaderModule = undefined,
 
-pub fn destroy(self: *Shader, ctx: *GraphicsContext) void {
+pub fn destroy(self: *Shader, ctx: *const GraphicsContext) void {
     ctx.device.destroyShaderModule(self.module, null);
 }
 
 // Only support SPIR-V
-pub fn create(ctx: *GraphicsContext, data: CreateShaderParam) !Shader {
+pub fn create(ctx: *const GraphicsContext, data: CreateShaderParam) !Shader {
     std.log.info("[Shader.create] {s} - {}", .{ data.name, data.stage });
 
     const extention = std.fs.path.extension(data.name);
@@ -105,7 +105,8 @@ fn getShaderByteCode(name: []const u8) ![]const u8 {
     const file_size = try file.getEndPos();
 
     // Use a stack buffer for shader code (adjust size as needed)
-    var shader_buf: [1024 * 1024]u8 = undefined; // 1MB max
+    // var shader_buf: [1024 * 1024]u8 = undefined; // 1MB max
+    var shader_buf: [1024 * 1024]u8 align(@alignOf(u32)) = undefined; // 1MB max
     if (file_size > shader_buf.len) return error.ShaderTooLarge;
 
     const shader_byte_code = shader_buf[0..file_size];

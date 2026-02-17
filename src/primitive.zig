@@ -26,6 +26,7 @@ pub const Triangle = struct {};
 pub const Color = struct {
     pub const Transparent: Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
     pub const Black: Color = .{ .r = 0, .g = 0, .b = 0, .a = 1 };
+    pub const Grey: Color = .{ .r = 0.6, .g = 0.6, .b = 0.6, .a = 1 };
     pub const White: Color = .{ .r = 1, .g = 1, .b = 1, .a = 1 };
     pub const Red: Color = .{ .r = 1, .g = 0, .b = 0, .a = 1 };
     pub const Green: Color = .{ .r = 0, .g = 1, .b = 0, .a = 1 };
@@ -49,5 +50,25 @@ pub const Color = struct {
 
     pub fn toVec4(color: Color) zm.F32x4 {
         return zm.f32x4(color.r, color.g, color.b, color.a);
+    }
+
+    // Convert f32[0-1] to u8[0-255]
+    pub fn toBytes(color: Color) [4]u8 {
+        return .{
+            @intFromFloat(color.r * 255.0),
+            @intFromFloat(color.g * 255.0),
+            @intFromFloat(color.b * 255.0),
+            @intFromFloat(color.a * 255.0),
+        };
+    }
+
+    // Convert f32[0-1] to u8[0-255]
+    pub fn toF32(color: Color) [4]f32 {
+        return .{
+            color.r,
+            color.g,
+            color.b,
+            color.a,
+        };
     }
 };

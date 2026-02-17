@@ -11,11 +11,11 @@ const zm = @import("zmath");
 
 const UiManager = @import("../../game/ui_manager.zig");
 const EcsManager = @import("../../game/ecs_manager.zig");
-const Colors = @import("../../game/colors.zig");
+const Color = @import("../../primitive.zig").Color;
 
 // const Api = @import("../backend.zig").Vulkan;
 // const Api = @import("../gfx.zig").Backend(.vulkan);
-const Asset = @import("asset.zig");
+const AssetLoader = @import("asset_loader.zig");
 const Batcher = @import("batcher.zig");
 const Buffer = @import("buffer.zig");
 const Camera = @import("../camera.zig");
@@ -40,7 +40,7 @@ const Renderer = @This();
 pub const GPUCommandFn = fn (vk.CommandBuffer) anyerror!void;
 pub const DrawPassType = enum { demo, ui, shadow, ssao, sky, solid, raycast, transparent };
 pub const TransferBufferType = enum { atlas_buffer_data, atlas_texture_data };
-pub const ImageType = enum { atlas, draw };
+pub const ImageType = enum { atlas, black, white, grey, error_checker };
 pub const SamplerType = enum { nearest, linear };
 pub const PipelineType = enum { triangle, compute, mesh };
 
@@ -104,7 +104,7 @@ const FrameData = struct {
         return false;
     }
 
-    pub fn reset(self: *FrameData, ctx: *GraphicsContext, extent: vk.Extent2D) !void {
+    pub fn reset(self: *FrameData, ctx: *const GraphicsContext, extent: vk.Extent2D) !void {
 
         // Set Viewport + scisors
         self.viewport.width = @floatFromInt(extent.width);
@@ -128,6 +128,8 @@ const GlobalDescriptor = struct {
 
     desc_allocator: Descriptor.Allocator,
 
+    writer: Descriptor.DescriptorWriter,
+
     // Used in the Compute Shader
     vk_compute_descriptor_set: vk.DescriptorSet,
     vk_compute_descriptor_set_layout: vk.DescriptorSetLayout,
@@ -143,11 +145,13 @@ const GlobalDescriptor = struct {
             .{ .vk_type = .storage_image, .ratio = 1 },
             .{ .vk_type = .uniform_buffer, .ratio = 1 },
             .{ .vk_type = .sampled_image, .ratio = 1 },
-            .{ .vk_type = .combined_image_sampler, .ratio = 1 },
+            .{ .vk_type = .combined_image_sampler, .ratio = 2 },
             .{ .vk_type = .sampler, .ratio = 1 },
         };
 
         global_descriptor.desc_allocator = try Descriptor.Allocator.init(allocator, ctx, MAX_SETS, &ratio);
+
+        global_descriptor.writer = try .init(allocator);
 
         {
             var builder: Descriptor.LayoutBuilder = try .init(allocator);
@@ -162,7 +166,7 @@ const GlobalDescriptor = struct {
             var mesh_desc_builder = try Descriptor.LayoutBuilder.init(allocator);
             defer mesh_desc_builder.deinit();
             try mesh_desc_builder.addBinding(0, .combined_image_sampler);
-            // try mesh_desc_builder.addBinding(0, .sampler);
+            try mesh_desc_builder.addBinding(1, .combined_image_sampler);
             global_descriptor.vk_mesh_descriptor_set_layout = try mesh_desc_builder.build(ctx, .{ .fragment_bit = true }, .{}, null);
             global_descriptor.vk_mesh_descriptor_set = try global_descriptor.desc_allocator.allocate(ctx, global_descriptor.vk_mesh_descriptor_set_layout, null);
         }
@@ -173,13 +177,14 @@ const GlobalDescriptor = struct {
         self.desc_allocator.destroyPools(ctx);
         ctx.device.destroyDescriptorSetLayout(self.vk_compute_descriptor_set_layout, null);
         ctx.device.destroyDescriptorSetLayout(self.vk_mesh_descriptor_set_layout, null);
+        self.writer.deinit();
     }
 };
 
 allocator: std.mem.Allocator,
 stats: Stats,
 
-ctx: *GraphicsContext,
+ctx: *const GraphicsContext,
 
 uniforms: Uniforms = undefined,
 
@@ -197,13 +202,16 @@ uniform_buffer: Buffer = undefined,
 
 triangle_mesh: Mesh = undefined,
 quad_mesh: Mesh = undefined,
+meshes: std.ArrayList(Mesh),
 
 // Global descriptors
 descriptor: GlobalDescriptor = undefined,
 
-// nearest_sampler: Sampler = undefined,
+asset_loader: AssetLoader,
+draw_image: Image = undefined,
 pipelines: std.EnumArray(PipelineType, Pipeline) = .initUndefined(),
 images: std.EnumArray(ImageType, Image) = .initUndefined(),
+samplers: std.EnumArray(SamplerType, Sampler) = .initUndefined(),
 
 // imgui_draw_data: *ig.ImDrawData = undefined,
 imgui_draw_data: *anyopaque = undefined,
@@ -214,32 +222,20 @@ is_minimised: bool = false,
 frame_number: u64 = 0,
 frame_data: [FRAME_OVERLAP]FrameData = [2]FrameData{ .{}, .{} },
 
-const triangle_vertices = [_]Data.Quad.Vertex{
-    .{ .pos = .{ 0, -0.5 }, .uv = .{ 0.5, 0 }, .col = .{ 1, 0, 0, 1 } },
-    .{ .pos = .{ 0.5, 0.5 }, .uv = .{ 1, 1 }, .col = .{ 0, 1, 0, 1 } },
-    .{ .pos = .{ -0.5, 0.5 }, .uv = .{ 0, 1 }, .col = .{ 0, 0, 1, 1 } },
-};
-const quad_vertices = [_]Data.Quad.Vertex{
-    .{ .pos = .{ 0.5, -0.5 }, .uv = .{ 1, 0 }, .col = .{ 1, 0, 0, 1 } },
-    .{ .pos = .{ 0.5, 0.5 }, .uv = .{ 1, 1 }, .col = .{ 0.5, 0.5, 0.5, 1 } },
-    .{ .pos = .{ -0.5, -0.5 }, .uv = .{ 0, 0 }, .col = .{ 0, 0, 1, 1 } },
-    .{ .pos = .{ -0.5, 0.5 }, .uv = .{ 0, 1 }, .col = .{ 0, 1, 0, 1 } },
-};
-const quad_indices = [_]Data.Quad.Indice{
-    0, 1, 2,
-    2, 1, 3,
-};
-
-pub fn init(allocator: std.mem.Allocator, ctx: *GraphicsContext) !Renderer {
+pub fn init(allocator: std.mem.Allocator, ctx: *const GraphicsContext) !Renderer {
     return .{
         .allocator = allocator,
         .stats = .init(),
         .batcher = try .init(allocator),
         .ctx = ctx,
+        .asset_loader = .init(allocator),
+        .meshes = try .initCapacity(allocator, 0),
     };
 }
 
 pub fn deinit(self: *Renderer) void {
+    self.asset_loader.deinit();
+
     self.ctx.device.deviceWaitIdle() catch |err| {
         Logger.err("[Renderer2D.deinit] Error {}", .{err});
         unreachable;
@@ -253,13 +249,20 @@ pub fn deinit(self: *Renderer) void {
         fd.destroy(self.ctx);
     }
 
+    self.descriptor.destroy(self.ctx);
+
+    self.draw_image.destroy(self.ctx);
     for (&self.images.values) |*image| {
         image.destroy(self.ctx);
     }
 
-    // self.nearest_sampler.destroy(self.ctx);
-
-    self.descriptor.destroy(self.ctx);
+    for (&self.samplers.values) |*sampler| {
+        sampler.destroy(self.ctx);
+    }
+    for (self.meshes.items) |*mesh| {
+        mesh.destroy(self.ctx);
+    }
+    self.meshes.deinit(self.allocator);
 
     // self.triangle_buffer.destroy(self.ctx);
     self.triangle_mesh.destroy(self.ctx);
@@ -285,48 +288,12 @@ pub fn setup(self: *Renderer) !void {
         try fd.setup(self.ctx, self.allocator);
     }
 
-    const draw_image = try Image.create(
-        self.ctx,
-        .{
-            .transfer_src_bit = true,
-            .transfer_dst_bit = true,
-            .storage_bit = true,
-            .color_attachment_bit = true,
-        },
-        .{ .device_local_bit = true },
-        .{
-            .width = @intCast(self.ctx.window.getWidth()),
-            .height = @intCast(self.ctx.window.getHeight()),
-            .depth = 1,
-        },
-        .r16g16b16a16_sfloat,
-        // self.swapchain.surface_format.format,
-    );
-    self.images.set(.draw, draw_image);
+    self.samplers.set(.nearest, try .create(self.ctx, .nearest));
+    self.samplers.set(.linear, try .create(self.ctx, .linear));
+
     self.descriptor = try GlobalDescriptor.create(self.allocator, self.ctx);
-    {
-        var writer = try Descriptor.DescriptorWriter.init(self.allocator);
-        defer writer.deinit();
 
-        try writer.writeImage(0, self.images.get(.draw), .general, .storage_image);
-        writer.updateSet(self.ctx, self.descriptor.vk_compute_descriptor_set);
-    }
-
-    const surface = try Image.loadImageAsset("assets/images/Background.jpg", .array_rgba_32);
-    const image = try Image.createFromSurface(self.ctx, &self.getCurrentFrame().cmd_pool, surface, .{ .sampled_bit = true }, .{ .device_local_bit = true });
-    self.images.set(.atlas, image);
-    self.text_buffer = try Buffer.create(self.ctx, @intCast(self.images.get(.atlas).size), .{ .transfer_dst_bit = true }, .{ .device_local_bit = true });
-    try self.text_buffer.fastTransfer(self.ctx, &self.getCurrentFrame().cmd_pool, surface.getPixels().?);
-
-    {
-        var writer = try Descriptor.DescriptorWriter.init(self.allocator);
-        defer writer.deinit();
-
-        try writer.writeImage(0, self.images.get(.atlas), .shader_read_only_optimal, .combined_image_sampler);
-        writer.updateSet(self.ctx, self.descriptor.vk_mesh_descriptor_set);
-    }
-
-    // self.nearest_sampler = try .create(self.ctx, .nearest);
+    try self.createTextures();
 
     // self.triangle_buffer = try Buffer.create(self.ctx, @sizeOf(@TypeOf(vertices)), .{ .vertex_buffer_bit = true, .transfer_dst_bit = true, .shader_device_address_bit = true }, .{ .device_local_bit = true });
     self.uniform_buffer = try Buffer.create(self.ctx, @sizeOf(@TypeOf(self.uniforms.transform)), .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
@@ -334,11 +301,9 @@ pub fn setup(self: *Renderer) !void {
 
     self.batcher_buffer = try Buffer.create(self.ctx, self.batcher.getTransferBufferSizeInBytes(), .{ .vertex_buffer_bit = true, .transfer_dst_bit = true }, .{ .host_coherent_bit = true, .host_visible_bit = true });
 
-    // const quad_mesh = try Mesh.makeQuadMesh(self.ctx, &self.cmd_pool, quad_vertices, indices: [6]u16)
-    self.triangle_mesh = try Mesh.makeTriangleMesh(self.ctx, &self.getCurrentFrame().cmd_pool, triangle_vertices);
+    self.triangle_mesh = try Mesh.makeTriangleMesh(self.allocator, self.ctx, &self.getCurrentFrame().cmd_pool, Data.triangle_vertices);
 
-    // const quad_mesh = try Mesh.makeQuadMesh(self.ctx, &self.cmd_pool, quad_vertices, indices: [6]u16)
-    self.quad_mesh = try Mesh.makeQuadMesh(self.ctx, &self.getCurrentFrame().cmd_pool, quad_vertices, &quad_indices);
+    self.quad_mesh = try Mesh.makeQuadMesh(self.allocator, self.ctx, &self.getCurrentFrame().cmd_pool, Data.quad_vertices, &Data.quad_indices);
 
     // Create Pipelines
     try self.createTrianglePipeline();
@@ -347,6 +312,102 @@ pub fn setup(self: *Renderer) !void {
     try self.createComputePipeline();
 
     // try self.triangle_buffer.fastTransfer(self.ctx, &self.cmd_pool, &std.mem.toBytes(vertices));
+
+    self.meshes = try self.asset_loader.loadMeshes(self.ctx, &self.getCurrentFrame().cmd_pool, "assets/meshes/basic.glb");
+}
+
+pub fn createTextures(self: *Renderer) !void {
+    { // Main Draw image
+        self.draw_image = try Image.create(
+            self.ctx,
+            .{
+                .transfer_src_bit = true,
+                .transfer_dst_bit = true,
+                .storage_bit = true,
+                .color_attachment_bit = true,
+            },
+            .{ .device_local_bit = true },
+            .{
+                .width = @intCast(self.ctx.window.getWidth()),
+                .height = @intCast(self.ctx.window.getHeight()),
+                .depth = 1,
+            },
+            .r16g16b16a16_sfloat,
+            self.samplers.getPtrConst(.linear),
+            // self.swapchain.surface_format.format,
+        );
+        {
+            self.descriptor.writer.clear();
+            try self.descriptor.writer.writeImage(0, self.draw_image, .general, .storage_image);
+            self.descriptor.writer.updateSet(self.ctx, self.descriptor.vk_compute_descriptor_set);
+        }
+    }
+
+    { // Single 1px color
+        var map: std.EnumMap(ImageType, ?Color) = .init(.{
+            .white = .White,
+            .black = .Black,
+            .grey = .Grey,
+        });
+        var it = map.iterator();
+        while (it.next()) |m| {
+            if (m.value.*) |color|
+                self.images.set(m.key, try Image.createFromColor(
+                    self.ctx,
+                    &self.getCurrentFrame().cmd_pool,
+                    color,
+                    .{ .height = 1, .width = 1, .depth = 1 },
+                    .r8g8b8a8_unorm,
+                    .{ .sampled_bit = true },
+                    .{ .device_local_bit = true },
+                    self.samplers.getPtrConst(.nearest),
+                ));
+        }
+    }
+
+    { // Checker pattern
+        const m = Color.Magenta.toBytes();
+        const b = Color.Black.toBytes();
+        const checker_bytes = m ++ b ++ b ++ m;
+
+        self.images.set(.error_checker, try Image.createFromBytes(
+            self.ctx,
+            &self.getCurrentFrame().cmd_pool,
+            &checker_bytes,
+            .{ .height = 2, .width = 2, .depth = 1 },
+            .r8g8b8a8_unorm,
+            .{ .sampled_bit = true },
+            .{ .device_local_bit = true },
+            self.samplers.getPtrConst(.nearest),
+        ));
+    }
+
+    { // Atlas
+        const surface = try Image.loadImageAsset("assets/images/Background.jpg", .array_rgba_32);
+        const image = try Image.createFromSurface(
+            self.ctx,
+            &self.getCurrentFrame().cmd_pool,
+            surface,
+            .{ .sampled_bit = true },
+            .{ .device_local_bit = true },
+            self.samplers.getPtrConst(.linear),
+        );
+        self.images.set(.atlas, image);
+        self.text_buffer = try Buffer.create(self.ctx, @intCast(self.images.get(.atlas).size), .{ .transfer_dst_bit = true }, .{ .device_local_bit = true });
+        try self.text_buffer.fastTransfer(self.ctx, &self.getCurrentFrame().cmd_pool, surface.getPixels().?);
+
+        {
+            var writer = try Descriptor.DescriptorWriter.init(self.allocator);
+            defer writer.deinit();
+
+            try writer.writeImage(0, self.images.get(.atlas), .shader_read_only_optimal, .combined_image_sampler);
+            writer.updateSet(self.ctx, self.descriptor.vk_mesh_descriptor_set);
+
+            writer.clear();
+            try writer.writeImage(1, self.images.get(.error_checker), .shader_read_only_optimal, .combined_image_sampler);
+            writer.updateSet(self.ctx, self.descriptor.vk_mesh_descriptor_set);
+        }
+    }
 }
 
 pub fn initUniform(self: *Renderer) void {
@@ -383,7 +444,7 @@ fn fillCommandBuffers(self: *Renderer) !void {
 
     try self.swapchain.waitForAllFences();
 
-    const draw_image = self.images.getPtr(.draw);
+    const draw_image = &self.draw_image;
     const current_frame = self.getCurrentFrame();
     const cmdbuf = current_frame.cmd_buf;
     try current_frame.desc_allocator.clearPools(self.ctx);
@@ -473,7 +534,6 @@ pub fn draw_triangle(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
 }
 
 pub fn draw_mesh(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
-    const draw_image = self.images.getPtr(.draw);
     const current_frame = self.getCurrentFrame();
     const pipeline = self.pipelines.getPtr(.mesh);
 
@@ -481,7 +541,7 @@ pub fn draw_mesh(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
 
     const color_attachment: vk.RenderingAttachmentInfo = .{
         .image_layout = .color_attachment_optimal,
-        .image_view = draw_image.view,
+        .image_view = self.draw_image.view,
         .resolve_mode = .{},
         .resolve_image_layout = .color_attachment_optimal,
         .load_op = .load,
@@ -501,9 +561,22 @@ pub fn draw_mesh(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
         .p_color_attachments = @ptrCast(&.{color_attachment}),
     };
 
-    const push_constant: Mesh.PushConstants2D = .{ .scale = .{ 1, 1 }, .translate = .{ 0, 0 }, .vb_address = self.quad_mesh.buffers.vertex.?.address.? };
+    // {
+    //     self.descriptor.writer.clear();
+    //     self.descriptor.writer.writeImage(0, self.images.get(.error_checker), .general, .combined_image_sampler) catch {};
+    //     self.descriptor.writer.updateSet(self.ctx, self.descriptor.vk_compute_descriptor_set);
+    // }
+
+    // Draw quad
+    // const push_constant: Mesh.PushConstants2D = .{ .scale = .{ 1, 1 }, .translate = .{ 0, 0 }, .vb_address = self.quad_mesh.buffers.vertex.?.address.? };
+    // self.ctx.device.cmdBindIndexBuffer(cmdbuf, self.quad_mesh.buffers.index.?.vk_buffer, 0, .uint16);
+
+    // Draw Monkey
+    const push_constant: Mesh.PushConstants2D = .{ .scale = .{ 1, 1 }, .translate = .{ 0, 0 }, .vb_address = self.meshes.items[2].buffers.vertex.?.address.? };
+    self.ctx.device.cmdBindIndexBuffer(cmdbuf, self.meshes.items[2].buffers.index.?.vk_buffer, 0, .uint16);
+
     self.ctx.device.cmdPushConstants(cmdbuf, pipeline.layout, .{ .vertex_bit = true }, 0, @sizeOf(Mesh.PushConstants2D), @ptrCast(&push_constant));
-    self.ctx.device.cmdBindIndexBuffer(cmdbuf, self.quad_mesh.buffers.index.?.vk_buffer, 0, .uint16);
+
     self.ctx.device.cmdBindDescriptorSets(
         cmdbuf,
         .graphics,
@@ -518,7 +591,11 @@ pub fn draw_mesh(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
     self.ctx.device.cmdBeginRendering(cmdbuf, &rendering_info);
     defer self.ctx.device.cmdEndRendering(cmdbuf);
 
-    self.ctx.device.cmdDrawIndexed(cmdbuf, 6, 1, 0, 0, 0);
+    // Draw quad
+    // self.ctx.device.cmdDrawIndexed(cmdbuf, 6, 1, 0, 0, 0);
+
+    // Draw Monkey
+    self.ctx.device.cmdDrawIndexed(cmdbuf, self.meshes.items[2].surfaces.items[0].count, 1, self.meshes.items[2].surfaces.items[0].start_index, 0, 0);
 }
 
 pub fn draw_background(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
@@ -698,14 +775,6 @@ fn create2DPipeline(self: *Renderer) !void {
 }
 
 fn createMeshPipeline(self: *Renderer) !void {
-    // var elements = [_]Buffer.BufferElement{
-    //     Buffer.BufferElement.new(.Float2, "Position"),
-    //     Buffer.BufferElement.new(.Float2, "TexCoord"),
-    //     Buffer.BufferElement.new(.Float4, "Color"),
-    // };
-    // const layout: Buffer.BufferLayout = .init(&elements);
-    // _ = layout;
-
     var vert = try Shader.create(self.ctx, .{ .name = "mesh.spv", .stage = .vertex });
     defer vert.destroy(self.ctx);
     var frag = try Shader.create(self.ctx, .{ .name = "mesh.spv", .stage = .fragment });
@@ -720,7 +789,7 @@ fn createMeshPipeline(self: *Renderer) !void {
     pipeline_builder.setMultisamplingNone();
     pipeline_builder.disableBlending();
     pipeline_builder.disableDepthTest();
-    pipeline_builder.setColorAttachmentFormat(self.images.getPtr(.draw).format);
+    pipeline_builder.setColorAttachmentFormat(self.draw_image.format);
     pipeline_builder.setDepthFormat(.undefined);
 
     const push_constant_range: vk.PushConstantRange = .{ .offset = 0, .size = @sizeOf(Mesh.PushConstants2D), .stage_flags = .{ .vertex_bit = true } };

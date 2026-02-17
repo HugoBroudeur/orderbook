@@ -86,6 +86,6 @@ pub fn setIcon(self: *Window, icon_path: [:0]const u8) !void {
     try self.ptr.setIcon(window_icon);
 }
 
-pub fn toExtend2D(self: *Window) vk.Extent2D {
+pub fn toExtend2D(self: *const Window) vk.Extent2D {
     return .{ .width = @intCast(self.getWidth()), .height = @intCast(self.getHeight()) };
 }

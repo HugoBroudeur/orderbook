@@ -84,3 +84,7 @@ pub fn DynamicBuffer(comptime T: type) type {
         }
     };
 }
+
+test "data_structure" {
+    try std.testing.expectEqual(true, true);
+}

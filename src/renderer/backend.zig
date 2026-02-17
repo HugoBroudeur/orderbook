@@ -88,7 +88,6 @@ pub fn Api(comptime be: Backend, comptime T: type) type {
         pub const Data = Shared.Data;
         pub const Stats = Shared.Stats;
 
-        pub const Asset = T.Asset;
         pub const Batcher = T.Batcher;
         pub const Buffer = T.Buffer;
         pub const GPU = T.GPU;
