@@ -146,11 +146,11 @@ const GlobalDescriptor = struct {
         var global_descriptor: GlobalDescriptor = undefined;
 
         var ratio = [_]Descriptor.Allocator.PoolSizeRatio{
-            .{ .vk_type = .storage_image, .ratio = 1 },
-            .{ .vk_type = .uniform_buffer, .ratio = 1 },
-            .{ .vk_type = .sampled_image, .ratio = 1 },
+            .{ .vk_type = .storage_image, .ratio = 3 },
+            .{ .vk_type = .uniform_buffer, .ratio = 3 },
+            // .{ .vk_type = .sampled_image, .ratio = 1 },
             .{ .vk_type = .combined_image_sampler, .ratio = 4 },
-            .{ .vk_type = .sampler, .ratio = 1 },
+            // .{ .vk_type = .sampler, .ratio = 1 },
         };
 
         global_descriptor.desc_allocator = try Descriptor.Allocator.init(allocator, ctx, MAX_SETS, &ratio);
