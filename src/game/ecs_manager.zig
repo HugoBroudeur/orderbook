@@ -7,6 +7,7 @@ const Ecs = @import("ecs/ecs.zig");
 const Prefab = @import("ecs/prefabs/prefab.zig");
 const OrderbookSystem = @import("ecs/systems/orderbook_system.zig");
 const MetricSystem = @import("ecs/systems/metric_system.zig");
+const GraphicsContext = @import("../core/graphics_context.zig");
 
 const zcs = @import("zcs");
 
@@ -66,7 +67,7 @@ pub fn progress(self: *EcsManager) void {
     self.flush_cmd_buf();
 }
 
-pub fn render(self: *EcsManager) void {
+pub fn render(self: *EcsManager, ctx: *const GraphicsContext) void {
     // _ = self;
     const draw_data = self.get_singleton(Ecs.components.Graphics.DrawData);
     const env = self.get_singleton(Ecs.components.EnvironmentInfo);
@@ -92,7 +93,7 @@ pub fn render(self: *EcsManager) void {
     //
     // DRAW FRAME
     //
-    self.scene_manager.render(self);
+    self.scene_manager.render(self, ctx);
     // self.renderer_2d.drawFrame(draw_data);
 
     //

@@ -2,6 +2,8 @@
 
 const std = @import("std");
 
+const zm = @import("zmath");
+
 const DataStructure = @import("../data_structure.zig");
 const Logger = @import("../core/log.zig").MaxLogs(50);
 
@@ -21,6 +23,15 @@ const Point = Primitive.Point;
 // const ig = @import("cimgui");
 
 const COMMAND_QUEUE_SIZE = 1000000;
+
+pub const SceneData = struct {
+    view: zm.Mat = zm.identity(),
+    proj: zm.Mat = zm.identity(),
+    view_proj: zm.Mat = zm.identity(),
+    ambient_color: Color = Color.White,
+    sunlight_direction: @Vector(4, f32) = .{ 0, 0, 0, 1 }, // w for sun power
+    sunlight_color: Color = Color.White,
+};
 
 pub const QuadImgCmd = struct {
     p1: Point,
@@ -49,6 +60,14 @@ pub const QuadFillCmd = struct {
     color4: Color = Color.White,
 };
 
+pub const MeshCmd = struct {
+    p1: Point,
+    p2: Point,
+    p3: Point,
+    p4: Point,
+    color: Color = Color.White,
+};
+
 pub const ImguiCmd = struct {
     data: *anyopaque,
     // data: *ig.ImDrawData,
@@ -63,6 +82,8 @@ pub const DrawQueue = struct {
 
     cmds: DataStructure.DynamicBuffer(DrawCmd),
 
+    scene_data: SceneData = .{},
+
     // ptr
     last_cmd: usize = 0,
     current_cmd: usize = 0,
@@ -76,6 +97,10 @@ pub const DrawQueue = struct {
 
     pub fn deinit(self: *DrawQueue) void {
         self.cmds.deinit();
+    }
+
+    pub fn setSceneData(self: *DrawQueue, data: SceneData) void {
+        self.scene_data = data;
     }
 
     pub fn push(self: *DrawQueue, cmd: DrawCmd) void {

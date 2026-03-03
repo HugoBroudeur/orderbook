@@ -129,7 +129,7 @@ pub fn onUpdate(self: *SandboxLayer) void {
                 return;
             }
             // self.ui_manager.renderFrame(&self.ecs_manager);
-            self.scene_manager.render(&self.ecs_manager);
+            self.scene_manager.render(&self.ecs_manager, self.ctx);
             // self.ecs_manager.render();
         }
     } else {
@@ -140,7 +140,7 @@ pub fn onUpdate(self: *SandboxLayer) void {
             return;
         }
         // self.ui_manager.renderFrame(&self.ecs_manager);
-        self.scene_manager.render(&self.ecs_manager);
+        self.scene_manager.render(&self.ecs_manager, self.ctx);
         // self.ecs_manager.render();
         // self.ecs_manager.render();
     }

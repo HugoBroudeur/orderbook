@@ -1,8 +1,7 @@
-import scene;
+import include.scene;
 
 struct VertexUniformData {
   float4x4 render_matrix;
-  float2 Translate;
 };
 
 struct Vertex {
@@ -94,7 +93,7 @@ float4 fragment(Fragment input) : SV_Target {
 
   // return float4(input.color, 1.0) *
   //        checkerTexture.Sample(
-  //            input.uv); 
+  //            input.uv);
   // return input.Color;
   //  return float4(input.TexCoord, 0, 1);
 }
