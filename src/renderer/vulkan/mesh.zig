@@ -34,7 +34,7 @@ pub const PushConstants2D = struct {
 };
 
 pub const PushConstants3D = struct {
-    world_matrix: Data.WorldMatrix3D,
+    render_matrix: zm.Mat,
     vb_address: vk.DeviceAddress = undefined,
 };
 pub const PushConstantType = enum { two_d, three_d };

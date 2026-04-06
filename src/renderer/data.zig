@@ -22,7 +22,6 @@ pub const ViewProj = struct {
     proj: zm.Mat,
 };
 
-pub const WorldMatrix3D = zm.Mat;
 pub const Scale2D = @Vector(2, f32);
 pub const Translate2D = @Vector(2, f32);
 

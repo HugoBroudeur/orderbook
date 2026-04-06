@@ -36,6 +36,10 @@ var featurev1_3: vk.PhysicalDeviceVulkan13Features = .{
 var featurev1_2: vk.PhysicalDeviceVulkan12Features = .{
     .p_next = @ptrCast(&featurev1_3),
     .buffer_device_address = .true,
+    .descriptor_binding_partially_bound = .true,
+    .descriptor_binding_variable_descriptor_count = .true,
+    .runtime_descriptor_array = .true,
+    .descriptor_indexing = .true,
 };
 var featurev1_1: vk.PhysicalDeviceVulkan11Features = .{
     .p_next = @ptrCast(&featurev1_2),
@@ -196,6 +200,7 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
             .general_bit_ext = true,
             .validation_bit_ext = true,
             .performance_bit_ext = true,
+            .device_address_binding_bit_ext = true,
         },
         .pfn_user_callback = &debugUtilsMessengerCallback,
         .p_user_data = null,
@@ -356,7 +361,13 @@ fn debugUtilsMessengerCallback(severity: vk.DebugUtilsMessageSeverityFlagsEXT, m
     const type_str = if (msg_type.general_bit_ext) "general" else if (msg_type.validation_bit_ext) "validation" else if (msg_type.performance_bit_ext) "performance" else if (msg_type.device_address_binding_bit_ext) "device addr" else "unknown";
 
     const message: [*c]const u8 = if (callback_data) |cb_data| cb_data.p_message else "NO MESSAGE!";
-    std.debug.print("[{s}][{s}]. Message:\n  {s}\n", .{ severity_str, type_str, message });
+    std.debug.print(
+        \\
+        \\[VULKAN:{s}:{s}]
+        \\  {s}
+        \\
+        \\
+    , .{ severity_str, type_str, message });
 
     return .false;
 }
