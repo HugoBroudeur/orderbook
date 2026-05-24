@@ -14,6 +14,7 @@ camera: Camera.PerspectiveCamera = undefined,
 ecs: *EcsManager,
 
 const MOUSE_SENSITIVITY = 200;
+const SPEED = 0.05;
 
 pub fn init(ecs: *EcsManager) CameraSystem {
     return .{ .ecs = ecs };
@@ -25,7 +26,13 @@ pub fn interface(self: *CameraSystem) System {
 
 pub fn setup(self: *CameraSystem) void {
     const es = self.ecs.createEntity();
-    self.ecs.addComponent(es, Camera.PerspectiveCamera, .{ .near = 0.1, .far = 10000, .fov = 70 });
+    // Pull camera back along +Z so meshes at the world origin are in front of it.
+    self.ecs.addComponent(es, Camera.PerspectiveCamera, .{
+        .near = 0.1,
+        .far = 10000,
+        .fov = 70,
+        .pos = .{ 0, 0, 5, 1 },
+    });
     self.ecs.addComponent(es, Ecs.components.Velocity, .{});
     self.ecs.addComponent(es, Ecs.components.Rotation, .{});
 
@@ -66,10 +73,10 @@ pub fn process(self: *CameraSystem, event: Event) void {
                 // log.info("Key Pressed {}", .{event.ptr.key_down.key.?});
 
                 switch (event.ptr.key_down.key.?) {
-                    .d => vw.velocity.z = -1,
-                    .t => vw.velocity.z = 1,
-                    .r => vw.velocity.x = -1,
-                    .s => vw.velocity.x = 1,
+                    .d => vw.velocity.z = -SPEED,
+                    .t => vw.velocity.z = SPEED,
+                    .r => vw.velocity.x = -SPEED,
+                    .s => vw.velocity.x = SPEED,
                     else => {},
                 }
             },

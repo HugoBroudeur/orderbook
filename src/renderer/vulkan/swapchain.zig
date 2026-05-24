@@ -131,7 +131,12 @@ pub const Swapchain = struct {
         const gc = self.ctx;
         const allocator = self.allocator;
         const old_handle = self.handle;
-        try self.currentSwapImage().waitForFence(self.ctx);
+        // Drain the device before destroying per-image semaphores and the old
+        // swapchain. waitForFence on a single swap image is not enough —
+        // semaphores belonging to other swap images may still be referenced by
+        // submitted batches, and the presented image is still owned by the
+        // present queue until the device is idle.
+        try gc.device.deviceWaitIdle();
         self.deinitExceptSwapchain();
         // set current handle to NULL_HANDLE to signal that the current swapchain does no longer need to be
         // de-initialized if we fail to recreate it.

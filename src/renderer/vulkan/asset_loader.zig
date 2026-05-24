@@ -12,13 +12,23 @@ const AssetLoader = @This();
 
 allocator: std.mem.Allocator,
 zgltf: Gltf,
+// zgltf.glb_binary is a SLICE into the input file buffer — it doesn't copy.
+// Retain ownership here so the slice stays valid for the lifetime of the
+// AssetLoader (which is also the lifetime of any GPU buffer we upload from it).
+file_buffers: std.ArrayList([]align(4) u8),
 
 pub fn init(allocator: std.mem.Allocator) AssetLoader {
-    return .{ .allocator = allocator, .zgltf = Gltf.init(allocator) };
+    return .{
+        .allocator = allocator,
+        .zgltf = Gltf.init(allocator),
+        .file_buffers = .{},
+    };
 }
 
 pub fn deinit(self: *AssetLoader) void {
     self.zgltf.deinit();
+    for (self.file_buffers.items) |buf| self.allocator.free(buf);
+    self.file_buffers.deinit(self.allocator);
 }
 
 pub fn loadGlb(self: *AssetLoader, glb_filename: []const u8) !Gltf.Data {
@@ -26,7 +36,8 @@ pub fn loadGlb(self: *AssetLoader, glb_filename: []const u8) !Gltf.Data {
     log.info("Parse GLB file: {s}", .{glb_filename});
 
     const buffer = try std.fs.cwd().readFileAllocOptions(self.allocator, glb_filename, 512_000, null, .@"4", null);
-    defer self.allocator.free(buffer);
+    // DO NOT free here — zgltf retains a slice into this buffer.
+    try self.file_buffers.append(self.allocator, buffer);
 
     try self.zgltf.parse(buffer);
     self.zgltf.debugPrint();
@@ -39,7 +50,8 @@ pub fn loadGltf(self: *AssetLoader, gltf_filename: []const u8) !Gltf.Data {
     log.info("Parse GLTF file: {s}", .{gltf_filename});
 
     const buffer = try std.fs.cwd().readFileAllocOptions(self.allocator, gltf_filename, 512_000, null, .@"4", null);
-    defer self.allocator.free(buffer);
+    // DO NOT free here — zgltf retains a slice into this buffer.
+    try self.file_buffers.append(self.allocator, buffer);
 
     try self.zgltf.parse(buffer);
     self.zgltf.debugPrint();
@@ -86,10 +98,9 @@ pub fn loadMeshes(self: *AssetLoader, ctx: *const GraphicsContext, cmd_pool: *co
                 if (self.zgltf.glb_binary) |bin| {
                     const accessor = data.accessors[primitive_index];
                     var it = accessor.iterator(Data.Indice, &self.zgltf, bin);
-                    try indices.resize(self.allocator, indices.items.len + accessor.count);
+                    // Append only — don't resize+append (would double the buffer
+                    // with garbage front-padding and shift the real indices).
                     while (it.next()) |idxx| {
-                        // _ = idxx;
-                        // try indices.insertSlice(self.allocator, initial_vertex, idxx);
                         try indices.appendSlice(self.allocator, idxx);
                     }
                 }
@@ -97,12 +108,31 @@ pub fn loadMeshes(self: *AssetLoader, ctx: *const GraphicsContext, cmd_pool: *co
 
             { // load vertex
                 if (self.zgltf.glb_binary) |bin| {
+                    std.debug.print("  [SELFTEST] primitive.attributes (in order, with tag and accessor idx):\n", .{});
+                    for (primitive.attributes) |attribute| {
+                        const idx_and_label: struct { idx: usize, label: []const u8 } = switch (attribute) {
+                            .position => |i| .{ .idx = i, .label = ".position" },
+                            .normal => |i| .{ .idx = i, .label = ".normal  " },
+                            .texcoord => |i| .{ .idx = i, .label = ".texcoord" },
+                            .color => |i| .{ .idx = i, .label = ".color   " },
+                            else => continue,
+                        };
+                        const acc = data.accessors[idx_and_label.idx];
+                        const bv_idx = acc.buffer_view.?;
+                        const bv = data.buffer_views[bv_idx];
+                        std.debug.print("    {s} → accessor[{d}] (type={s}, comp={s}, count={d}, acc.byte_offset={d}) → buffer_view[{d}] (bv.byte_offset={d}, bv.byte_length={d}, bv.byte_stride={?})\n", .{
+                            idx_and_label.label, idx_and_label.idx, @tagName(acc.type), @tagName(acc.component_type), acc.count, acc.byte_offset,
+                            bv_idx, bv.byte_offset, bv.byte_length, bv.byte_stride,
+                        });
+                    }
                     for (primitive.attributes) |attribute| {
                         switch (attribute) {
-                            .position => |idx| {
+                            // [SELFTEST] SWAPPED: read NORMAL accessor as positions.
+                            // If we see recognizable geometry, the .position / .normal tags are
+                            // pointing at the wrong buffer views.
+                            .normal => |idx| {
                                 const accessor = data.accessors[idx];
                                 var it = accessor.iterator(f32, &self.zgltf, bin);
-                                try vertices.resize(self.allocator, vertices.items.len + accessor.count);
                                 while (it.next()) |v| {
                                     try vertices.append(self.allocator, .{
                                         .pos = .{ v[0], v[1], v[2] },
@@ -113,13 +143,8 @@ pub fn loadMeshes(self: *AssetLoader, ctx: *const GraphicsContext, cmd_pool: *co
                                     });
                                 }
                             },
-                            .normal => |idx| {
-                                const accessor = data.accessors[idx];
-                                var it = accessor.iterator(f32, &self.zgltf, bin);
-                                var i: u32 = 0;
-                                while (it.next()) |n| : (i += 1) {
-                                    vertices.items[initial_vertex + i].normal = .{ n[0], n[1], n[2] };
-                                }
+                            .position => |idx| {
+                                _ = idx;
                             },
                             .texcoord => |idx| {
                                 const accessor = data.accessors[idx];
@@ -142,6 +167,71 @@ pub fn loadMeshes(self: *AssetLoader, ctx: *const GraphicsContext, cmd_pool: *co
                         }
                     }
                 }
+            }
+        }
+
+        // [SELFTEST] Diagnostic: dump first/last vertex + index range so we can
+        // verify the loaded data is sensible. Remove once mesh rendering works.
+        if (vertices.items.len > 0 and indices.items.len > 0) {
+            const first_v = vertices.items[0];
+            const last_v = vertices.items[vertices.items.len - 1];
+            var max_idx: u32 = 0;
+            var min_idx: u32 = std.math.maxInt(u32);
+            for (indices.items) |idx| {
+                if (idx > max_idx) max_idx = idx;
+                if (idx < min_idx) min_idx = idx;
+            }
+            // Compute bounding box of all positions so we can verify the mesh
+            // is in a reasonable world-space region.
+            var min_p: [3]f32 = .{ std.math.floatMax(f32), std.math.floatMax(f32), std.math.floatMax(f32) };
+            var max_p: [3]f32 = .{ -std.math.floatMax(f32), -std.math.floatMax(f32), -std.math.floatMax(f32) };
+            for (vertices.items) |v| {
+                for (0..3) |k| {
+                    if (v.pos[k] < min_p[k]) min_p[k] = v.pos[k];
+                    if (v.pos[k] > max_p[k]) max_p[k] = v.pos[k];
+                }
+            }
+            std.debug.print(
+                \\[SELFTEST-loader] mesh "{s}"
+                \\  vertex_count = {d}, index_count = {d}
+                \\  first vertex pos = ({d:.3}, {d:.3}, {d:.3}), color = ({d:.2}, {d:.2}, {d:.2}, {d:.2})
+                \\  last  vertex pos = ({d:.3}, {d:.3}, {d:.3})
+                \\  bounding box  min = ({d:.3}, {d:.3}, {d:.3}), max = ({d:.3}, {d:.3}, {d:.3})
+                \\  index range = [{d} .. {d}] (must be < vertex_count={d})
+                \\  first 3 indices = {d} {d} {d}
+                \\  surface[0] start_index={d} count={d}
+                \\  @sizeOf(Vertex)={d}, @alignOf(Vertex)={d}, slice len in bytes = {d}
+                \\
+            , .{
+                mesh.name,
+                vertices.items.len, indices.items.len,
+                first_v.pos[0], first_v.pos[1], first_v.pos[2],
+                first_v.col[0], first_v.col[1], first_v.col[2], first_v.col[3],
+                last_v.pos[0], last_v.pos[1], last_v.pos[2],
+                min_p[0], min_p[1], min_p[2], max_p[0], max_p[1], max_p[2],
+                min_idx, max_idx, vertices.items.len,
+                indices.items[0], indices.items[1], indices.items[2],
+                mesh.surfaces.items[0].start_index, mesh.surfaces.items[0].count,
+                @sizeOf(Data.Vertex), @alignOf(Data.Vertex), std.mem.sliceAsBytes(vertices.items).len,
+            });
+            // Dump the raw bytes of vertex 0 so we can compare with the expected layout.
+            const v0_bytes = std.mem.asBytes(&vertices.items[0]);
+            std.debug.print("  vertex0 raw bytes (len={d}):", .{v0_bytes.len});
+            for (v0_bytes, 0..) |b, k| {
+                if (k % 4 == 0) std.debug.print(" ", .{});
+                std.debug.print("{x:0>2}", .{b});
+            }
+            std.debug.print("\n", .{});
+            // Print position + magnitude of first 8 (or all if fewer) vertices.
+            // Magnitude ~1.0 for ALL vertices suggests we read normals not positions.
+            const n = @min(vertices.items.len, 8);
+            std.debug.print("  first {d} vertex positions (with magnitude):\n", .{n});
+            for (vertices.items[0..n], 0..) |v, k| {
+                const mag = std.math.sqrt(v.pos[0] * v.pos[0] + v.pos[1] * v.pos[1] + v.pos[2] * v.pos[2]);
+                std.debug.print("    [{d}] = ({d:.3}, {d:.3}, {d:.3})  |mag|={d:.3}\n", .{ k, v.pos[0], v.pos[1], v.pos[2], mag });
+            }
+            if (max_idx >= vertices.items.len) {
+                std.debug.print("[SELFTEST-loader] !!! INDEX OUT OF RANGE: max_idx={d} >= vertex_count={d}\n", .{ max_idx, vertices.items.len });
             }
         }
 

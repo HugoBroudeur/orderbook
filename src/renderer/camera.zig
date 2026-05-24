@@ -68,8 +68,9 @@ pub fn Camera(comptime T: CameraType) type {
                 ),
             };
 
-            // self.mvp = zm.mul(self.view_matrix, self.projection_matrix);
-            self.mvp = zm.mul(self.projection_matrix, self.view_matrix);
+            // zmath uses row-vector convention: zm.mul(A, B) means apply A then B.
+            // So view-then-projection composes as zm.mul(view, projection).
+            self.mvp = zm.mul(self.view_matrix, self.projection_matrix);
 
             self.need_compute = false;
         }

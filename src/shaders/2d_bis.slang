@@ -63,9 +63,7 @@ PS_Input vertex(uint vertexID: SV_VertexID) {
   //                      storageBuffer.uniforms.Translate;
   // output.Position.zw = float2(0.0, 1.0);
 
-  output.Position =
-      mul(scene.sceneData.viewproj, mul(storageBuffer.uniforms.render_matrix,
-                                        float4(input.Position, 1.0)));
+  output.Position = mul(scene.sceneData.viewproj, float4(input.Position, 1.0));
   // output.Position = mul(scene.sceneData.viewproj,
   // float4(input.Position, 1.0)); output.Position =
   //     mul(storageBuffer.uniforms.render_matrix, float4(input.Position, 1.0));

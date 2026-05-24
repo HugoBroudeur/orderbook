@@ -136,8 +136,8 @@ const GlobalDescriptor = struct {
     scene_descriptor_layout: vk.DescriptorSetLayout = undefined,
 
     // Used in the Mesh Shader
-    // vk_mesh_descriptor_set: vk.DescriptorSet = undefined,
-    // vk_mesh_descriptor_set_layout: vk.DescriptorSetLayout = undefined,
+    vk_mesh_descriptor_set: vk.DescriptorSet = undefined,
+    vk_mesh_descriptor_set_layout: vk.DescriptorSetLayout = undefined,
     vk_material_descriptor_set: vk.DescriptorSet = undefined,
     vk_material_descriptor_set_layout: vk.DescriptorSetLayout = undefined,
 
@@ -206,34 +206,43 @@ const GlobalDescriptor = struct {
             // try self.writer.writeBuffer(0, , .general, .storage_image);
             // self.writer.updateSet(ctx, self.scene_descriptor);
         }
-        // { // Mesh
-        //     var mesh_desc_builder = try Descriptor.LayoutBuilder.init(self.allocator);
-        //     defer mesh_desc_builder.deinit();
-        //     try mesh_desc_builder.addBinding(0, .uniform_buffer);
-        //     try mesh_desc_builder.addBinding(1, .combined_image_sampler);
-        //     mesh_desc_builder.bindings.items[1].descriptor_count = 4048;
-        //
-        //     const flags: [2]vk.DescriptorBindingFlags = .{
-        //         .{},
-        //         .{ .partially_bound_bit = true, .variable_descriptor_count_bit = true },
-        //     };
-        //     const bind_flags: vk.DescriptorSetLayoutBindingFlagsCreateInfo = .{
-        //         .binding_count = flags.len,
-        //         .p_binding_flags = @ptrCast(&flags),
-        //     };
-        //
-        //     self.vk_mesh_descriptor_set_layout = try mesh_desc_builder.build(
-        //         ctx,
-        //         .{ .vertex_bit = true, .fragment_bit = true },
-        //         .{},
-        //         &bind_flags,
-        //     );
-        //     self.vk_mesh_descriptor_set = try self.desc_allocator.allocate(
-        //         ctx,
-        //         self.vk_mesh_descriptor_set_layout,
-        //         null,
-        //     );
-        // }
+        { // Mesh
+            var mesh_desc_builder = try DescriptorLayoutBuilder.init(self.allocator);
+            defer mesh_desc_builder.deinit();
+            try mesh_desc_builder.addBinding(0, .uniform_buffer);
+            try mesh_desc_builder.addBinding(1, .combined_image_sampler);
+            mesh_desc_builder.bindings.items[1].descriptor_count = 4048;
+
+            const flags: [2]vk.DescriptorBindingFlags = .{
+                .{},
+                .{ .partially_bound_bit = true, .variable_descriptor_count_bit = true },
+            };
+            const bind_flags: vk.DescriptorSetLayoutBindingFlagsCreateInfo = .{
+                .binding_count = flags.len,
+                .p_binding_flags = @ptrCast(&flags),
+            };
+
+            self.vk_mesh_descriptor_set_layout = try mesh_desc_builder.build(
+                ctx,
+                .{ .vertex_bit = true, .fragment_bit = true },
+                .{},
+                &bind_flags,
+            );
+
+            // VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT requires a
+            // VkDescriptorSetVariableDescriptorCountAllocateInfo at allocate time;
+            // otherwise the effective count for the variable binding defaults to 0.
+            const variable_count: u32 = 4048;
+            const variable_count_info: vk.DescriptorSetVariableDescriptorCountAllocateInfo = .{
+                .descriptor_set_count = 1,
+                .p_descriptor_counts = @ptrCast(&variable_count),
+            };
+            self.vk_mesh_descriptor_set = try self.desc_allocator.allocate(
+                ctx,
+                self.vk_mesh_descriptor_set_layout,
+                @ptrCast(&variable_count_info),
+            );
+        }
         { // Material
             var material_builder = try DescriptorLayoutBuilder.init(self.allocator);
             defer material_builder.deinit();
@@ -291,7 +300,7 @@ const GlobalDescriptor = struct {
         if (self.is_initialised) {
             ctx.device.destroyDescriptorSetLayout(self.draw_image_descriptor_layout, null);
             ctx.device.destroyDescriptorSetLayout(self.scene_descriptor_layout, null);
-            // ctx.device.destroyDescriptorSetLayout(self.vk_mesh_descriptor_set_layout, null);
+            ctx.device.destroyDescriptorSetLayout(self.vk_mesh_descriptor_set_layout, null);
             ctx.device.destroyDescriptorSetLayout(self.vk_2d_descriptor_set_layout, null);
             // ctx.device.destroyDescriptorSetLayout(self.vk_2d_full_descriptor_set_layout, null);
             ctx.device.destroyDescriptorSetLayout(self.vk_material_descriptor_set_layout, null);
@@ -309,10 +318,13 @@ swapchain: Swapchain = undefined,
 
 batcher_buffer: Buffer = undefined,
 text_buffer: Buffer = undefined,
+material_buffer: Buffer = undefined,
 // uniform_buffer: Buffer = undefined,
 
 triangle_mesh: Mesh = undefined,
 quad_mesh: Mesh = undefined,
+selftest_mesh: Mesh = undefined,
+cube_mesh: Mesh = undefined,
 meshes: std.ArrayList(Mesh),
 
 // Global descriptors
@@ -378,10 +390,12 @@ pub fn deinit(self: *Renderer) void {
     // self.triangle_buffer.destroy(self.ctx);
     self.triangle_mesh.destroy(self.ctx);
     self.quad_mesh.destroy(self.ctx);
+    self.selftest_mesh.destroy(self.ctx);
+    self.cube_mesh.destroy(self.ctx);
     self.batcher_buffer.destroy(self.ctx);
     self.text_buffer.destroy(self.ctx);
     // self.uniform_buffer.destroy(self.ctx);
-    // self.material_buffer.destroy(self.ctx);
+    self.material_buffer.destroy(self.ctx);
     self.batcher.deinit();
 
     // self.framebuffer.destroy(self.ctx);
@@ -411,8 +425,31 @@ pub fn setup(self: *Renderer) !void {
     // self.uniform_buffer = try Buffer.create(self.ctx, @sizeOf(@TypeOf(self.uniforms.transform)), .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
     // try self.uniform_buffer.copyInto(self.ctx, &std.mem.toBytes(self.uniforms.transform), 0);
 
-    // self.material_buffer = try Buffer.create(self.ctx, 4, .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
-    // try self.material_buffer.copyInto(self.ctx, &Color.White.toBytes(), 0);
+    // Material UBO: must match the GLTFMaterialData layout in the COMPILED mesh.spv,
+    // which references material.data.colorTexID and metalRoughTexID even though those
+    // fields are currently commented out in include/scene.slang. Std140 alignment:
+    //   vec4 colorFactors  @ offset 0  (16 bytes)
+    //   int  colorTexID    @ offset 16 (4 bytes)
+    //   int  metalRoughTID @ offset 20 (4 bytes)
+    // Pad to next 16-byte boundary → 32 bytes total.
+    const MaterialData = extern struct {
+        color_factors: [4]f32 align(16) = .{ 1.0, 1.0, 1.0, 1.0 },
+        color_tex_id: i32 = 0,
+        metal_rough_tex_id: i32 = 0,
+        _pad: [2]i32 = .{ 0, 0 },
+    };
+    const material_data: MaterialData = .{};
+    self.material_buffer = try Buffer.create(self.ctx, @sizeOf(MaterialData), .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
+    try self.material_buffer.copyInto(self.ctx, std.mem.asBytes(&material_data), 0);
+    // Bind material_buffer into the global material descriptor (binding 0)
+    self.descriptor.writer.clear();
+    try self.descriptor.writer.writeBuffer(0, self.material_buffer, self.material_buffer.size, 0, .uniform_buffer);
+    self.descriptor.writer.updateSet(self.ctx, self.descriptor.vk_material_descriptor_set);
+    // Seed the bindless texture array at index 0 with the error_checker so any
+    // material.data.colorTexID == 0 sample returns something defined.
+    self.descriptor.writer.clear();
+    try self.descriptor.writer.writeImage(1, self.images.get(.error_checker), .shader_read_only_optimal, .combined_image_sampler);
+    self.descriptor.writer.updateSet(self.ctx, self.descriptor.vk_mesh_descriptor_set);
 
     self.batcher_buffer = try Buffer.create(self.ctx, self.batcher.getTransferBufferSizeInBytes(), .{ .vertex_buffer_bit = true, .transfer_dst_bit = true }, .{ .host_coherent_bit = true, .host_visible_bit = true });
 
@@ -424,12 +461,96 @@ pub fn setup(self: *Renderer) !void {
     try self.createTrianglePipeline();
     try self.create2DPipeline();
     try self.create2DBisPipeline();
-    // try self.createMeshPipeline();
+    try self.createMeshPipeline();
     try self.createComputePipeline();
 
     // try self.triangle_buffer.fastTransfer(self.ctx, &self.cmd_pool, &std.mem.toBytes(vertices));
 
     self.meshes = try self.asset_loader.loadMeshes(self.ctx, &self.getCurrentFrame().cmd_pool, "assets/meshes/basic.glb");
+
+    // [SELFTEST] Hardcoded big triangle in 3D at world z=0, with bright colors.
+    // Camera is at (0,0,5) looking toward -Z, so this triangle is 5 units away
+    // and ~2 units across — should fill a large central portion of the screen.
+    // If you see this red/green/blue triangle, the mesh pipeline is healthy.
+    {
+        const verts = [_]Data.Vertex{
+            .{ .pos = .{ -1.0, -1.0, 0.0 }, .uv_x = 0, .normal = .{ 0, 0, 1 }, .uv_y = 0, .col = .{ 1, 0, 0, 1 } },
+            .{ .pos = .{ 1.0, -1.0, 0.0 }, .uv_x = 1, .normal = .{ 0, 0, 1 }, .uv_y = 0, .col = .{ 0, 1, 0, 1 } },
+            .{ .pos = .{ 0.0, 1.0, 0.0 }, .uv_x = 0.5, .normal = .{ 0, 0, 1 }, .uv_y = 1, .col = .{ 0, 0, 1, 1 } },
+        };
+        const idxs = [_]Data.Indice{ 0, 1, 2 };
+        self.selftest_mesh = try Mesh.init(self.allocator);
+        self.selftest_mesh.name = "[SELFTEST] triangle";
+        try self.selftest_mesh.surfaces.append(self.allocator, .{ .start_index = 0, .count = idxs.len });
+        try self.selftest_mesh.uploadMesh(self.ctx, &self.getCurrentFrame().cmd_pool, &verts, &idxs);
+        std.debug.print("[SELFTEST-mesh] uploaded test triangle: vb=0x{x}, ib_count=3\n", .{self.selftest_mesh.buffers.vertex.?.address.?});
+    }
+
+    // Hand-built unit cube centered at origin (half-size = 0.5).
+    // 24 vertices = 4 per face so each face can carry its own color/normal.
+    // 36 indices = 6 per face (2 triangles). Winding is CCW from outside,
+    // but the mesh pipeline currently has culling disabled so winding is
+    // not load-bearing for visibility — it's just convention.
+    {
+        const h: f32 = 0.5;
+        // Face colors so each face is visually distinct.
+        const c_pz: [4]f32 = .{ 0.2, 0.4, 1.0, 1 }; // +Z front: blue
+        const c_nz: [4]f32 = .{ 1.0, 1.0, 0.2, 1 }; // -Z back:  yellow
+        const c_px: [4]f32 = .{ 1.0, 0.2, 0.2, 1 }; // +X right: red
+        const c_nx: [4]f32 = .{ 0.2, 1.0, 1.0, 1 }; // -X left:  cyan
+        const c_py: [4]f32 = .{ 0.2, 1.0, 0.2, 1 }; // +Y top:   green
+        const c_ny: [4]f32 = .{ 1.0, 0.2, 1.0, 1 }; // -Y bot:   magenta
+
+        const cube_verts = [_]Data.Vertex{
+            // +Z (front) — normal (0,0,1)
+            .{ .pos = .{ -h, -h,  h }, .uv_x = 0, .normal = .{ 0, 0, 1 }, .uv_y = 0, .col = c_pz },
+            .{ .pos = .{  h, -h,  h }, .uv_x = 1, .normal = .{ 0, 0, 1 }, .uv_y = 0, .col = c_pz },
+            .{ .pos = .{  h,  h,  h }, .uv_x = 1, .normal = .{ 0, 0, 1 }, .uv_y = 1, .col = c_pz },
+            .{ .pos = .{ -h,  h,  h }, .uv_x = 0, .normal = .{ 0, 0, 1 }, .uv_y = 1, .col = c_pz },
+            // -Z (back) — normal (0,0,-1)
+            .{ .pos = .{  h, -h, -h }, .uv_x = 0, .normal = .{ 0, 0, -1 }, .uv_y = 0, .col = c_nz },
+            .{ .pos = .{ -h, -h, -h }, .uv_x = 1, .normal = .{ 0, 0, -1 }, .uv_y = 0, .col = c_nz },
+            .{ .pos = .{ -h,  h, -h }, .uv_x = 1, .normal = .{ 0, 0, -1 }, .uv_y = 1, .col = c_nz },
+            .{ .pos = .{  h,  h, -h }, .uv_x = 0, .normal = .{ 0, 0, -1 }, .uv_y = 1, .col = c_nz },
+            // +X (right) — normal (1,0,0)
+            .{ .pos = .{  h, -h,  h }, .uv_x = 0, .normal = .{ 1, 0, 0 }, .uv_y = 0, .col = c_px },
+            .{ .pos = .{  h, -h, -h }, .uv_x = 1, .normal = .{ 1, 0, 0 }, .uv_y = 0, .col = c_px },
+            .{ .pos = .{  h,  h, -h }, .uv_x = 1, .normal = .{ 1, 0, 0 }, .uv_y = 1, .col = c_px },
+            .{ .pos = .{  h,  h,  h }, .uv_x = 0, .normal = .{ 1, 0, 0 }, .uv_y = 1, .col = c_px },
+            // -X (left) — normal (-1,0,0)
+            .{ .pos = .{ -h, -h, -h }, .uv_x = 0, .normal = .{ -1, 0, 0 }, .uv_y = 0, .col = c_nx },
+            .{ .pos = .{ -h, -h,  h }, .uv_x = 1, .normal = .{ -1, 0, 0 }, .uv_y = 0, .col = c_nx },
+            .{ .pos = .{ -h,  h,  h }, .uv_x = 1, .normal = .{ -1, 0, 0 }, .uv_y = 1, .col = c_nx },
+            .{ .pos = .{ -h,  h, -h }, .uv_x = 0, .normal = .{ -1, 0, 0 }, .uv_y = 1, .col = c_nx },
+            // +Y (top) — normal (0,1,0)
+            .{ .pos = .{ -h,  h,  h }, .uv_x = 0, .normal = .{ 0, 1, 0 }, .uv_y = 0, .col = c_py },
+            .{ .pos = .{  h,  h,  h }, .uv_x = 1, .normal = .{ 0, 1, 0 }, .uv_y = 0, .col = c_py },
+            .{ .pos = .{  h,  h, -h }, .uv_x = 1, .normal = .{ 0, 1, 0 }, .uv_y = 1, .col = c_py },
+            .{ .pos = .{ -h,  h, -h }, .uv_x = 0, .normal = .{ 0, 1, 0 }, .uv_y = 1, .col = c_py },
+            // -Y (bottom) — normal (0,-1,0)
+            .{ .pos = .{ -h, -h, -h }, .uv_x = 0, .normal = .{ 0, -1, 0 }, .uv_y = 0, .col = c_ny },
+            .{ .pos = .{  h, -h, -h }, .uv_x = 1, .normal = .{ 0, -1, 0 }, .uv_y = 0, .col = c_ny },
+            .{ .pos = .{  h, -h,  h }, .uv_x = 1, .normal = .{ 0, -1, 0 }, .uv_y = 1, .col = c_ny },
+            .{ .pos = .{ -h, -h,  h }, .uv_x = 0, .normal = .{ 0, -1, 0 }, .uv_y = 1, .col = c_ny },
+        };
+        const cube_idxs = [_]Data.Indice{
+            0,  1,  2,   0,  2,  3,   // +Z
+            4,  5,  6,   4,  6,  7,   // -Z
+            8,  9,  10,  8,  10, 11,  // +X
+            12, 13, 14,  12, 14, 15,  // -X
+            16, 17, 18,  16, 18, 19,  // +Y
+            20, 21, 22,  20, 22, 23,  // -Y
+        };
+        self.cube_mesh = try Mesh.init(self.allocator);
+        self.cube_mesh.name = "[manual] cube";
+        try self.cube_mesh.surfaces.append(self.allocator, .{ .start_index = 0, .count = cube_idxs.len });
+        try self.cube_mesh.uploadMesh(self.ctx, &self.getCurrentFrame().cmd_pool, &cube_verts, &cube_idxs);
+        std.debug.print("[cube] uploaded manual cube: vb=0x{x}, vertex_count={d}, index_count={d}\n", .{
+            self.cube_mesh.buffers.vertex.?.address.?,
+            cube_verts.len,
+            cube_idxs.len,
+        });
+    }
 }
 
 pub fn createTextures(self: *Renderer) !void {
@@ -539,10 +660,10 @@ fn fillCommandBuffers(self: *Renderer) !void {
 
     self.images.getPtr(.atlas).transitionToLayout(self.ctx, cmdbuf, .undefined, .shader_read_only_optimal);
     // self.draw_triangle(cmdbuf);
-    // self.draw_mesh(cmdbuf);
-
-    // self.draw_2d(cmdbuf);
-    try self.draw_2d_bis(cmdbuf);
+    // [SELFTEST] Temporarily disabled draw_2d_bis to isolate the mesh against
+    // the sky. If the mesh is visible, the 2D quad was over-drawing it.
+    // try self.draw_2d_bis(cmdbuf);
+    try self.draw_mesh(cmdbuf);
 
     draw_image.transitionToLayout(self.ctx, cmdbuf, .color_attachment_optimal, .transfer_src_optimal);
     Image.vkTransitionToLayout(self.swapchain.currentImage(), self.ctx, cmdbuf, .undefined, .transfer_dst_optimal);
@@ -691,8 +812,6 @@ pub fn draw_2d_bis(self: *Renderer, cmdbuf: vk.CommandBuffer) !void {
         .p_color_attachments = @ptrCast(&.{color_attachment}),
     };
 
-    // Draw quad
-    // const push_constant: Mesh.PushConstants2D = .{ .scale = .{ 1, 1 }, .translate = .{ 0, 0 }, .vb_address = self.quad_mesh.buffers.vertex.?.address.? };
     const push_constant: Mesh.PushConstants3D = .{ .render_matrix = current_frame.scene_data.view_proj, .vb_address = self.quad_mesh.buffers.vertex.?.address.? };
     self.ctx.device.cmdBindIndexBuffer(cmdbuf, self.quad_mesh.buffers.index.?.vk_buffer, 0, .uint16);
 
@@ -745,11 +864,19 @@ pub fn draw_2d_bis(self: *Renderer, cmdbuf: vk.CommandBuffer) !void {
     self.ctx.device.cmdDrawIndexed(cmdbuf, 6, 1, 0, 0, 0);
 }
 
-pub fn draw_mesh(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
+pub fn draw_mesh(self: *Renderer, cmdbuf: vk.CommandBuffer) !void {
     const current_frame = self.getCurrentFrame();
     const pipeline = self.pipelines.getPtr(.mesh);
 
     self.ctx.device.cmdBindPipeline(cmdbuf, .graphics, self.pipelines.get(.mesh).vk_pipeline);
+
+    // Refresh scene data UBO inside the global mesh descriptor set.
+    // The fence wait in fillCommandBuffers() guarantees the prior frame is done
+    // before we rewrite this set.
+    try current_frame.scene_data_buffer.copyInto(self.ctx, &std.mem.toBytes(current_frame.scene_data), 0);
+    self.descriptor.writer.clear();
+    try self.descriptor.writer.writeBuffer(0, current_frame.scene_data_buffer, current_frame.scene_data_buffer.size, 0, .uniform_buffer);
+    self.descriptor.writer.updateSet(self.ctx, self.descriptor.vk_mesh_descriptor_set);
 
     const color_attachment: vk.RenderingAttachmentInfo = .{
         .image_layout = .color_attachment_optimal,
@@ -785,55 +912,50 @@ pub fn draw_mesh(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
     // const push_constant: Mesh.PushConstants2D = .{ .scale = .{ 1, 1 }, .translate = .{ 0, 0 }, .vb_address = self.quad_mesh.buffers.vertex.?.address.? };
     // self.ctx.device.cmdBindIndexBuffer(cmdbuf, self.quad_mesh.buffers.index.?.vk_buffer, 0, .uint16);
 
-    // Draw Monkey
-    const push_constant: Mesh.PushConstants3D = .{ .render_matrix = current_frame.scene_data.view_proj, .vb_address = self.meshes.items[2].buffers.vertex.?.address.? };
-    self.ctx.device.cmdBindIndexBuffer(cmdbuf, self.meshes.items[2].buffers.index.?.vk_buffer, 0, .uint16);
+    // Draw two meshes side-by-side, both via the mesh pipeline.
+    //   left  : self.selftest_mesh (single triangle, control)
+    //   right : self.cube_mesh     (hand-built cube, under test)
+    // The hardcoded GLB self.meshes.items[2] (Suzanne) is bypassed for now —
+    // it triggers vulkan validation errors when drawn with the wrong index count.
+    const targets = [_]struct { mesh: *Mesh, m: zm.Mat }{
+        .{ .mesh = &self.selftest_mesh, .m = zm.Mat{
+            zm.f32x4(1, 0, 0, 0),
+            zm.f32x4(0, 1, 0, 0),
+            zm.f32x4(0, 0, 1, 0),
+            zm.f32x4(-2, 0, 0, 1),
+        } },
+        .{ .mesh = &self.cube_mesh, .m = zm.Mat{
+            zm.f32x4(1.5, 0, 0, 0),
+            zm.f32x4(0, 1.5, 0, 0),
+            zm.f32x4(0, 0, 1.5, 0),
+            zm.f32x4(2, 0, 0, 1),
+        } },
+    };
 
-    self.ctx.device.cmdPushConstants(cmdbuf, pipeline.layout, .{ .vertex_bit = true }, 0, @sizeOf(@TypeOf(push_constant)), @ptrCast(&push_constant));
+    // Bind descriptor sets once (same for all draws this frame).
+    self.ctx.device.cmdBindDescriptorSets(cmdbuf, .graphics, pipeline.layout, 0, 1, @ptrCast(&self.descriptor.vk_mesh_descriptor_set), 0, null);
+    self.ctx.device.cmdBindDescriptorSets(cmdbuf, .graphics, pipeline.layout, 1, 1, @ptrCast(&self.descriptor.vk_material_descriptor_set), 0, null);
 
-    // Set 0: scene data + bindless textures
-    self.ctx.device.cmdBindDescriptorSets(
-        cmdbuf,
-        .graphics,
-        pipeline.layout,
-        0,
-        1,
-        @ptrCast(&self.descriptor.vk_mesh_descriptor_set),
-        0,
-        null,
-    );
-    // Set 1: material data
-    self.ctx.device.cmdBindDescriptorSets(
-        cmdbuf,
-        .graphics,
-        pipeline.layout,
-        1,
-        1,
-        @ptrCast(&self.descriptor.vk_material_descriptor_set),
-        0,
-        null,
-    );
-    // self.ctx.device.cmdBindDescriptorSets(
-    //     cmdbuf,
-    //     .graphics,
-    //     pipeline.layout,
-    //     0,
-    //     2, // bind both sets at once
-    //     @ptrCast(&[2]vk.DescriptorSet{
-    //         self.descriptor.vk_mesh_descriptor_set, // set 0: scene + textures
-    //         self.descriptor.vk_material_descriptor_set, // set 1: material data
-    //     }),
-    //     0,
-    //     null,
-    // );
+    const dbg_once = struct {
+        var fired: bool = false;
+    };
+    for (targets, 0..) |t, i| {
+        const push_constant: Mesh.PushConstants3D = .{ .render_matrix = t.m, .vb_address = t.mesh.buffers.vertex.?.address.? };
+        self.ctx.device.cmdBindIndexBuffer(cmdbuf, t.mesh.buffers.index.?.vk_buffer, 0, .uint16);
+        self.ctx.device.cmdPushConstants(cmdbuf, pipeline.layout, .{ .vertex_bit = true }, 0, @sizeOf(@TypeOf(push_constant)), @ptrCast(&push_constant));
+        const surface = t.mesh.surfaces.items[0];
+        self.ctx.device.cmdDrawIndexed(cmdbuf, surface.count, 1, surface.start_index, 0, 0);
 
-    defer self.ctx.device.cmdEndRendering(cmdbuf);
+        if (!dbg_once.fired) {
+            std.debug.print("[DEBUG-draw {d}] mesh '{s}' vb=0x{x} ib_handle={any} count={d} start={d} m[3]={d:.2} {d:.2} {d:.2} {d:.2}\n", .{
+                i,         t.mesh.name, push_constant.vb_address, t.mesh.buffers.index.?.vk_buffer, surface.count, surface.start_index,
+                t.m[3][0], t.m[3][1],   t.m[3][2],                t.m[3][3],
+            });
+        }
+    }
+    dbg_once.fired = true;
 
-    // Draw quad
-    // self.ctx.device.cmdDrawIndexed(cmdbuf, 6, 1, 0, 0, 0);
-
-    // Draw Monkey
-    self.ctx.device.cmdDrawIndexed(cmdbuf, self.meshes.items[2].surfaces.items[0].count, 1, self.meshes.items[2].surfaces.items[0].start_index, 0, 0);
+    self.ctx.device.cmdEndRendering(cmdbuf);
 }
 
 pub fn draw_background(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
@@ -1059,7 +1181,11 @@ fn createMeshPipeline(self: *Renderer) !void {
     try pipeline_builder.setShaders(&vert, &frag);
     pipeline_builder.setInputTopology(.triangle_list);
     pipeline_builder.setPolygonMode(.fill);
-    pipeline_builder.setCullMode(.{}, .clockwise);
+    // [SELFTEST] explicitly force NO culling, and try counter-clockwise as the
+    // "front face" — matches GLTF convention. This rules out winding/cull as
+    // the cause of Suzanne invisibility.
+    pipeline_builder.setCullMode(vk.CullModeFlags{}, .counter_clockwise);
+    std.debug.print("[SELFTEST-pipeline] mesh pipeline cull_mode = {f} front_face = {}\n", .{ pipeline_builder.rasterizer.cull_mode, pipeline_builder.rasterizer.front_face });
     pipeline_builder.setMultisamplingNone();
     pipeline_builder.disableBlending();
     pipeline_builder.disableDepthTest();
@@ -1069,8 +1195,8 @@ fn createMeshPipeline(self: *Renderer) !void {
     const push_constant_range: vk.PushConstantRange = .{ .offset = 0, .size = @sizeOf(Mesh.PushConstants3D), .stage_flags = .{ .vertex_bit = true } };
 
     const set_layouts = [_]vk.DescriptorSetLayout{
-        // self.descriptor.vk_mesh_descriptor_set_layout, // set 0
-        self.descriptor.vk_material_descriptor_set_layout, // set 1
+        self.descriptor.vk_mesh_descriptor_set_layout, // set 0: scene UBO + bindless textures
+        self.descriptor.vk_material_descriptor_set_layout, // set 1: material UBO
     };
 
     pipeline_builder.pipeline_layout = try self.ctx.device.createPipelineLayout(&.{
