@@ -7,9 +7,7 @@ const Ecs = @import("ecs/ecs.zig");
 const Prefab = @import("ecs/prefabs/prefab.zig");
 const OrderbookSystem = @import("ecs/systems/orderbook_system.zig");
 const MetricSystem = @import("ecs/systems/metric_system.zig");
-const CameraSystem = @import("ecs/systems/camera_system.zig");
 const GraphicsContext = @import("../core/graphics_context.zig");
-const Event = @import("../events/event.zig");
 
 const zcs = @import("zcs");
 
@@ -22,8 +20,6 @@ market_manager: *MarketManager,
 scene_manager: *SceneManager,
 entities: zcs.Entities,
 cmd_buf: zcs.CmdBuf,
-
-camera_system: CameraSystem = undefined,
 
 pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, market_manager: *MarketManager, scene_manager: *SceneManager) !EcsManager {
     var es = try zcs.Entities.init(.{ .gpa = allocator });
@@ -48,7 +44,6 @@ pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, market_manager
 pub fn deinit(self: *EcsManager) void {
     self.cmd_buf.deinit(self.allocator, &self.entities);
     self.entities.deinit(self.allocator);
-    self.camera_system.deinit();
 }
 
 pub fn setup(self: *EcsManager) !void {
@@ -58,16 +53,10 @@ pub fn setup(self: *EcsManager) !void {
     self.create_single_component_entity(Ecs.components.MarketData, .{});
 
     self.flush_cmd_buf();
-
-    // Register Systems
-    self.camera_system = CameraSystem.init(self);
-    self.camera_system.setup();
 }
 
 pub fn progress(self: *EcsManager) void {
     self.entities.forEach("system_update_env_info", MetricSystem.system_update_env_info, .{});
-
-    self.camera_system.update();
 
     self.entities.forEach("system_place_order", OrderbookSystem.system_place_order, .{
         .cb = &self.cmd_buf,
@@ -89,26 +78,9 @@ pub fn get_singleton(self: *EcsManager, comptime T: type) *T {
     unreachable;
 }
 
-pub fn handleEvent(self: *EcsManager, ev: Event) void {
-    self.camera_system.process(ev);
-}
-
 pub fn create_single_component_entity(self: *EcsManager, comptime C: type, value: C) void {
     const entity: Ecs.Entity = .reserve(&self.cmd_buf);
     _ = entity.add(&self.cmd_buf, C, value);
-}
-
-pub fn createEntity(self: *EcsManager) Ecs.Entity {
-    return Ecs.Entity.reserve(&self.cmd_buf);
-}
-
-pub fn addComponent(self: *EcsManager, entity: Ecs.Entity, comptime Component: type, value: Component) void {
-    _ = entity.add(&self.cmd_buf, Component, value);
-}
-
-pub fn getDeltaTime(self: *EcsManager) u64 {
-    const env = self.get_singleton(Ecs.components.EnvironmentInfo);
-    return env.dt;
 }
 
 pub fn flush_cmd_buf(self: *EcsManager) void {

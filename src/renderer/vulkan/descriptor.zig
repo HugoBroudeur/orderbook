@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.descriptor);
 const vk = @import("vulkan");
 
 const Buffer = @import("buffer.zig");
@@ -8,7 +9,7 @@ const GraphicsContext = @import("../../core/graphics_context.zig");
 
 const Descriptor = @This();
 
-pub const Allocator = struct {
+pub const DescriptorAllocator = struct {
     pub const MAX_SETS_PER_POOL = 4092;
 
     pub const PoolSizeRatio = struct {
@@ -16,23 +17,23 @@ pub const Allocator = struct {
         ratio: f32,
     };
 
-    allocator: std.mem.Allocator,
+    arena: std.heap.ArenaAllocator,
 
     ratios: std.ArrayList(PoolSizeRatio),
     full_pools: std.ArrayList(vk.DescriptorPool),
     ready_pools: std.ArrayList(vk.DescriptorPool),
     sets_per_pool: u32,
 
-    pub fn init(allocator: std.mem.Allocator, ctx: *const GraphicsContext, max_sets: u32, pool_ratios: []const PoolSizeRatio) !Allocator {
-        var desc_alloc: Allocator = .{
-            .allocator = allocator,
+    pub fn init(allocator: std.mem.Allocator, ctx: *const GraphicsContext, max_sets: u32, pool_ratios: []const PoolSizeRatio) !DescriptorAllocator {
+        var desc_alloc: DescriptorAllocator = .{
+            .arena = std.heap.ArenaAllocator.init(allocator),
             .sets_per_pool = max_sets,
             .ratios = try .initCapacity(allocator, pool_ratios.len),
             .full_pools = try .initCapacity(allocator, 0),
             .ready_pools = try .initCapacity(allocator, 1),
         };
 
-        desc_alloc.ready_pools.appendAssumeCapacity(try desc_alloc.createPool(ctx, max_sets, pool_ratios));
+        desc_alloc.ready_pools.appendAssumeCapacity(createPool(allocator, ctx, max_sets, pool_ratios).?);
         for (pool_ratios) |ratio| {
             desc_alloc.ratios.appendAssumeCapacity(ratio);
         }
@@ -41,39 +42,13 @@ pub const Allocator = struct {
         return desc_alloc;
     }
 
-    pub fn createPool(
-        self: *Allocator,
-        ctx: *const GraphicsContext,
-        set_count: u32,
-        ratios: []const PoolSizeRatio,
-    ) !vk.DescriptorPool {
-        var pool_sizes = try std.ArrayList(vk.DescriptorPoolSize).initCapacity(self.allocator, ratios.len);
-        defer pool_sizes.deinit(self.allocator);
-
-        for (ratios) |ratio| {
-            pool_sizes.appendAssumeCapacity(.{
-                .type = ratio.vk_type,
-                .descriptor_count = @as(u32, @intFromFloat(ratio.ratio)) * set_count,
-            });
-        }
-
-        const dpci: vk.DescriptorPoolCreateInfo = .{
-            .flags = .{},
-            .max_sets = set_count,
-            .pool_size_count = @intCast(pool_sizes.items.len),
-            .p_pool_sizes = @ptrCast(pool_sizes.items),
-        };
-
-        return try ctx.device.createDescriptorPool(&dpci, null);
-    }
-
-    pub fn getPool(self: *Allocator, ctx: *const GraphicsContext) !vk.DescriptorPool {
+    pub fn getPool(self: *DescriptorAllocator, ctx: *const GraphicsContext) !vk.DescriptorPool {
         var new_pool: vk.DescriptorPool = undefined;
 
         if (self.ready_pools.items.len > 0) {
             new_pool = self.ready_pools.pop().?;
         } else {
-            new_pool = try self.createPool(ctx, self.sets_per_pool, self.ratios.items);
+            new_pool = createPool(self.arena.child_allocator, ctx, self.sets_per_pool, self.ratios.items).?;
 
             self.sets_per_pool = self.sets_per_pool * 3 / 2;
             if (self.sets_per_pool > MAX_SETS_PER_POOL) {
@@ -84,8 +59,9 @@ pub const Allocator = struct {
         return new_pool;
     }
 
+    // Allocate a Descriptor Set in the provided Layout
     pub fn allocate(
-        self: *Allocator,
+        self: *DescriptorAllocator,
         ctx: *const GraphicsContext,
         layout: vk.DescriptorSetLayout,
         p_next: ?*const anyopaque,
@@ -102,21 +78,21 @@ pub const Allocator = struct {
         var ds: vk.DescriptorSet = undefined;
         ctx.device.allocateDescriptorSets(&alloc_info, @ptrCast(&ds)) catch {
             // Allocation failed, try again
-            try self.full_pools.append(self.allocator, pool);
+            try self.full_pools.append(self.arena.child_allocator, pool);
             pool = try self.getPool(ctx);
             alloc_info.descriptor_pool = pool;
             try ctx.device.allocateDescriptorSets(&alloc_info, @ptrCast(&ds));
         };
 
-        try self.ready_pools.append(self.allocator, pool);
+        try self.ready_pools.append(self.arena.child_allocator, pool);
         return ds;
     }
 
-    pub fn clearPools(self: *Allocator, ctx: *const GraphicsContext) !void {
+    pub fn clear(self: *DescriptorAllocator, ctx: *const GraphicsContext) !void {
         for (self.ready_pools.items) |pool| {
             try ctx.device.resetDescriptorPool(pool, .{});
         }
-        try self.ready_pools.ensureTotalCapacity(self.allocator, self.ready_pools.items.len + self.full_pools.items.len);
+        try self.ready_pools.ensureTotalCapacity(self.arena.child_allocator, self.ready_pools.items.len + self.full_pools.items.len);
         for (self.full_pools.items) |pool| {
             try ctx.device.resetDescriptorPool(pool, .{});
             self.ready_pools.appendAssumeCapacity(pool);
@@ -124,15 +100,15 @@ pub const Allocator = struct {
         self.full_pools.clearRetainingCapacity();
     }
 
-    pub fn destroyPools(self: *Allocator, ctx: *const GraphicsContext) void {
+    pub fn destroy(self: *DescriptorAllocator, ctx: *const GraphicsContext) void {
         for (self.ready_pools.items) |pool| {
             ctx.device.destroyDescriptorPool(pool, null);
         }
-        self.ready_pools.deinit(self.allocator);
+        self.ready_pools.deinit(self.arena.child_allocator);
         for (self.full_pools.items) |pool| {
             ctx.device.destroyDescriptorPool(pool, null);
         }
-        self.full_pools.deinit(self.allocator);
+        self.full_pools.deinit(self.arena.child_allocator);
     }
 };
 
@@ -282,3 +258,37 @@ pub const DescriptorWriter = struct {
         );
     }
 };
+
+pub fn createPool(
+    allocator: std.mem.Allocator,
+    ctx: *const GraphicsContext,
+    set_count: u32,
+    ratios: []const DescriptorAllocator.PoolSizeRatio,
+) ?vk.DescriptorPool {
+    var pool_sizes = std.ArrayList(vk.DescriptorPoolSize).initCapacity(allocator, ratios.len) catch {
+        std.log.err("Failed to allocate memory for pool sizes ! Out of memory !", .{});
+        @panic("Out of memory");
+    };
+    defer pool_sizes.deinit(allocator);
+
+    for (ratios) |ratio| {
+        pool_sizes.appendAssumeCapacity(.{
+            .type = ratio.vk_type,
+            .descriptor_count = @as(u32, @intFromFloat(ratio.ratio)) * set_count,
+        });
+    }
+
+    const dpci: vk.DescriptorPoolCreateInfo = .{
+        .flags = .{},
+        .max_sets = set_count,
+        .pool_size_count = @intCast(pool_sizes.items.len),
+        .p_pool_sizes = @ptrCast(pool_sizes.items),
+    };
+
+    const pool = ctx.device.createDescriptorPool(&dpci, null) catch |err| {
+        log.warn("Failed to create descriptor pool. Reason {}", .{err});
+        return null;
+    };
+
+    return pool;
+}

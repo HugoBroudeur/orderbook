@@ -2,6 +2,7 @@ const std = @import("std");
 const Camera = @import("../renderer/camera.zig");
 const Commands = @import("../renderer/command.zig");
 const SceneData = @import("../renderer/command.zig").SceneData;
+const UniformData = @import("../renderer/command.zig").UniformData;
 const EcsManager = @import("ecs_manager.zig");
 const Ecs = @import("ecs/ecs.zig");
 const zm = @import("zmath");
@@ -14,7 +15,7 @@ pub const Scene = struct {
     name: []const u8,
 };
 
-camera: Camera.Camera(.orthographic),
+camera: Camera.PerspectiveCamera,
 current_scene: Scene,
 draw_queue: *Commands.DrawQueue,
 
@@ -39,10 +40,9 @@ pub fn deinit(self: *SceneManager) void {
 
 pub fn render(self: *SceneManager, ecs_manager: *const EcsManager, ctx: *const GraphicsContext) void {
     Ecs.logger.info("[SceneManager.render] Camera: {s}", .{self.camera.name});
-    _ = ecs_manager;
     // const draw_data = ecs_manager.get_singleton(Ecs.components.Graphics.DrawData);
 
-    self.beginScene(ctx);
+    self.beginScene(ctx, ecs_manager);
 
     // Draw the Imgui UI
     // self.draw_queue.push(.{ .imgui = .{ .data = draw_data.ui } });
@@ -81,7 +81,7 @@ pub fn render(self: *SceneManager, ecs_manager: *const EcsManager, ctx: *const G
     self.endScene();
 }
 
-pub fn beginScene(self: *SceneManager, ctx: *const GraphicsContext) void {
+pub fn beginScene(self: *SceneManager, ctx: *const GraphicsContext, ecs_manager: *const EcsManager) void {
     // _ = self;
     // std.log.debug("[Renderer2D.beginScene] Camera: {s}", .{self.camera.name});
 
@@ -89,30 +89,68 @@ pub fn beginScene(self: *SceneManager, ctx: *const GraphicsContext) void {
     // self.data.texture_shader.setMat4('u_viewProjection', camera.GetViewProjectionMatrix());
     // self.data.batcher.begin();
 
-    const width: usize = ctx.window.getWidth();
-    const heigth: usize = ctx.window.getHeight();
-    const fov: f32 = 70;
-    const near: f32 = 0.1;
-    const far: f32 = 10000;
+    var iter = ecs_manager.entities.iterator(struct {
+        camera: *Camera.PerspectiveCamera,
+    });
 
-    var scene_data: SceneData = .{};
+    while (iter.next(&ecs_manager.entities)) |vw| {
+        const camera = vw.camera;
 
-    scene_data.view = zm.translation(0, 0, -5);
+        const width: usize = ctx.window.getWidth();
+        const heigth: usize = ctx.window.getHeight();
 
-    scene_data.proj = zm.perspectiveFovRh(zm.modAngle(fov), @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(heigth)), near, far);
+        camera.setViewport(.{
+            .x = 0,
+            .y = 0,
+            .width = @intCast(width),
+            .heigth = @intCast(heigth),
+        });
 
-    // invert the Y direction on projection matrix so that we are more similar
-    // to opengl and gltf axis
-    scene_data.proj[1][1] *= -1;
+        var scene_data: SceneData = .{};
 
-    scene_data.view_proj = zm.mul(scene_data.view, scene_data.proj);
+        // scene_data.view = zm.translation(0, 0, -5);
+        scene_data.view = camera.getViewMatrix();
 
-    // Send Camera
-    self.draw_queue.setSceneData(scene_data);
+        scene_data.proj = camera.getProjectionMatrix();
+        // invert the Y direction on projection matrix so that we are more similar
+        // to opengl and gltf axis
+        scene_data.proj[1][1] *= -1;
+
+        // scene_data.view_proj = zm.mul(scene_data.view, scene_data.proj);
+        scene_data.view_proj = camera.getViewProjMatrix();
+        // Send Camera
+        self.draw_queue.setSceneData(scene_data);
+        break;
+    }
 }
 
 pub fn endScene(self: *SceneManager) void {
     //TODO
     // std.log.debug("[Renderer2D.endScene]", .{});
     self.draw_queue.submit();
+}
+
+pub fn initUniform() UniformData {
+    // const width: usize = self.ctx.window.getWidth();
+    // const heigth: usize = self.ctx.window.getHeight();
+    const width: usize = 1080;
+    const heigth: usize = 800;
+    const fov: f32 = 40;
+    const near: f32 = 0.0001;
+    const far: f32 = 1000;
+
+    return .{
+        .transform = .{
+            .scale = .{ 0.5, 0.5 },
+            .translate = .{ 0, 0 },
+        },
+        .mvp = .{
+            .proj_matrix = zm.perspectiveFovRh(zm.modAngle(fov), @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(heigth)), near, far),
+            // .proj_matrix = zm.identity(),
+            .view_matrix = zm.identity(),
+        },
+        .time = .{
+            .time = 0,
+        },
+    };
 }

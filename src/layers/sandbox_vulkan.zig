@@ -162,4 +162,6 @@ pub fn onEvent(self: *SandboxLayer, ev: Event) void {
         },
         else => {},
     }
+
+    self.ecs_manager.handleEvent(ev);
 }

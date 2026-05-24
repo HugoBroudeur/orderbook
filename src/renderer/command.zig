@@ -29,8 +29,9 @@ pub const SceneData = struct {
     proj: zm.Mat = zm.identity(),
     view_proj: zm.Mat = zm.identity(),
     ambient_color: Color = Color.White,
-    sunlight_direction: @Vector(4, f32) = .{ 0, 0, 0, 1 }, // w for sun power
+    sunlight_direction: @Vector(4, f32) = .{ 1, 1, 1, 1 }, // w for sun power
     sunlight_color: Color = Color.White,
+    time: f32 align(4) = 0,
 };
 
 pub const QuadImgCmd = struct {

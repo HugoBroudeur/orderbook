@@ -34,6 +34,18 @@ pub const GameObject = struct {
     is_visible: bool = false,
 };
 
+pub const Velocity = struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+};
+pub const Rotation = struct {
+    /// Pitch = Vertical Rotation
+    pitch: f32 = 0,
+    /// Yaw = Horizontal Rotation
+    yaw: f32 = 0,
+};
+
 pub const Event = @import("events.zig");
 
 pub const TickRate = struct {

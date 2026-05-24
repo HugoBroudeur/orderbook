@@ -27,7 +27,7 @@
         //     .hash = "zflecs-0.2.0-dev-1PN3ym9mOgCyE8w0DdK_Uf7FAob-nm0Dp_lZKR3QyJaC",
         // },
         .zcs = .{
-            .url = "git+https://github.com/Games-by-Mason/ZCS#1b7ab86df0a21342ccd2bc2b05e1eb0c52507569",
+            .url = "git+https://codeberg.org/Games-by-Mason/mr_ecs.git?ref=v0.1.1#1b7ab86df0a21342ccd2bc2b05e1eb0c52507569",
             .hash = "zcs-0.1.1-WhLQ_EVeAwAvYUhbrAM5iqkZ4WLsjRqbANW6vkLao_tf",
         },
         .sqlite = .{

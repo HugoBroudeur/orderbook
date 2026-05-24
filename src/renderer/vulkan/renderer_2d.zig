@@ -22,7 +22,9 @@ const Camera = @import("../camera.zig");
 const Command = @import("../command.zig");
 const CommandPool = @import("command_pool.zig");
 const Data = @import("../data.zig");
-const Descriptor = @import("descriptor.zig");
+const DescriptorAllocator = @import("descriptor.zig").DescriptorAllocator;
+const DescriptorWriter = @import("descriptor.zig").DescriptorWriter;
+const DescriptorLayoutBuilder = @import("descriptor.zig").LayoutBuilder;
 const Framebuffer = @import("framebuffer.zig");
 const GraphicsContext = @import("../../core/graphics_context.zig");
 const Image = @import("image.zig");
@@ -43,23 +45,9 @@ pub const DrawPassType = enum { demo, ui, shadow, ssao, sky, solid, raycast, tra
 pub const TransferBufferType = enum { atlas_buffer_data, atlas_texture_data };
 pub const ImageType = enum { atlas, black, white, grey, error_checker };
 pub const SamplerType = enum { nearest, linear };
-pub const PipelineType = enum { triangle, compute, mesh, _2d };
+pub const PipelineType = enum { triangle, compute, mesh, _2d, _2d_bis };
 
 pub const FRAME_OVERLAP = 2;
-
-const Uniforms = struct {
-    transform: struct {
-        scale: @Vector(2, f32),
-        translate: @Vector(2, f32),
-    },
-    mvp: struct {
-        proj_matrix: zm.Mat,
-        view_matrix: zm.Mat,
-    },
-    time: struct {
-        time: f32,
-    },
-};
 
 const FrameData = struct {
     clear_color: vk.ClearValue = .{ .color = .{ .float_32 = .{ 0, 0, 0, 1 } } },
@@ -72,21 +60,26 @@ const FrameData = struct {
     cmd_pool: CommandPool = undefined,
     cmd_buf: vk.CommandBuffer = undefined,
 
-    desc_allocator: Descriptor.Allocator = undefined,
+    desc_allocator: DescriptorAllocator = undefined,
 
     scene_data: SceneData = .{},
+    scene_data_buffer: Buffer = undefined,
 
     pub fn setup(self: *FrameData, ctx: *const GraphicsContext, allocator: std.mem.Allocator) !void {
         self.cmd_pool = try CommandPool.create(ctx);
         try self.createCommandBuffer(ctx);
 
-        const frame_sizes = &[_]Descriptor.Allocator.PoolSizeRatio{
+        const frame_sizes = &[_]DescriptorAllocator.PoolSizeRatio{
             .{ .vk_type = .storage_image, .ratio = 3 },
             .{ .vk_type = .storage_buffer, .ratio = 3 },
             .{ .vk_type = .uniform_buffer, .ratio = 3 },
             .{ .vk_type = .combined_image_sampler, .ratio = 4 },
         };
-        self.desc_allocator = try Descriptor.Allocator.init(allocator, ctx, 1000, frame_sizes);
+        self.desc_allocator = try DescriptorAllocator.init(allocator, ctx, 1000, frame_sizes);
+
+        self.scene_data_buffer = try Buffer.create(ctx, @sizeOf(SceneData), .{
+            .uniform_buffer_bit = true,
+        }, .{ .host_visible_bit = true, .device_local_bit = true });
     }
 
     pub fn createCommandBuffer(self: *FrameData, ctx: *const GraphicsContext) !void {
@@ -120,7 +113,8 @@ const FrameData = struct {
 
     pub fn destroy(self: *FrameData, ctx: *const GraphicsContext) void {
         self.cmd_pool.destroy(ctx);
-        self.desc_allocator.destroyPools(ctx);
+        self.desc_allocator.destroy(ctx);
+        self.scene_data_buffer.destroy(ctx);
     }
 };
 
@@ -129,95 +123,179 @@ const GlobalDescriptor = struct {
     // Create a descriptor pool that will hold 10 sets with 1 image each
     const MAX_SETS = 10;
 
-    desc_allocator: Descriptor.Allocator,
-
-    writer: Descriptor.DescriptorWriter,
+    allocator: std.mem.Allocator,
+    desc_allocator: DescriptorAllocator,
+    writer: DescriptorWriter,
+    is_initialised: bool = false,
 
     // Used in the Compute Shader
-    vk_compute_descriptor_set: vk.DescriptorSet,
-    vk_compute_descriptor_set_layout: vk.DescriptorSetLayout,
+    draw_image_descriptor: vk.DescriptorSet = undefined,
+    draw_image_descriptor_layout: vk.DescriptorSetLayout = undefined,
+
+    // Global Scene
+    scene_descriptor_layout: vk.DescriptorSetLayout = undefined,
 
     // Used in the Mesh Shader
-    vk_mesh_descriptor_set: vk.DescriptorSet,
-    vk_mesh_descriptor_set_layout: vk.DescriptorSetLayout,
-    vk_material_descriptor_set: vk.DescriptorSet,
-    vk_material_descriptor_set_layout: vk.DescriptorSetLayout,
+    // vk_mesh_descriptor_set: vk.DescriptorSet = undefined,
+    // vk_mesh_descriptor_set_layout: vk.DescriptorSetLayout = undefined,
+    vk_material_descriptor_set: vk.DescriptorSet = undefined,
+    vk_material_descriptor_set_layout: vk.DescriptorSetLayout = undefined,
 
     // Used in the 2D Shader
-    vk_2d_descriptor_set: vk.DescriptorSet,
-    vk_2d_descriptor_set_layout: vk.DescriptorSetLayout,
+    vk_2d_descriptor_set: vk.DescriptorSet = undefined,
+    vk_2d_descriptor_set_layout: vk.DescriptorSetLayout = undefined,
 
-    pub fn create(allocator: std.mem.Allocator, ctx: *const GraphicsContext) !GlobalDescriptor {
-        var global_descriptor: GlobalDescriptor = undefined;
+    // Used in the 2D Shader
+    vk_2d_full_descriptor_set: vk.DescriptorSet = undefined,
+    vk_2d_full_descriptor_set_layout: vk.DescriptorSetLayout = undefined,
 
-        var ratio = [_]Descriptor.Allocator.PoolSizeRatio{
+    pub fn init(allocator: std.mem.Allocator, ctx: *const GraphicsContext) !GlobalDescriptor {
+        var ratio = [_]DescriptorAllocator.PoolSizeRatio{
             .{ .vk_type = .storage_image, .ratio = 3 },
-            .{ .vk_type = .uniform_buffer, .ratio = 3 },
+            .{ .vk_type = .uniform_buffer, .ratio = 4 },
             // .{ .vk_type = .sampled_image, .ratio = 1 },
             .{ .vk_type = .combined_image_sampler, .ratio = 4096 },
             // .{ .vk_type = .sampler, .ratio = 1 },
         };
+        return .{
+            .allocator = allocator,
+            .desc_allocator = try DescriptorAllocator.init(allocator, ctx, MAX_SETS, &ratio),
+            .writer = try .init(allocator),
+        };
+    }
 
-        global_descriptor.desc_allocator = try Descriptor.Allocator.init(allocator, ctx, MAX_SETS, &ratio);
-
-        global_descriptor.writer = try .init(allocator);
-
-        {
-            var builder: Descriptor.LayoutBuilder = try .init(allocator);
+    pub fn setup(self: *GlobalDescriptor, ctx: *const GraphicsContext, compute_img: Image, atlas_img: Image, checker_img: Image) !void {
+        { // Compute image
+            var builder: DescriptorLayoutBuilder = try .init(self.allocator);
             defer builder.deinit();
 
             try builder.addBinding(0, .storage_image);
 
-            global_descriptor.vk_compute_descriptor_set_layout = try builder.build(ctx, .{ .compute_bit = true }, .{}, null);
-            global_descriptor.vk_compute_descriptor_set = try global_descriptor.desc_allocator.allocate(ctx, global_descriptor.vk_compute_descriptor_set_layout, null);
-        }
-        { // Mesh
-            var mesh_desc_builder = try Descriptor.LayoutBuilder.init(allocator);
-            defer mesh_desc_builder.deinit();
-            try mesh_desc_builder.addBinding(0, .uniform_buffer);
-            try mesh_desc_builder.addBinding(1, .combined_image_sampler);
-            mesh_desc_builder.bindings.items[1].descriptor_count = 4048;
+            self.draw_image_descriptor_layout = try builder.build(ctx, .{ .compute_bit = true }, .{}, null);
+            self.draw_image_descriptor = try self.desc_allocator.allocate(ctx, self.draw_image_descriptor_layout, null);
 
-            const flags: [2]vk.DescriptorBindingFlags = .{
-                .{ .partially_bound_bit = true },
-                .{ .variable_descriptor_count_bit = true },
+            self.writer.clear();
+            try self.writer.writeImage(0, compute_img, .general, .storage_image);
+            self.writer.updateSet(ctx, self.draw_image_descriptor);
+        }
+        { // Scene data
+            var scene_desc_builder = try DescriptorLayoutBuilder.init(self.allocator);
+            defer scene_desc_builder.deinit();
+            try scene_desc_builder.addBinding(0, .uniform_buffer);
+            // try scene_desc_builder.addBinding(1, .combined_image_sampler);
+            // scene_desc_builder.bindings.items[1].descriptor_count = 3048;
+
+            const flags: [1]vk.DescriptorBindingFlags = .{
+                .{},
+                // .{ .partially_bound_bit = true, .variable_descriptor_count_bit = true },
             };
             const bind_flags: vk.DescriptorSetLayoutBindingFlagsCreateInfo = .{
                 .binding_count = flags.len,
                 .p_binding_flags = @ptrCast(&flags),
             };
 
-            global_descriptor.vk_mesh_descriptor_set_layout = try mesh_desc_builder.build(ctx, .{ .vertex_bit = true, .fragment_bit = true }, .{}, &bind_flags);
-            global_descriptor.vk_mesh_descriptor_set = try global_descriptor.desc_allocator.allocate(ctx, global_descriptor.vk_mesh_descriptor_set_layout, null);
+            self.scene_descriptor_layout = try scene_desc_builder.build(
+                ctx,
+                .{ .vertex_bit = true, .fragment_bit = true },
+                .{},
+                @ptrCast(&bind_flags),
+            );
+
+            // self.writer.clear();
+            // // try self.writer.writeImage(0, compute_img, .general, .storage_image);
+            // try self.writer.writeBuffer(0, , .general, .storage_image);
+            // self.writer.updateSet(ctx, self.scene_descriptor);
         }
+        // { // Mesh
+        //     var mesh_desc_builder = try Descriptor.LayoutBuilder.init(self.allocator);
+        //     defer mesh_desc_builder.deinit();
+        //     try mesh_desc_builder.addBinding(0, .uniform_buffer);
+        //     try mesh_desc_builder.addBinding(1, .combined_image_sampler);
+        //     mesh_desc_builder.bindings.items[1].descriptor_count = 4048;
+        //
+        //     const flags: [2]vk.DescriptorBindingFlags = .{
+        //         .{},
+        //         .{ .partially_bound_bit = true, .variable_descriptor_count_bit = true },
+        //     };
+        //     const bind_flags: vk.DescriptorSetLayoutBindingFlagsCreateInfo = .{
+        //         .binding_count = flags.len,
+        //         .p_binding_flags = @ptrCast(&flags),
+        //     };
+        //
+        //     self.vk_mesh_descriptor_set_layout = try mesh_desc_builder.build(
+        //         ctx,
+        //         .{ .vertex_bit = true, .fragment_bit = true },
+        //         .{},
+        //         &bind_flags,
+        //     );
+        //     self.vk_mesh_descriptor_set = try self.desc_allocator.allocate(
+        //         ctx,
+        //         self.vk_mesh_descriptor_set_layout,
+        //         null,
+        //     );
+        // }
         { // Material
-            var material_builder = try Descriptor.LayoutBuilder.init(allocator);
+            var material_builder = try DescriptorLayoutBuilder.init(self.allocator);
             defer material_builder.deinit();
             try material_builder.addBinding(0, .uniform_buffer); // material.data
-            global_descriptor.vk_material_descriptor_set_layout = try material_builder.build(
+            self.vk_material_descriptor_set_layout = try material_builder.build(
                 ctx,
                 .{ .fragment_bit = true },
                 .{},
                 null,
             );
-            global_descriptor.vk_material_descriptor_set = try global_descriptor.desc_allocator.allocate(ctx, global_descriptor.vk_material_descriptor_set_layout, null);
+            self.vk_material_descriptor_set = try self.desc_allocator.allocate(ctx, self.vk_material_descriptor_set_layout, null);
+            // {
+            //     var writer = try Descriptor.DescriptorWriter.init(self.allocator);
+            //     defer writer.deinit();
+
+            // { // Material Data
+            //     writer.clear();
+            //     try writer.writeBuffer(0, self.material_buffer, self.material_buffer.size, 0, .uniform_buffer);
+            //     // writer.updateSet(self.ctx, self.descriptor.vk_mesh_descriptor_set);
+            //     writer.updateSet(self.ctx, self.descriptor.vk_material_descriptor_set);
+            //     // }
+            // }
         }
-        {
-            var _2d_desc_builder = try Descriptor.LayoutBuilder.init(allocator);
+        { // 2D images (atlas)
+            var _2d_desc_builder = try DescriptorLayoutBuilder.init(self.allocator);
             defer _2d_desc_builder.deinit();
             try _2d_desc_builder.addBinding(0, .combined_image_sampler);
             try _2d_desc_builder.addBinding(1, .combined_image_sampler);
-            global_descriptor.vk_2d_descriptor_set_layout = try _2d_desc_builder.build(ctx, .{ .fragment_bit = true }, .{}, null);
-            global_descriptor.vk_2d_descriptor_set = try global_descriptor.desc_allocator.allocate(ctx, global_descriptor.vk_2d_descriptor_set_layout, null);
+            self.vk_2d_descriptor_set_layout = try _2d_desc_builder.build(ctx, .{ .fragment_bit = true }, .{}, null);
+            self.vk_2d_descriptor_set = try self.desc_allocator.allocate(ctx, self.vk_2d_descriptor_set_layout, null);
+
+            self.writer.clear();
+            try self.writer.writeImage(0, atlas_img, .shader_read_only_optimal, .combined_image_sampler);
+            self.writer.updateSet(ctx, self.vk_2d_descriptor_set);
+
+            self.writer.clear();
+            try self.writer.writeImage(1, checker_img, .shader_read_only_optimal, .combined_image_sampler);
+            self.writer.updateSet(ctx, self.vk_2d_descriptor_set);
         }
-        return global_descriptor;
+        // {
+        //     var _2d_full_desc_builder = try Descriptor.LayoutBuilder.init(self.allocator);
+        //     defer _2d_full_desc_builder.deinit();
+        //     try _2d_full_desc_builder.addBinding(0, .uniform_buffer); // material.data
+        //     try _2d_full_desc_builder.addBinding(1, .combined_image_sampler);
+        //
+        //     self.vk_2d_full_descriptor_set_layout = try _2d_full_desc_builder.build(ctx, .{ .vertex_bit = true, .fragment_bit = true }, .{}, null);
+        //     self.vk_2d_full_descriptor_set = try self.desc_allocator.allocate(ctx, self.vk_2d_full_descriptor_set_layout, null);
+        // }
+        //
+        self.is_initialised = true;
     }
 
     pub fn destroy(self: *GlobalDescriptor, ctx: *const GraphicsContext) void {
-        self.desc_allocator.destroyPools(ctx);
-        ctx.device.destroyDescriptorSetLayout(self.vk_compute_descriptor_set_layout, null);
-        ctx.device.destroyDescriptorSetLayout(self.vk_mesh_descriptor_set_layout, null);
-        ctx.device.destroyDescriptorSetLayout(self.vk_2d_descriptor_set_layout, null);
+        self.desc_allocator.destroy(ctx);
+        if (self.is_initialised) {
+            ctx.device.destroyDescriptorSetLayout(self.draw_image_descriptor_layout, null);
+            ctx.device.destroyDescriptorSetLayout(self.scene_descriptor_layout, null);
+            // ctx.device.destroyDescriptorSetLayout(self.vk_mesh_descriptor_set_layout, null);
+            ctx.device.destroyDescriptorSetLayout(self.vk_2d_descriptor_set_layout, null);
+            // ctx.device.destroyDescriptorSetLayout(self.vk_2d_full_descriptor_set_layout, null);
+            ctx.device.destroyDescriptorSetLayout(self.vk_material_descriptor_set_layout, null);
+        }
         self.writer.deinit();
     }
 };
@@ -227,19 +305,11 @@ stats: Stats,
 
 ctx: *const GraphicsContext,
 
-uniforms: Uniforms = undefined,
-
-// passes: struct {
-//     clear: RenderPass = undefined,
-//     solid: RenderPass = undefined,
-// } = .{},
 swapchain: Swapchain = undefined,
-// framebuffer: Framebuffer = undefined,
 
-// triangle_buffer: Buffer = undefined,
 batcher_buffer: Buffer = undefined,
 text_buffer: Buffer = undefined,
-uniform_buffer: Buffer = undefined,
+// uniform_buffer: Buffer = undefined,
 
 triangle_mesh: Mesh = undefined,
 quad_mesh: Mesh = undefined,
@@ -310,7 +380,8 @@ pub fn deinit(self: *Renderer) void {
     self.quad_mesh.destroy(self.ctx);
     self.batcher_buffer.destroy(self.ctx);
     self.text_buffer.destroy(self.ctx);
-    self.uniform_buffer.destroy(self.ctx);
+    // self.uniform_buffer.destroy(self.ctx);
+    // self.material_buffer.destroy(self.ctx);
     self.batcher.deinit();
 
     // self.framebuffer.destroy(self.ctx);
@@ -321,8 +392,6 @@ pub fn deinit(self: *Renderer) void {
 }
 
 pub fn setup(self: *Renderer) !void {
-    self.initUniform();
-
     self.swapchain = try Swapchain.init(self.ctx, self.allocator);
 
     for (&self.frame_data) |*fd| {
@@ -332,13 +401,18 @@ pub fn setup(self: *Renderer) !void {
     self.samplers.set(.nearest, try .create(self.ctx, .nearest));
     self.samplers.set(.linear, try .create(self.ctx, .linear));
 
-    self.descriptor = try GlobalDescriptor.create(self.allocator, self.ctx);
-
     try self.createTextures();
 
+    // self.descriptor = try GlobalDescriptor.create(self.allocator, self.ctx);
+    self.descriptor = try GlobalDescriptor.init(self.allocator, self.ctx);
+    try self.descriptor.setup(self.ctx, self.draw_image, self.images.get(.atlas), self.images.get(.error_checker));
+
     // self.triangle_buffer = try Buffer.create(self.ctx, @sizeOf(@TypeOf(vertices)), .{ .vertex_buffer_bit = true, .transfer_dst_bit = true, .shader_device_address_bit = true }, .{ .device_local_bit = true });
-    self.uniform_buffer = try Buffer.create(self.ctx, @sizeOf(@TypeOf(self.uniforms.transform)), .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
-    try self.uniform_buffer.copyInto(self.ctx, &std.mem.toBytes(self.uniforms.transform), 0);
+    // self.uniform_buffer = try Buffer.create(self.ctx, @sizeOf(@TypeOf(self.uniforms.transform)), .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
+    // try self.uniform_buffer.copyInto(self.ctx, &std.mem.toBytes(self.uniforms.transform), 0);
+
+    // self.material_buffer = try Buffer.create(self.ctx, 4, .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
+    // try self.material_buffer.copyInto(self.ctx, &Color.White.toBytes(), 0);
 
     self.batcher_buffer = try Buffer.create(self.ctx, self.batcher.getTransferBufferSizeInBytes(), .{ .vertex_buffer_bit = true, .transfer_dst_bit = true }, .{ .host_coherent_bit = true, .host_visible_bit = true });
 
@@ -349,7 +423,8 @@ pub fn setup(self: *Renderer) !void {
     // Create Pipelines
     try self.createTrianglePipeline();
     try self.create2DPipeline();
-    try self.createMeshPipeline();
+    try self.create2DBisPipeline();
+    // try self.createMeshPipeline();
     try self.createComputePipeline();
 
     // try self.triangle_buffer.fastTransfer(self.ctx, &self.cmd_pool, &std.mem.toBytes(vertices));
@@ -377,11 +452,6 @@ pub fn createTextures(self: *Renderer) !void {
             self.samplers.getPtrConst(.linear),
             // self.swapchain.surface_format.format,
         );
-        {
-            self.descriptor.writer.clear();
-            try self.descriptor.writer.writeImage(0, self.draw_image, .general, .storage_image);
-            self.descriptor.writer.updateSet(self.ctx, self.descriptor.vk_compute_descriptor_set);
-        }
     }
 
     { // Single 1px color
@@ -436,45 +506,7 @@ pub fn createTextures(self: *Renderer) !void {
         self.images.set(.atlas, image);
         self.text_buffer = try Buffer.create(self.ctx, @intCast(self.images.get(.atlas).size), .{ .transfer_dst_bit = true }, .{ .device_local_bit = true });
         try self.text_buffer.fastTransfer(self.ctx, &self.getCurrentFrame().cmd_pool, surface.getPixels().?);
-
-        {
-            var writer = try Descriptor.DescriptorWriter.init(self.allocator);
-            defer writer.deinit();
-
-            try writer.writeImage(0, self.images.get(.atlas), .shader_read_only_optimal, .combined_image_sampler);
-            // writer.updateSet(self.ctx, self.descriptor.vk_mesh_descriptor_set);
-            writer.updateSet(self.ctx, self.descriptor.vk_2d_descriptor_set);
-
-            writer.clear();
-            try writer.writeImage(1, self.images.get(.error_checker), .shader_read_only_optimal, .combined_image_sampler);
-            // writer.updateSet(self.ctx, self.descriptor.vk_mesh_descriptor_set);
-            writer.updateSet(self.ctx, self.descriptor.vk_2d_descriptor_set);
-        }
     }
-}
-
-pub fn initUniform(self: *Renderer) void {
-    // Setup the uniform buffers
-    const width: usize = self.ctx.window.getWidth();
-    const heigth: usize = self.ctx.window.getHeight();
-    const fov: f32 = 40;
-    const near: f32 = 0.0001;
-    const far: f32 = 1000;
-
-    self.uniforms = .{
-        .transform = .{
-            .scale = .{ 0.5, 0.5 },
-            .translate = .{ 0, 0 },
-        },
-        .mvp = .{
-            .proj_matrix = zm.perspectiveFovRh(zm.modAngle(fov), @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(heigth)), near, far),
-            // .proj_matrix = zm.identity(),
-            .view_matrix = zm.identity(),
-        },
-        .time = .{
-            .time = 0,
-        },
-    };
 }
 
 pub fn getCurrentFrame(self: *Renderer) *FrameData {
@@ -490,7 +522,7 @@ fn fillCommandBuffers(self: *Renderer) !void {
     const draw_image = &self.draw_image;
     const current_frame = self.getCurrentFrame();
     const cmdbuf = current_frame.cmd_buf;
-    try current_frame.desc_allocator.clearPools(self.ctx);
+    try current_frame.desc_allocator.clear(self.ctx);
 
     const cmd_begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .one_time_submit_bit = true } };
     try self.ctx.device.resetCommandBuffer(cmdbuf, .{});
@@ -507,9 +539,10 @@ fn fillCommandBuffers(self: *Renderer) !void {
 
     self.images.getPtr(.atlas).transitionToLayout(self.ctx, cmdbuf, .undefined, .shader_read_only_optimal);
     // self.draw_triangle(cmdbuf);
-    self.draw_mesh(cmdbuf);
+    // self.draw_mesh(cmdbuf);
 
-    self.draw_2d(cmdbuf);
+    // self.draw_2d(cmdbuf);
+    try self.draw_2d_bis(cmdbuf);
 
     draw_image.transitionToLayout(self.ctx, cmdbuf, .color_attachment_optimal, .transfer_src_optimal);
     Image.vkTransitionToLayout(self.swapchain.currentImage(), self.ctx, cmdbuf, .undefined, .transfer_dst_optimal);
@@ -630,6 +663,88 @@ pub fn draw_2d(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
     self.ctx.device.cmdDrawIndexed(cmdbuf, 6, 1, 0, 0, 0);
 }
 
+pub fn draw_2d_bis(self: *Renderer, cmdbuf: vk.CommandBuffer) !void {
+    const current_frame = self.getCurrentFrame();
+    const pipeline = self.pipelines.getPtr(._2d_bis);
+
+    self.ctx.device.cmdBindPipeline(cmdbuf, .graphics, pipeline.vk_pipeline);
+
+    const color_attachment: vk.RenderingAttachmentInfo = .{
+        .image_layout = .color_attachment_optimal,
+        .image_view = self.draw_image.view,
+        .resolve_mode = .{},
+        .resolve_image_layout = .color_attachment_optimal,
+        .load_op = .load,
+        .store_op = .store,
+        .clear_value = .{
+            .color = .{
+                .float_32 = [_]f32{ 0, 0, 0, 0 }, // 0,0,0,0 transparent
+            },
+        },
+    };
+
+    const rendering_info: vk.RenderingInfo = .{
+        .layer_count = 1,
+        .render_area = current_frame.scissor,
+        .view_mask = 0,
+        .color_attachment_count = 1,
+        .p_color_attachments = @ptrCast(&.{color_attachment}),
+    };
+
+    // Draw quad
+    // const push_constant: Mesh.PushConstants2D = .{ .scale = .{ 1, 1 }, .translate = .{ 0, 0 }, .vb_address = self.quad_mesh.buffers.vertex.?.address.? };
+    const push_constant: Mesh.PushConstants3D = .{ .render_matrix = current_frame.scene_data.view_proj, .vb_address = self.quad_mesh.buffers.vertex.?.address.? };
+    self.ctx.device.cmdBindIndexBuffer(cmdbuf, self.quad_mesh.buffers.index.?.vk_buffer, 0, .uint16);
+
+    self.ctx.device.cmdPushConstants(cmdbuf, pipeline.layout, .{ .vertex_bit = true }, 0, @sizeOf(Mesh.PushConstants3D), @ptrCast(&push_constant));
+
+    //  VkDescriptorSetVariableDescriptorCountAllocateInfo allocArrayInfo{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO, .pNext = nullptr};
+    //
+    //  uint32_t descriptorCounts =texCache.Cache.size();
+    //  allocArrayInfo.pDescriptorCounts = &descriptorCounts;
+    //  allocArrayInfo.descriptorSetCount = 1;
+    //create a descriptor set that binds that buffer and update it
+    //    VkDescriptorSet globalDescriptor = get_current_frame()._frameDescriptors.allocate(_device, _gpuSceneDataDescriptorLayout, &allocArrayInfo);
+    //
+    // DescriptorWriter writer;
+    // writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+
+    // const descriptorCount: u32 = 0; // should be TextureCache.Cache.size();
+    // const allocArrayInfo: vk.DescriptorSetVariableDescriptorCountAllocateInfo = .{ .descriptor_set_count = 1, .p_descriptor_counts = @ptrCast(&descriptorCount) };
+    // const descriptor = try current_frame.desc_allocator.allocate(self.ctx, self.descriptor.scene_descriptor_layout, &allocArrayInfo);
+    const descriptor = try current_frame.desc_allocator.allocate(self.ctx, self.descriptor.scene_descriptor_layout, null);
+
+    self.descriptor.writer.clear();
+
+    // Write in the Scene Data Buffer
+    try current_frame.scene_data_buffer.copyInto(self.ctx, &std.mem.toBytes(current_frame.scene_data), 0);
+    try self.descriptor.writer.writeBuffer(0, current_frame.scene_data_buffer, current_frame.scene_data_buffer.size, 0, .uniform_buffer);
+
+    self.descriptor.writer.updateSet(self.ctx, descriptor);
+
+    const sets = [_]vk.DescriptorSet{
+        descriptor, // set 0
+        // self.descriptor.vk_material_descriptor_set_layout, // set 1
+    };
+
+    self.ctx.device.cmdBindDescriptorSets(
+        cmdbuf,
+        .graphics,
+        pipeline.layout,
+        0,
+        sets.len,
+        @ptrCast(&sets),
+        0,
+        null,
+    );
+
+    self.ctx.device.cmdBeginRendering(cmdbuf, &rendering_info);
+    defer self.ctx.device.cmdEndRendering(cmdbuf);
+
+    // Draw quad
+    self.ctx.device.cmdDrawIndexed(cmdbuf, 6, 1, 0, 0, 0);
+}
+
 pub fn draw_mesh(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
     const current_frame = self.getCurrentFrame();
     const pipeline = self.pipelines.getPtr(.mesh);
@@ -657,6 +772,8 @@ pub fn draw_mesh(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
         .color_attachment_count = 1,
         .p_color_attachments = @ptrCast(&.{color_attachment}),
     };
+
+    self.ctx.device.cmdBeginRendering(cmdbuf, &rendering_info);
 
     // {
     //     self.descriptor.writer.clear();
@@ -710,7 +827,6 @@ pub fn draw_mesh(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
     //     null,
     // );
 
-    self.ctx.device.cmdBeginRendering(cmdbuf, &rendering_info);
     defer self.ctx.device.cmdEndRendering(cmdbuf);
 
     // Draw quad
@@ -731,7 +847,7 @@ pub fn draw_background(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
         self.pipelines.get(.compute).layout,
         0,
         1,
-        @ptrCast(&self.descriptor.vk_compute_descriptor_set),
+        @ptrCast(&self.descriptor.draw_image_descriptor),
         0,
         null,
     );
@@ -895,6 +1011,43 @@ fn create2DPipeline(self: *Renderer) !void {
     self.pipelines.set(._2d, pipeline);
 }
 
+fn create2DBisPipeline(self: *Renderer) !void {
+    var vert = try Shader.create(self.ctx, .{ .name = "2d_bis.spv", .stage = .vertex });
+    defer vert.destroy(self.ctx);
+    var frag = try Shader.create(self.ctx, .{ .name = "2d_bis.spv", .stage = .fragment });
+    defer frag.destroy(self.ctx);
+
+    var pipeline_builder = try Pipeline.Builder.init(self.allocator);
+    defer pipeline_builder.deinit();
+    try pipeline_builder.setShaders(&vert, &frag);
+    pipeline_builder.setInputTopology(.triangle_list);
+    pipeline_builder.setPolygonMode(.fill);
+    pipeline_builder.setCullMode(.{}, .clockwise);
+    pipeline_builder.setMultisamplingNone();
+    pipeline_builder.disableBlending();
+    pipeline_builder.disableDepthTest();
+    pipeline_builder.setColorAttachmentFormat(self.draw_image.format);
+    pipeline_builder.setDepthFormat(.undefined);
+
+    const push_constant_range: vk.PushConstantRange = .{ .offset = 0, .size = @sizeOf(Mesh.PushConstants3D), .stage_flags = .{ .vertex_bit = true } };
+
+    const set_layouts = [_]vk.DescriptorSetLayout{
+        self.descriptor.scene_descriptor_layout, // set 0
+            // self.descriptor.vk_material_descriptor_set_layout, // set 1
+    };
+
+    pipeline_builder.pipeline_layout = try self.ctx.device.createPipelineLayout(&.{
+        .set_layout_count = set_layouts.len,
+        .p_set_layouts = @ptrCast(&set_layouts),
+        .push_constant_range_count = 1,
+        .p_push_constant_ranges = @ptrCast(&push_constant_range),
+    }, null);
+
+    const pipeline = try pipeline_builder.buildPipeline(self.ctx);
+
+    self.pipelines.set(._2d_bis, pipeline);
+}
+
 fn createMeshPipeline(self: *Renderer) !void {
     var vert = try Shader.create(self.ctx, .{ .name = "mesh.spv", .stage = .vertex });
     defer vert.destroy(self.ctx);
@@ -916,7 +1069,7 @@ fn createMeshPipeline(self: *Renderer) !void {
     const push_constant_range: vk.PushConstantRange = .{ .offset = 0, .size = @sizeOf(Mesh.PushConstants3D), .stage_flags = .{ .vertex_bit = true } };
 
     const set_layouts = [_]vk.DescriptorSetLayout{
-        self.descriptor.vk_mesh_descriptor_set_layout, // set 0
+        // self.descriptor.vk_mesh_descriptor_set_layout, // set 0
         self.descriptor.vk_material_descriptor_set_layout, // set 1
     };
 
@@ -943,7 +1096,7 @@ fn createComputePipeline(self: *Renderer) !void {
     const pipeline_layout = try self.ctx.device.createPipelineLayout(&.{
         .flags = .{},
         .set_layout_count = 1,
-        .p_set_layouts = @ptrCast(&self.descriptor.vk_compute_descriptor_set_layout),
+        .p_set_layouts = @ptrCast(&self.descriptor.draw_image_descriptor_layout),
         .push_constant_range_count = 0,
         .p_push_constant_ranges = undefined,
     }, null);

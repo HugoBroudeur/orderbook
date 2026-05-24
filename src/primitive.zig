@@ -2,20 +2,26 @@ const std = @import("std");
 const sdl = @import("sdl3");
 const zm = @import("zmath");
 
-pub const Rect = struct {
-    x: f32,
-    y: f32,
-    width: f32,
-    heigth: f32,
+fn rect(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        x: T,
+        y: T,
+        width: T,
+        heigth: T,
 
-    pub fn zero() Rect {
-        return .{ .x = 0, .y = 0, .width = 0, .heigth = 0 };
-    }
+        pub fn zero() Self {
+            return .{ .x = 0, .y = 0, .width = 0, .heigth = 0 };
+        }
 
-    pub fn eq(self: Rect, rect: Rect) bool {
-        return std.meta.eql(self, rect);
-    }
-};
+        pub fn eq(self: Self, rectangle: Self) bool {
+            return std.meta.eql(self, rectangle);
+        }
+    };
+}
+
+pub const Rect = rect(f32);
+pub const IRect = rect(i32);
 
 pub const Point = struct { x: f32, y: f32, z: f32 = 0 };
 

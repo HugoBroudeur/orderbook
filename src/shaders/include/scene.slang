@@ -43,13 +43,14 @@ public struct SceneData {
   public float4 ambientColor;
   public float4 sunlightDirection;
   public float4 sunlightColor;
+  public float4 time;
 };
 
 public struct GLTFMaterialData {
   public float4 colorFactors;
-  public float4 metal_rough_factors;
-  public int colorTexID;
-  public int metalRoughTexID;
+  // public float4 metal_rough_factors;
+  // public int colorTexID;
+  // public int metalRoughTexID;
 };
 
 // Interface defining what any SceneParams implementation must provide
@@ -84,3 +85,8 @@ public struct MaterialParams {
   public ConstantBuffer<GLTFMaterialData> data;
 };
 
+public struct SimpleSceneParams {
+  public ConstantBuffer<SceneData> sceneData;
+
+  public ConstantBuffer<SceneData> getSceneData() { return sceneData; }
+}
