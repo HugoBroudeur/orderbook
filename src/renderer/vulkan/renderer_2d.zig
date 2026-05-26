@@ -88,7 +88,6 @@ const FrameData = struct {
             .level = .primary,
             .command_buffer_count = 1,
         }, @ptrCast(&self.cmd_buf));
-        errdefer ctx.devive.freeCommandBuffers(self.cmd_pool.vk_cmd_pool, 1, @ptrCast(&self.cmd_buf));
     }
 
     pub fn shouldReset(self: *FrameData, ctx: *const GraphicsContext) bool {
@@ -101,13 +100,13 @@ const FrameData = struct {
     }
 
     pub fn reset(self: *FrameData, ctx: *const GraphicsContext, extent: vk.Extent2D) !void {
-
-        // Set Viewport + scisors
         self.viewport.width = @floatFromInt(extent.width);
         self.viewport.height = @floatFromInt(extent.height);
         self.scissor.extent = extent;
         self.previous_frame_window_size = .{ .width = @intCast(ctx.window.getWidth()), .height = @intCast(ctx.window.getHeight()) };
+        self.swapchain_state = .optimal;
 
+        ctx.device.freeCommandBuffers(self.cmd_pool.vk_cmd_pool, 1, @ptrCast(&self.cmd_buf));
         try self.createCommandBuffer(ctx);
     }
 
@@ -341,6 +340,8 @@ imgui_draw_data: *anyopaque = undefined,
 
 batcher: Batcher,
 is_minimised: bool = false,
+draw_extent: vk.Extent2D = .{ .width = 0, .height = 0 },
+render_scale: f32 = 1.0,
 
 frame_number: u64 = 0,
 frame_data: [FRAME_OVERLAP]FrameData = [2]FrameData{ .{}, .{} },
@@ -503,43 +504,43 @@ pub fn setup(self: *Renderer) !void {
 
         const cube_verts = [_]Data.Vertex{
             // +Z (front) — normal (0,0,1)
-            .{ .pos = .{ -h, -h,  h }, .uv_x = 0, .normal = .{ 0, 0, 1 }, .uv_y = 0, .col = c_pz },
-            .{ .pos = .{  h, -h,  h }, .uv_x = 1, .normal = .{ 0, 0, 1 }, .uv_y = 0, .col = c_pz },
-            .{ .pos = .{  h,  h,  h }, .uv_x = 1, .normal = .{ 0, 0, 1 }, .uv_y = 1, .col = c_pz },
-            .{ .pos = .{ -h,  h,  h }, .uv_x = 0, .normal = .{ 0, 0, 1 }, .uv_y = 1, .col = c_pz },
+            .{ .pos = .{ -h, -h, h }, .uv_x = 0, .normal = .{ 0, 0, 1 }, .uv_y = 0, .col = c_pz },
+            .{ .pos = .{ h, -h, h }, .uv_x = 1, .normal = .{ 0, 0, 1 }, .uv_y = 0, .col = c_pz },
+            .{ .pos = .{ h, h, h }, .uv_x = 1, .normal = .{ 0, 0, 1 }, .uv_y = 1, .col = c_pz },
+            .{ .pos = .{ -h, h, h }, .uv_x = 0, .normal = .{ 0, 0, 1 }, .uv_y = 1, .col = c_pz },
             // -Z (back) — normal (0,0,-1)
-            .{ .pos = .{  h, -h, -h }, .uv_x = 0, .normal = .{ 0, 0, -1 }, .uv_y = 0, .col = c_nz },
+            .{ .pos = .{ h, -h, -h }, .uv_x = 0, .normal = .{ 0, 0, -1 }, .uv_y = 0, .col = c_nz },
             .{ .pos = .{ -h, -h, -h }, .uv_x = 1, .normal = .{ 0, 0, -1 }, .uv_y = 0, .col = c_nz },
-            .{ .pos = .{ -h,  h, -h }, .uv_x = 1, .normal = .{ 0, 0, -1 }, .uv_y = 1, .col = c_nz },
-            .{ .pos = .{  h,  h, -h }, .uv_x = 0, .normal = .{ 0, 0, -1 }, .uv_y = 1, .col = c_nz },
+            .{ .pos = .{ -h, h, -h }, .uv_x = 1, .normal = .{ 0, 0, -1 }, .uv_y = 1, .col = c_nz },
+            .{ .pos = .{ h, h, -h }, .uv_x = 0, .normal = .{ 0, 0, -1 }, .uv_y = 1, .col = c_nz },
             // +X (right) — normal (1,0,0)
-            .{ .pos = .{  h, -h,  h }, .uv_x = 0, .normal = .{ 1, 0, 0 }, .uv_y = 0, .col = c_px },
-            .{ .pos = .{  h, -h, -h }, .uv_x = 1, .normal = .{ 1, 0, 0 }, .uv_y = 0, .col = c_px },
-            .{ .pos = .{  h,  h, -h }, .uv_x = 1, .normal = .{ 1, 0, 0 }, .uv_y = 1, .col = c_px },
-            .{ .pos = .{  h,  h,  h }, .uv_x = 0, .normal = .{ 1, 0, 0 }, .uv_y = 1, .col = c_px },
+            .{ .pos = .{ h, -h, h }, .uv_x = 0, .normal = .{ 1, 0, 0 }, .uv_y = 0, .col = c_px },
+            .{ .pos = .{ h, -h, -h }, .uv_x = 1, .normal = .{ 1, 0, 0 }, .uv_y = 0, .col = c_px },
+            .{ .pos = .{ h, h, -h }, .uv_x = 1, .normal = .{ 1, 0, 0 }, .uv_y = 1, .col = c_px },
+            .{ .pos = .{ h, h, h }, .uv_x = 0, .normal = .{ 1, 0, 0 }, .uv_y = 1, .col = c_px },
             // -X (left) — normal (-1,0,0)
             .{ .pos = .{ -h, -h, -h }, .uv_x = 0, .normal = .{ -1, 0, 0 }, .uv_y = 0, .col = c_nx },
-            .{ .pos = .{ -h, -h,  h }, .uv_x = 1, .normal = .{ -1, 0, 0 }, .uv_y = 0, .col = c_nx },
-            .{ .pos = .{ -h,  h,  h }, .uv_x = 1, .normal = .{ -1, 0, 0 }, .uv_y = 1, .col = c_nx },
-            .{ .pos = .{ -h,  h, -h }, .uv_x = 0, .normal = .{ -1, 0, 0 }, .uv_y = 1, .col = c_nx },
+            .{ .pos = .{ -h, -h, h }, .uv_x = 1, .normal = .{ -1, 0, 0 }, .uv_y = 0, .col = c_nx },
+            .{ .pos = .{ -h, h, h }, .uv_x = 1, .normal = .{ -1, 0, 0 }, .uv_y = 1, .col = c_nx },
+            .{ .pos = .{ -h, h, -h }, .uv_x = 0, .normal = .{ -1, 0, 0 }, .uv_y = 1, .col = c_nx },
             // +Y (top) — normal (0,1,0)
-            .{ .pos = .{ -h,  h,  h }, .uv_x = 0, .normal = .{ 0, 1, 0 }, .uv_y = 0, .col = c_py },
-            .{ .pos = .{  h,  h,  h }, .uv_x = 1, .normal = .{ 0, 1, 0 }, .uv_y = 0, .col = c_py },
-            .{ .pos = .{  h,  h, -h }, .uv_x = 1, .normal = .{ 0, 1, 0 }, .uv_y = 1, .col = c_py },
-            .{ .pos = .{ -h,  h, -h }, .uv_x = 0, .normal = .{ 0, 1, 0 }, .uv_y = 1, .col = c_py },
+            .{ .pos = .{ -h, h, h }, .uv_x = 0, .normal = .{ 0, 1, 0 }, .uv_y = 0, .col = c_py },
+            .{ .pos = .{ h, h, h }, .uv_x = 1, .normal = .{ 0, 1, 0 }, .uv_y = 0, .col = c_py },
+            .{ .pos = .{ h, h, -h }, .uv_x = 1, .normal = .{ 0, 1, 0 }, .uv_y = 1, .col = c_py },
+            .{ .pos = .{ -h, h, -h }, .uv_x = 0, .normal = .{ 0, 1, 0 }, .uv_y = 1, .col = c_py },
             // -Y (bottom) — normal (0,-1,0)
             .{ .pos = .{ -h, -h, -h }, .uv_x = 0, .normal = .{ 0, -1, 0 }, .uv_y = 0, .col = c_ny },
-            .{ .pos = .{  h, -h, -h }, .uv_x = 1, .normal = .{ 0, -1, 0 }, .uv_y = 0, .col = c_ny },
-            .{ .pos = .{  h, -h,  h }, .uv_x = 1, .normal = .{ 0, -1, 0 }, .uv_y = 1, .col = c_ny },
-            .{ .pos = .{ -h, -h,  h }, .uv_x = 0, .normal = .{ 0, -1, 0 }, .uv_y = 1, .col = c_ny },
+            .{ .pos = .{ h, -h, -h }, .uv_x = 1, .normal = .{ 0, -1, 0 }, .uv_y = 0, .col = c_ny },
+            .{ .pos = .{ h, -h, h }, .uv_x = 1, .normal = .{ 0, -1, 0 }, .uv_y = 1, .col = c_ny },
+            .{ .pos = .{ -h, -h, h }, .uv_x = 0, .normal = .{ 0, -1, 0 }, .uv_y = 1, .col = c_ny },
         };
         const cube_idxs = [_]Data.Indice{
-            0,  1,  2,   0,  2,  3,   // +Z
-            4,  5,  6,   4,  6,  7,   // -Z
-            8,  9,  10,  8,  10, 11,  // +X
-            12, 13, 14,  12, 14, 15,  // -X
-            16, 17, 18,  16, 18, 19,  // +Y
-            20, 21, 22,  20, 22, 23,  // -Y
+            0, 1, 2, 0, 2, 3, // +Z
+            4, 5, 6, 4, 6, 7, // -Z
+            8, 9, 10, 8, 10, 11, // +X
+            12, 13, 14, 12, 14, 15, // -X
+            16, 17, 18, 16, 18, 19, // +Y
+            20, 21, 22, 20, 22, 23, // -Y
         };
         self.cube_mesh = try Mesh.init(self.allocator);
         self.cube_mesh.name = "[manual] cube";
@@ -668,7 +669,7 @@ fn fillCommandBuffers(self: *Renderer) !void {
     draw_image.transitionToLayout(self.ctx, cmdbuf, .color_attachment_optimal, .transfer_src_optimal);
     Image.vkTransitionToLayout(self.swapchain.currentImage(), self.ctx, cmdbuf, .undefined, .transfer_dst_optimal);
 
-    Image.vkCopyImageToImage(self.ctx, cmdbuf, draw_image.vk_image, self.swapchain.currentImage(), self.ctx.window.toExtend2D(), self.swapchain.extent);
+    Image.vkCopyImageToImage(self.ctx, cmdbuf, draw_image.vk_image, self.swapchain.currentImage(), self.draw_extent, self.swapchain.extent);
 
     Image.vkTransitionToLayout(self.swapchain.currentImage(), self.ctx, cmdbuf, .transfer_dst_optimal, .color_attachment_optimal);
 
@@ -917,7 +918,7 @@ pub fn draw_mesh(self: *Renderer, cmdbuf: vk.CommandBuffer) !void {
     //   right : self.cube_mesh     (hand-built cube, under test)
     // The hardcoded GLB self.meshes.items[2] (Suzanne) is bypassed for now —
     // it triggers vulkan validation errors when drawn with the wrong index count.
-    const targets = [_]struct { mesh: *Mesh, m: zm.Mat }{
+    const targets = [_]struct { mesh: *Mesh, m: zm.Mat, max_count: ?u32 = null }{
         .{ .mesh = &self.selftest_mesh, .m = zm.Mat{
             zm.f32x4(1, 0, 0, 0),
             zm.f32x4(0, 1, 0, 0),
@@ -930,6 +931,7 @@ pub fn draw_mesh(self: *Renderer, cmdbuf: vk.CommandBuffer) !void {
             zm.f32x4(0, 0, 1.5, 0),
             zm.f32x4(2, 0, 0, 1),
         } },
+        .{ .mesh = &self.meshes.items[2], .m = zm.identity(), .max_count = null },
     };
 
     // Bind descriptor sets once (same for all draws this frame).
@@ -944,11 +946,12 @@ pub fn draw_mesh(self: *Renderer, cmdbuf: vk.CommandBuffer) !void {
         self.ctx.device.cmdBindIndexBuffer(cmdbuf, t.mesh.buffers.index.?.vk_buffer, 0, .uint16);
         self.ctx.device.cmdPushConstants(cmdbuf, pipeline.layout, .{ .vertex_bit = true }, 0, @sizeOf(@TypeOf(push_constant)), @ptrCast(&push_constant));
         const surface = t.mesh.surfaces.items[0];
-        self.ctx.device.cmdDrawIndexed(cmdbuf, surface.count, 1, surface.start_index, 0, 0);
+        const draw_count = if (t.max_count) |mc| @min(surface.count, mc) else surface.count;
+        self.ctx.device.cmdDrawIndexed(cmdbuf, draw_count, 1, surface.start_index, 0, 0);
 
         if (!dbg_once.fired) {
             std.debug.print("[DEBUG-draw {d}] mesh '{s}' vb=0x{x} ib_handle={any} count={d} start={d} m[3]={d:.2} {d:.2} {d:.2} {d:.2}\n", .{
-                i,         t.mesh.name, push_constant.vb_address, t.mesh.buffers.index.?.vk_buffer, surface.count, surface.start_index,
+                i,         t.mesh.name, push_constant.vb_address, t.mesh.buffers.index.?.vk_buffer, draw_count, surface.start_index,
                 t.m[3][0], t.m[3][1],   t.m[3][2],                t.m[3][3],
             });
         }
@@ -974,9 +977,8 @@ pub fn draw_background(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
         null,
     );
 
-    // Dispatch (16x16 workgroup size, so divide image size by 16)
-    const group_count_x: u32 = @intCast((self.ctx.window.getWidth()) / 16); // Round up
-    const group_count_y: u32 = @intCast((self.ctx.window.getHeight()) / 16); // Round up
+    const group_count_x: u32 = (@max(self.draw_extent.width, 1) + 15) / 16;
+    const group_count_y: u32 = (@max(self.draw_extent.height, 1) + 15) / 16;
 
     self.ctx.device.cmdDispatch(cmdbuf, group_count_x, group_count_y, 1);
 }
@@ -1050,7 +1052,20 @@ pub fn draw(self: *Renderer, batches: []Batcher.Batch) !void {
             self.stats.addSkippedDraw();
             return;
         };
+        // Sync window size to all frames so the other frame in flight doesn't
+        // trigger a redundant second recreate next turn.
+        for (&self.frame_data) |*fd| {
+            fd.previous_frame_window_size = current_frame.previous_frame_window_size;
+        }
     }
+
+    self.draw_extent = .{
+        .width = @intFromFloat(@as(f32, @floatFromInt(@min(self.swapchain.extent.width, self.draw_image.width))) * self.render_scale),
+        .height = @intFromFloat(@as(f32, @floatFromInt(@min(self.swapchain.extent.height, self.draw_image.height))) * self.render_scale),
+    };
+    current_frame.viewport.width = @floatFromInt(self.draw_extent.width);
+    current_frame.viewport.height = @floatFromInt(self.draw_extent.height);
+    current_frame.scissor.extent = self.draw_extent;
 
     self.fillCommandBuffers() catch {
         current_frame.swapchain_state = .suboptimal;
@@ -1187,7 +1202,8 @@ fn createMeshPipeline(self: *Renderer) !void {
     pipeline_builder.setCullMode(vk.CullModeFlags{}, .counter_clockwise);
     std.debug.print("[SELFTEST-pipeline] mesh pipeline cull_mode = {f} front_face = {}\n", .{ pipeline_builder.rasterizer.cull_mode, pipeline_builder.rasterizer.front_face });
     pipeline_builder.setMultisamplingNone();
-    pipeline_builder.disableBlending();
+    // pipeline_builder.disableBlending();
+    pipeline_builder.enableBlendingAdditive();
     pipeline_builder.disableDepthTest();
     pipeline_builder.setColorAttachmentFormat(self.draw_image.format);
     pipeline_builder.setDepthFormat(.undefined);
