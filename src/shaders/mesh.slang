@@ -76,24 +76,12 @@ Fragment vertex(uint vertexID: SV_VertexID) {
 // Actual frament shader, using array for layered textured (atlas)
 [shader("fragment")]
 float4 fragment(Fragment input) : SV_Target {
-  // return input.Color * Texture.Sample(Sampler, input.TexCoord);
-
-  // float lightValue = max(dot(inNormal, vec3(0.3f,1.f,0.3f)), 0.1f);
-  //
-  // vec3 irradiance = calcIrradiance(inNormal);
-  //
-
-  // vec3 color = inColor * texture(colorTex,inUV).xyz;
+  // [DEBUG] Output vertex color directly — bypasses texture to confirm
+  // geometry. If all 3 meshes appear with their vertex colors, remove this and
+  // restore the texture path below.
+  // return float4(input.color, 1.0);
   int colorID = material.data.colorTexID;
   float3 color = input.color * scene.allTextures[colorID].Sample(input.uv).xyz;
-
-  // outFragColor =
-  //     vec4(color * lightValue + color * irradiance.x * vec3(0.2f), 1.0f);
   return float4(color, 1.0);
-
-  // return float4(input.color, 1.0) *
-  //        checkerTexture.Sample(
-  //            input.uv);
-  // return input.Color;
-  //  return float4(input.TexCoord, 0, 1);
 }
+

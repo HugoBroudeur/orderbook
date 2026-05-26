@@ -48,8 +48,8 @@ public struct SceneData {
 
 public struct GLTFMaterialData {
   public float4 colorFactors;
+  public int colorTexID;      // matches CPU MaterialData.color_tex_id at offset 16
   // public float4 metal_rough_factors;
-  // public int colorTexID;
   // public int metalRoughTexID;
 };
 

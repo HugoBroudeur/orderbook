@@ -40,7 +40,9 @@ pub fn loadGlb(self: *AssetLoader, glb_filename: []const u8) !Gltf.Data {
     try self.file_buffers.append(self.allocator, buffer);
 
     try self.zgltf.parse(buffer);
+    // ================== DEBUG ===============
     self.zgltf.debugPrint();
+    // ==================================
 
     return self.zgltf.data;
 }
@@ -54,7 +56,9 @@ pub fn loadGltf(self: *AssetLoader, gltf_filename: []const u8) !Gltf.Data {
     try self.file_buffers.append(self.allocator, buffer);
 
     try self.zgltf.parse(buffer);
+    // ================== DEBUG ===============
     self.zgltf.debugPrint();
+    // ==================================
 
     return self.zgltf.data;
 }
@@ -108,6 +112,7 @@ pub fn loadMeshes(self: *AssetLoader, ctx: *const GraphicsContext, cmd_pool: *co
 
             { // load vertex
                 if (self.zgltf.glb_binary) |bin| {
+                    // ================== DEBUG ===============
                     std.debug.print("  [SELFTEST] primitive.attributes (in order, with tag and accessor idx):\n", .{});
                     for (primitive.attributes) |attribute| {
                         const idx_and_label: struct { idx: usize, label: []const u8 } = switch (attribute) {
@@ -125,34 +130,81 @@ pub fn loadMeshes(self: *AssetLoader, ctx: *const GraphicsContext, cmd_pool: *co
                             bv_idx, bv.byte_offset, bv.byte_length, bv.byte_stride,
                         });
                     }
+                    // ==================================
                     for (primitive.attributes) |attribute| {
                         switch (attribute) {
-                            // [SELFTEST] SWAPPED: read NORMAL accessor as positions.
-                            // If we see recognizable geometry, the .position / .normal tags are
-                            // pointing at the wrong buffer views.
-                            .normal => |idx| {
+                            .position => |idx| {
                                 const accessor = data.accessors[idx];
+                                const bv = self.zgltf.data.buffer_views[accessor.buffer_view.?];
+                                const byte_off = bv.byte_offset + accessor.byte_offset;
+                                // ================== DEBUG ===============
+                                std.debug.print("  [ITER-DBG] .position acc[{d}] bufView={d} byte_off={d} bin.len={d} bin.ptr=0x{x}\n", .{
+                                    idx, accessor.buffer_view.?, byte_off, bin.len, @intFromPtr(bin.ptr),
+                                });
+                                if (byte_off + 12 <= bin.len) {
+                                    const raw = bin[byte_off .. byte_off + 12];
+                                    const x = @as(f32, @bitCast(std.mem.readInt(u32, raw[0..4], .little)));
+                                    const y = @as(f32, @bitCast(std.mem.readInt(u32, raw[4..8], .little)));
+                                    const z = @as(f32, @bitCast(std.mem.readInt(u32, raw[8..12], .little)));
+                                    std.debug.print("  [ITER-DBG] raw bytes at bin[{d}]: {x} {x} {x} → ({d:.4},{d:.4},{d:.4})\n", .{
+                                        byte_off, raw[0..4].*, raw[4..8].*, raw[8..12].*,
+                                        x, y, z,
+                                    });
+                                }
+                                var dbg_first = true;
+                                // ==================================
                                 var it = accessor.iterator(f32, &self.zgltf, bin);
                                 while (it.next()) |v| {
+                                    // ================== DEBUG ===============
+                                    if (dbg_first) {
+                                        std.debug.print("  [ITER-DBG] iterator first result: ({d:.4},{d:.4},{d:.4})\n", .{ v[0], v[1], v[2] });
+                                    }
+                                    // ==================================
                                     try vertices.append(self.allocator, .{
                                         .pos = .{ v[0], v[1], v[2] },
-                                        .normal = .{ 1, 0, 0 },
-                                        .col = .{ 1, 1, 1, 1 },
+                                        .normal = .{ 0, 0, 1 },
+                                        // Bright orange so GLB-loaded meshes are visually
+                                        // distinct from the white selftest/cube meshes.
+                                        .col = .{ 1.0, 0.5, 0.0, 1.0 },
                                         .uv_x = 0,
                                         .uv_y = 0,
                                     });
+                                    // ================== DEBUG ===============
+                                    if (dbg_first) {
+                                        const vx = vertices.items[vertices.items.len - 1];
+                                        std.debug.print("  [ITER-DBG] vertex[0] pos AFTER append: ({d:.4},{d:.4},{d:.4})\n", .{ vx.pos[0], vx.pos[1], vx.pos[2] });
+                                        dbg_first = false;
+                                    }
+                                    // ==================================
                                 }
                             },
-                            .position => |idx| {
-                                _ = idx;
+                            .normal => |idx| {
+                                const accessor = data.accessors[idx];
+                                var it = accessor.iterator(f32, &self.zgltf, bin);
+                                var i: u32 = 0;
+                                while (it.next()) |v| : (i += 1) {
+                                    // ================== DEBUG ===============
+                                    if (i == 0) std.debug.print("  [ITER-DBG] BEFORE normal[0] write: pos=({d:.4},{d:.4},{d:.4})\n", .{ vertices.items[initial_vertex].pos[0], vertices.items[initial_vertex].pos[1], vertices.items[initial_vertex].pos[2] });
+                                    // ==================================
+                                    vertices.items[initial_vertex + i].normal = .{ v[0], v[1], v[2] };
+                                    // ================== DEBUG ===============
+                                    if (i == 0) std.debug.print("  [ITER-DBG] AFTER  normal[0] write ({d:.4},{d:.4},{d:.4}): pos=({d:.4},{d:.4},{d:.4})\n", .{ v[0], v[1], v[2], vertices.items[initial_vertex].pos[0], vertices.items[initial_vertex].pos[1], vertices.items[initial_vertex].pos[2] });
+                                    // ==================================
+                                }
                             },
                             .texcoord => |idx| {
                                 const accessor = data.accessors[idx];
                                 var it = accessor.iterator(f32, &self.zgltf, bin);
                                 var i: u32 = 0;
                                 while (it.next()) |uv| : (i += 1) {
+                                    // ================== DEBUG ===============
+                                    if (i == 0) std.debug.print("  [ITER-DBG] BEFORE texcoord[0] write: pos=({d:.4},{d:.4},{d:.4})\n", .{ vertices.items[initial_vertex].pos[0], vertices.items[initial_vertex].pos[1], vertices.items[initial_vertex].pos[2] });
+                                    // ==================================
                                     vertices.items[initial_vertex + i].uv_x = uv[0];
                                     vertices.items[initial_vertex + i].uv_y = uv[1];
+                                    // ================== DEBUG ===============
+                                    if (i == 0) std.debug.print("  [ITER-DBG] AFTER  texcoord[0] write ({d:.4},{d:.4}): pos=({d:.4},{d:.4},{d:.4})\n", .{ uv[0], uv[1], vertices.items[initial_vertex].pos[0], vertices.items[initial_vertex].pos[1], vertices.items[initial_vertex].pos[2] });
+                                    // ==================================
                                 }
                             },
                             .color => |idx| {
@@ -170,8 +222,7 @@ pub fn loadMeshes(self: *AssetLoader, ctx: *const GraphicsContext, cmd_pool: *co
             }
         }
 
-        // [SELFTEST] Diagnostic: dump first/last vertex + index range so we can
-        // verify the loaded data is sensible. Remove once mesh rendering works.
+        // ================== DEBUG ===============
         if (vertices.items.len > 0 and indices.items.len > 0) {
             const first_v = vertices.items[0];
             const last_v = vertices.items[vertices.items.len - 1];
@@ -233,7 +284,29 @@ pub fn loadMeshes(self: *AssetLoader, ctx: *const GraphicsContext, cmd_pool: *co
             if (max_idx >= vertices.items.len) {
                 std.debug.print("[SELFTEST-loader] !!! INDEX OUT OF RANGE: max_idx={d} >= vertex_count={d}\n", .{ max_idx, vertices.items.len });
             }
+            // Print vertex positions referenced by the FIRST TRIANGLE's actual indices.
+            // This verifies that the loaded positions match expected GLTF world-space coords,
+            // not normals (which would all have |mag|~1.0).
+            if (indices.items.len >= 3) {
+                const idx0 = indices.items[0];
+                const idx1 = indices.items[1];
+                const idx2 = indices.items[2];
+                std.debug.print("  first triangle indices: [{d}, {d}, {d}]\n", .{ idx0, idx1, idx2 });
+                if (idx0 < vertices.items.len) {
+                    const p = vertices.items[idx0].pos;
+                    std.debug.print("    vtx[{d}] pos=({d:.4},{d:.4},{d:.4})\n", .{ idx0, p[0], p[1], p[2] });
+                }
+                if (idx1 < vertices.items.len) {
+                    const p = vertices.items[idx1].pos;
+                    std.debug.print("    vtx[{d}] pos=({d:.4},{d:.4},{d:.4})\n", .{ idx1, p[0], p[1], p[2] });
+                }
+                if (idx2 < vertices.items.len) {
+                    const p = vertices.items[idx2].pos;
+                    std.debug.print("    vtx[{d}] pos=({d:.4},{d:.4},{d:.4})\n", .{ idx2, p[0], p[1], p[2] });
+                }
+            }
         }
+        // ==================================
 
         try mesh.uploadMesh(ctx, cmd_pool, try vertices.toOwnedSlice(self.allocator), try indices.toOwnedSlice(self.allocator));
 

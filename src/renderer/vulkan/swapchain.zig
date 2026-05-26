@@ -23,6 +23,9 @@ pub const Swapchain = struct {
     image_index: u32,
     next_image_acquired: vk.Semaphore,
 
+    // Flag if a window resize has happened
+    resize_requested: bool = false,
+
     pub fn init(ctx: *const GraphicsContext, allocator: Allocator) !Swapchain {
         const width, const heigth = try ctx.window.ptr.getMaximumSize();
         const extent: vk.Extent2D = .{ .width = @intCast(width), .height = @intCast(heigth) };
@@ -105,6 +108,7 @@ pub const Swapchain = struct {
             .swap_images = swap_images,
             .image_index = result.image_index,
             .next_image_acquired = next_image_acquired,
+            .resize_requested = false,
         };
     }
 
@@ -202,7 +206,7 @@ pub const Swapchain = struct {
         // this will put the image we just rendered to into the visible window.
         // we want to wait on the current.render_finished semaphore for that,
         // as its necessary that drawing commands have finished before the image is displayed to the user
-        _ = try self.ctx.device.queuePresentKHR(self.ctx.present_queue.handle, &.{
+        const queue_result = try self.ctx.device.queuePresentKHR(self.ctx.present_queue.handle, &.{
             .wait_semaphore_count = 1,
             .p_wait_semaphores = @ptrCast(&current.render_finished),
             .swapchain_count = 1,
@@ -210,13 +214,22 @@ pub const Swapchain = struct {
             .p_image_indices = @ptrCast(&self.image_index),
         });
 
+        if (queue_result == .error_out_of_date_khr) {
+            self.resize_requested = true;
+        }
+
         // Step 4: Acquire next frame
-        const result = try self.ctx.device.acquireNextImageKHR(
+        const result = self.ctx.device.acquireNextImageKHR(
             self.handle,
             std.math.maxInt(u64),
             self.next_image_acquired,
             .null_handle,
-        );
+        ) catch |err| {
+            if (err == error.OutOfDateKHR) {
+                self.resize_requested = true;
+            }
+            return err;
+        };
 
         std.mem.swap(vk.Semaphore, &self.swap_images[result.image_index].image_acquired, &self.next_image_acquired);
         self.image_index = result.image_index;
@@ -241,6 +254,11 @@ pub const Swapchain = struct {
             .signal_semaphore_info_count = 1,
             .p_signal_semaphore_infos = @ptrCast(signal_semaphore),
         };
+    }
+
+    pub fn isRecreateNeeded(self: *Swapchain) bool {
+        const cur_window_size = self.ctx.window.toExtend2D();
+        return cur_window_size.width != self.extent.width or cur_window_size.height != self.extent.height or self.resize_requested;
     }
 };
 

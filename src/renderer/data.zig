@@ -56,12 +56,12 @@ pub const quad_indices = [_]Quad.Indice{
 
 pub const Indice = u16;
 // Global 3D
-pub const Vertex = packed struct {
-    pos: @Vector(3, f32),
+pub const Vertex = extern struct {
+    pos: [3]f32,
     uv_x: f32,
-    normal: @Vector(3, f32),
+    normal: [3]f32,
     uv_y: f32,
-    col: @Vector(4, f32),
+    col: [4]f32,
 };
 
 const std = @import("std");

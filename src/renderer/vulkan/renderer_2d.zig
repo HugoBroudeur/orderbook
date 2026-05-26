@@ -51,7 +51,6 @@ pub const FRAME_OVERLAP = 2;
 
 const FrameData = struct {
     clear_color: vk.ClearValue = .{ .color = .{ .float_32 = .{ 0, 0, 0, 1 } } },
-    previous_frame_window_size: struct { width: u32, height: u32 } = .{ .width = 0, .height = 0 },
     /// Contains the state if the last swapchain got an error
     swapchain_state: Swapchain.PresentState = .optimal,
     viewport: vk.Viewport = .{ .x = 0, .y = 0, .width = 0, .height = 0, .min_depth = 0, .max_depth = 1 },
@@ -67,7 +66,6 @@ const FrameData = struct {
 
     pub fn setup(self: *FrameData, ctx: *const GraphicsContext, allocator: std.mem.Allocator) !void {
         self.cmd_pool = try CommandPool.create(ctx);
-        try self.createCommandBuffer(ctx);
 
         const frame_sizes = &[_]DescriptorAllocator.PoolSizeRatio{
             .{ .vk_type = .storage_image, .ratio = 3 },
@@ -82,32 +80,10 @@ const FrameData = struct {
         }, .{ .host_visible_bit = true, .device_local_bit = true });
     }
 
-    pub fn createCommandBuffer(self: *FrameData, ctx: *const GraphicsContext) !void {
-        try ctx.device.allocateCommandBuffers(&.{
-            .command_pool = self.cmd_pool.vk_cmd_pool,
-            .level = .primary,
-            .command_buffer_count = 1,
-        }, @ptrCast(&self.cmd_buf));
-    }
-
-    pub fn shouldReset(self: *FrameData, ctx: *const GraphicsContext) bool {
-        if (self.swapchain_state == .suboptimal) return true;
-
-        if (self.previous_frame_window_size.height != ctx.window.getHeight()) return true;
-        if (self.previous_frame_window_size.width != ctx.window.getWidth()) return true;
-
-        return false;
-    }
-
-    pub fn reset(self: *FrameData, ctx: *const GraphicsContext, extent: vk.Extent2D) !void {
+    pub fn resize(self: *FrameData, extent: vk.Extent2D) void {
         self.viewport.width = @floatFromInt(extent.width);
         self.viewport.height = @floatFromInt(extent.height);
         self.scissor.extent = extent;
-        self.previous_frame_window_size = .{ .width = @intCast(ctx.window.getWidth()), .height = @intCast(ctx.window.getHeight()) };
-        self.swapchain_state = .optimal;
-
-        ctx.device.freeCommandBuffers(self.cmd_pool.vk_cmd_pool, 1, @ptrCast(&self.cmd_buf));
-        try self.createCommandBuffer(ctx);
     }
 
     pub fn destroy(self: *FrameData, ctx: *const GraphicsContext) void {
@@ -342,6 +318,7 @@ batcher: Batcher,
 is_minimised: bool = false,
 draw_extent: vk.Extent2D = .{ .width = 0, .height = 0 },
 render_scale: f32 = 1.0,
+last_window_size: vk.Extent2D,
 
 frame_number: u64 = 0,
 frame_data: [FRAME_OVERLAP]FrameData = [2]FrameData{ .{}, .{} },
@@ -354,6 +331,7 @@ pub fn init(allocator: std.mem.Allocator, ctx: *const GraphicsContext) !Renderer
         .ctx = ctx,
         .asset_loader = .init(allocator),
         .meshes = try .initCapacity(allocator, 0),
+        .last_window_size = ctx.window.toExtend2D(),
     };
 }
 
@@ -411,6 +389,7 @@ pub fn setup(self: *Renderer) !void {
 
     for (&self.frame_data) |*fd| {
         try fd.setup(self.ctx, self.allocator);
+        try self.createCommandBuffers(fd);
     }
 
     self.samplers.set(.nearest, try .create(self.ctx, .nearest));
@@ -693,6 +672,22 @@ fn fillCommandBuffers(self: *Renderer) !void {
     // }
 
     try self.ctx.device.endCommandBuffer(cmdbuf);
+}
+
+pub fn createCommandBuffers(self: *Renderer, frame: *FrameData) !void {
+    try self.ctx.device.allocateCommandBuffers(&.{
+        .command_pool = frame.cmd_pool.vk_cmd_pool,
+        .level = .primary,
+        .command_buffer_count = 1,
+    }, @ptrCast(&frame.cmd_buf));
+}
+
+pub fn resetCommandBuffers(self: *Renderer) !void {
+    var frame = self.getCurrentFrame();
+    frame.swapchain_state = .optimal;
+
+    self.ctx.device.freeCommandBuffers(frame.cmd_pool.vk_cmd_pool, 1, @ptrCast(&frame.cmd_buf));
+    try self.createCommandBuffers(frame);
 }
 
 pub fn draw_triangle(self: *Renderer, cmdbuf: vk.CommandBuffer) void {
@@ -1039,33 +1034,26 @@ pub fn draw(self: *Renderer, batches: []Batcher.Batch) !void {
         total_vertices += @intCast(batch.vertices.cur_pos);
     }
 
-    if (current_frame.shouldReset(self.ctx)) {
-        self.swapchain.recreate(.{
-            .width = @intCast(self.ctx.window.getWidth()),
-            .height = @intCast(self.ctx.window.getHeight()),
-        }) catch {
+    const cur_window_size = self.ctx.window.toExtend2D();
+
+    if (current_frame.swapchain_state == .suboptimal or self.swapchain.isRecreateNeeded()) {
+        self.swapchain.recreate(cur_window_size) catch {
             current_frame.swapchain_state = .suboptimal;
             self.stats.addSkippedDraw();
             return;
         };
-        current_frame.reset(self.ctx, self.swapchain.extent) catch {
+
+        self.resetCommandBuffers() catch {
             self.stats.addSkippedDraw();
             return;
         };
-        // Sync window size to all frames so the other frame in flight doesn't
-        // trigger a redundant second recreate next turn.
-        for (&self.frame_data) |*fd| {
-            fd.previous_frame_window_size = current_frame.previous_frame_window_size;
-        }
     }
 
     self.draw_extent = .{
         .width = @intFromFloat(@as(f32, @floatFromInt(@min(self.swapchain.extent.width, self.draw_image.width))) * self.render_scale),
         .height = @intFromFloat(@as(f32, @floatFromInt(@min(self.swapchain.extent.height, self.draw_image.height))) * self.render_scale),
     };
-    current_frame.viewport.width = @floatFromInt(self.draw_extent.width);
-    current_frame.viewport.height = @floatFromInt(self.draw_extent.height);
-    current_frame.scissor.extent = self.draw_extent;
+    current_frame.resize(self.draw_extent);
 
     self.fillCommandBuffers() catch {
         current_frame.swapchain_state = .suboptimal;
