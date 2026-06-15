@@ -48,7 +48,7 @@ ImGui is wired into the Vulkan path).
 ## Steps
 
 ### Step 1 — Add fields to `Renderer` struct
-**File:** `src/renderer/vulkan/renderer_2d.zig`
+**File:** `src/renderer/vulkan/engine.zig`
 
 Add after `is_minimised`:
 ```zig
@@ -57,7 +57,7 @@ render_scale: f32 = 1.0,
 ```
 
 ### Step 2 — Compute `draw_extent` each frame in `draw()`
-**File:** `src/renderer/vulkan/renderer_2d.zig`, function `draw()`
+**File:** `src/renderer/vulkan/engine.zig`, function `draw()`
 
 After the `shouldReset` block (whether or not recreation happened), add:
 ```zig
@@ -75,7 +75,7 @@ This replaces the current pattern where viewport/scissor are only set inside
 `FrameData.reset()` (which is only called when the swapchain is recreated).
 
 ### Step 3 — Fix the blit source rect
-**File:** `src/renderer/vulkan/renderer_2d.zig`, function `fillCommandBuffers()`
+**File:** `src/renderer/vulkan/engine.zig`, function `fillCommandBuffers()`
 
 Line ~671, change:
 ```zig
@@ -89,7 +89,7 @@ Image.vkCopyImageToImage(self.ctx, cmdbuf, draw_image.vk_image, self.swapchain.c
 ```
 
 ### Step 4 — Fix compute dispatch to use `draw_extent`
-**File:** `src/renderer/vulkan/renderer_2d.zig`, function `draw_background()`
+**File:** `src/renderer/vulkan/engine.zig`, function `draw_background()`
 
 Change:
 ```zig
@@ -134,7 +134,7 @@ The plan originally said these were "kept as-is", but verification found three b
 
 ### Bug 1 — Command buffer leak in `reset()` (severity: medium)
 
-**File:** `src/renderer/vulkan/renderer_2d.zig`, lines 103–112
+**File:** `src/renderer/vulkan/engine.zig`, lines 103–112
 
 `reset()` calls `createCommandBuffer()` which allocates a new `vk.CommandBuffer` into
 `self.cmd_buf` without freeing the previous one. Every swapchain recreate (i.e. every
@@ -159,7 +159,7 @@ pub fn reset(self: *FrameData, ctx: *const GraphicsContext, extent: vk.Extent2D)
 
 ### Bug 2 — `errdefer` is ordered after `try` in `createCommandBuffer()` (severity: low)
 
-**File:** `src/renderer/vulkan/renderer_2d.zig`, lines 85–92
+**File:** `src/renderer/vulkan/engine.zig`, lines 85–92
 
 ```zig
 pub fn createCommandBuffer(self: *FrameData, ctx: *const GraphicsContext) !void {
@@ -177,7 +177,7 @@ silent. Fix by removing the dead `errdefer` (cleanup is now handled by the expli
 
 ### Bug 3 — Double swapchain recreate with `FRAME_OVERLAP = 2` (severity: low)
 
-**File:** `src/renderer/vulkan/renderer_2d.zig`, lines 54, 94–101, 109
+**File:** `src/renderer/vulkan/engine.zig`, lines 54, 94–101, 109
 
 `previous_frame_window_size` is stored per `FrameData` instance. After a resize:
 

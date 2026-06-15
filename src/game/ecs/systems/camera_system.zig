@@ -1,4 +1,5 @@
 const std = @import("std");
+const zm = @import("zmath");
 const log = std.log.scoped(.camera_system);
 const zecs = @import("zecs");
 // const log = @import("../../debug/log.zig").ecs;
@@ -6,7 +7,7 @@ const System = @import("system.zig");
 const Event = @import("../../../events/event.zig");
 const EcsManager = @import("../../ecs_manager.zig");
 const Ecs = @import("../ecs.zig");
-const Camera = @import("../../../renderer/camera.zig");
+const Camera = @import("../../../engine/camera.zig");
 
 const CameraSystem = @This();
 
@@ -51,12 +52,18 @@ pub fn update(self: *CameraSystem) void {
     while (iter.next(&self.ecs.entities)) |vw| {
         const camera = vw.camera;
         camera.setLookAt(vw.rotation.yaw, vw.rotation.pitch);
-        camera.pos = .{
-            camera.pos[0] + @as(f32, @floatFromInt(dt)) * vw.velocity.x,
-            camera.pos[1] + @as(f32, @floatFromInt(dt)) * vw.velocity.y,
-            camera.pos[2] + @as(f32, @floatFromInt(dt)) * vw.velocity.z,
-            camera.pos[3],
-        };
+
+        const speed = @as(f32, @floatFromInt(dt));
+        const rot = zm.matFromQuat(camera.look_at);
+
+        const forward = zm.normalize3(zm.mul(zm.f32x4(0, 0, -1, 0), rot));
+        const right = zm.normalize3(zm.mul(zm.f32x4(1, 0, 0, 0), rot));
+        const up = zm.f32x4(0, 1, 0, 0);
+
+        camera.pos += forward * zm.f32x4s(speed * vw.velocity.z);
+        camera.pos += right * zm.f32x4s(speed * vw.velocity.x);
+        camera.pos += up * zm.f32x4s(speed * vw.velocity.y);
+        camera.pos[3] = 1;
     }
 }
 
@@ -73,10 +80,12 @@ pub fn process(self: *CameraSystem, event: Event) void {
                 // log.info("Key Pressed {}", .{event.ptr.key_down.key.?});
 
                 switch (event.ptr.key_down.key.?) {
-                    .d => vw.velocity.z = -SPEED,
-                    .t => vw.velocity.z = SPEED,
+                    .d => vw.velocity.z = SPEED,
+                    .t => vw.velocity.z = -SPEED,
                     .r => vw.velocity.x = -SPEED,
                     .s => vw.velocity.x = SPEED,
+                    .space => vw.velocity.y = SPEED,
+                    .left_shift => vw.velocity.y = -SPEED,
                     else => {},
                 }
             },
@@ -88,15 +97,24 @@ pub fn process(self: *CameraSystem, event: Event) void {
                     .t => vw.velocity.z = 0,
                     .r => vw.velocity.x = 0,
                     .s => vw.velocity.x = 0,
+                    .space => vw.velocity.y = 0,
+                    .left_shift => vw.velocity.y = 0,
+
                     else => {},
                 }
             },
             .mouse_motion => {
+                if (!self.ecs.get_singleton(Ecs.components.MouseState).locked) break;
                 vw.rotation.yaw += event.ptr.mouse_motion.x_rel / MOUSE_SENSITIVITY;
-                vw.rotation.pitch += event.ptr.mouse_motion.y_rel / MOUSE_SENSITIVITY;
+                const max_pitch = std.math.pi / 2.0 - 0.01;
+                vw.rotation.pitch = std.math.clamp(
+                    vw.rotation.pitch + event.ptr.mouse_motion.y_rel / MOUSE_SENSITIVITY,
+                    -max_pitch,
+                    max_pitch,
+                );
             },
             .mouse_wheel => {
-                vw.camera.fov += event.ptr.mouse_wheel.scroll_y;
+                vw.camera.setFov(vw.camera.fov + event.ptr.mouse_wheel.scroll_y);
             },
             else => {},
         }

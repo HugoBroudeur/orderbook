@@ -3,15 +3,20 @@ const std = @import("std");
 // Register external module from "./build.zig.zon" file.
 pub fn addExternalModule(b: *std.Build, module: *std.Build.Module) void {
     const allocator = b.allocator;
-    const abs_path = b.build_root.handle.realpathAlloc(allocator, ".") catch unreachable;
+    var thread = std.Io.Threaded.init(allocator, .{});
+
+    // Get executable name from current directory name
+    const abs_path = b.build_root.handle.realPathFileAlloc(thread.io(), ".", allocator) catch unreachable;
     defer allocator.free(abs_path);
-    const fp = std.fs.cwd().openFile("build.zig.zon", .{}) catch |err| {
+
+    const cwd = std.Io.Dir.cwd();
+    var fp = cwd.openFile(thread.io(), "build.zig.zon", .{}) catch |err| {
         std.debug.print("Failed to open file: {}\n", .{err});
         return;
     };
-    defer fp.close();
+    defer fp.close(thread.io());
 
-    const file_size = (fp.stat() catch |err| {
+    const file_size = (fp.stat(thread.io()) catch |err| {
         std.debug.print("Stat error: {}\n", .{err});
         return;
     }).size;
@@ -22,14 +27,22 @@ pub fn addExternalModule(b: *std.Build, module: *std.Build.Module) void {
     };
     defer allocator.free(content);
 
-    const bytes_read = fp.read(content) catch |err| {
-        std.debug.print("Read error: {}\n", .{err});
+    var read_buf: [4096]u8 = undefined;
+    var reader = fp.reader(thread.io(), &read_buf);
+    reader.interface.readSliceAll(content) catch |err| {
+        std.debug.print("Failed to read file: {}\n", .{err});
         return;
     };
 
+    // const bytes_read = try fp.readStreaming(thread.io(), content);
+    // const bytes_read = fp.read(content) catch |err| {
+    //     std.debug.print("Read error: {}\n", .{err});
+    //     return;
+    // };
+
     var state: i32 = 1;
     var idx: ?usize = undefined;
-    var lines = std.mem.splitScalar(u8, content[0..bytes_read], '\n');
+    var lines = std.mem.splitScalar(u8, content[0..file_size], '\n');
 
     while (lines.next()) |sLine| {
         switch (state) {
@@ -50,7 +63,7 @@ pub fn addExternalModule(b: *std.Build, module: *std.Build.Module) void {
                     var itr = std.mem.splitSequence(u8, sLine, "=");
                     if (itr.next()) |pname| {
                         const plib_name = std.mem.trim(u8, pname, " ");
-                        const lib_name = std.mem.trimLeft(u8, plib_name, ".");
+                        const lib_name = std.mem.trimStart(u8, plib_name, ".");
 
                         idx = std.mem.indexOf(u8, sLine, ".path");
                         if (idx) |_| {

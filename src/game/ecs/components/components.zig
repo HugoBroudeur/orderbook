@@ -335,9 +335,10 @@ pub const InputsState = struct {
 };
 
 pub const MouseState = struct {
-    cursor: vec.Vec2,
-    speed: vec.Vec2,
-    scroll: vec.Vec2,
+    locked: bool = false,
+    // cursor: vec.Vec2,
+    // speed: vec.Vec2,
+    // scroll: vec.Vec2,
     // buttons: std.EnumArray(sapp.Mousebutton, sapp.EventType),
 };
 

@@ -1,4 +1,6 @@
 const std = @import("std");
+const Socket = std.Io.net.Socket;
+const Protocol = std.Io.net.Protocol;
 const socket = @import("socket.zig");
 const networking = @import("main.zig");
 
@@ -12,10 +14,11 @@ pub const ServerContext = struct { ip: []const u8, port: u16, max_threads_count:
 pub const TcpServer = struct {
     const Self = @This();
 
+    io: std.Io,
     allocator: std.mem.Allocator,
-    address: std.net.Address,
+    address: std.Io.net.IpAddress,
 
-    socket: socket.TcpSocket,
+    // socket: socket.TcpSocket,
     // thread_pool: *std.Thread.Pool,
     max_threads_count: usize,
     is_started: bool,
@@ -23,16 +26,14 @@ pub const TcpServer = struct {
     client_sockets: std.ArrayList(*socket.ClientSocket),
     polls: [4096]std.posix.pollfd = undefined,
 
-    pub fn init(allocator: std.mem.Allocator, ctx: ServerContext) !Self {
-        const address = try std.net.Address.resolveIp(ctx.ip, ctx.port);
-        // var pool: std.Thread.Pool = undefined;
-        // try pool.init(.{ .allocator = allocator, .n_jobs = ctx.max_threads_count });
-        // std.log.info("{any}", .{pool});
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, ctx: ServerContext) !Self {
+        const address = try std.Io.net.IpAddress.resolve(io, ctx.ip, ctx.port);
 
         return .{
+            .io = io,
             .allocator = allocator,
             .address = address,
-            .socket = socket.TcpSocket.init(address.any.family),
+            // .socket = socket.TcpSocket.init(address.any.family),
             // .thread_pool = &pool,
             .max_threads_count = ctx.max_threads_count,
             .is_started = false,
@@ -44,7 +45,6 @@ pub const TcpServer = struct {
     pub fn deinit(self: *Self) void {
         // self.thread_pool.deinit();
         self.client_sockets.deinit(self.allocator);
-        self.socket.deinit();
     }
 
     pub fn start(self: *Self) !void {
@@ -54,8 +54,8 @@ pub const TcpServer = struct {
 
         std.log.debug("[DEBUG][TcpServer.start] Starting server", .{});
 
-        try self.socket.open();
-        try self.socket.listen(&self.address);
+        // try self.socket.open();
+        // try self.socket.listen(&self.address);
 
         const poll: std.posix.pollfd = .{
             .fd = self.socket.listener.?,
@@ -79,6 +79,9 @@ pub const TcpServer = struct {
         try pool.init(.{ .allocator = self.allocator, .n_jobs = self.max_threads_count });
         defer pool.deinit();
 
+        const server = try self.address.listen(self.io, .{ .mode = Socket.Mode.stream, .protocol = Protocol.tcp });
+        _ = server;
+
         while (true) {
             const client = socket.ClientSocket.wait_for_client(self.socket) catch |err| {
                 std.log.err("[ERROR][TcpServer.listen] Error ClientSocket Wait for Client: {}", .{err});
@@ -100,8 +103,9 @@ pub const TcpServer = struct {
 };
 
 pub const GrpcServer = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
-    address: std.net.Address,
+    address: std.Io.net.IpAddress,
 
     socket: socket.TcpSocket,
     // server: std.net.StreamServer,
@@ -111,9 +115,10 @@ pub const GrpcServer = struct {
     is_started: bool,
     log_level: networking.LogLevel,
 
-    pub fn init(allocator: std.mem.Allocator, ip: []const u8, port: u16) !GrpcServer {
-        const address = try std.net.Address.resolveIp(ip, port);
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, ip: []const u8, port: u16) !GrpcServer {
+        const address = try std.Io.net.IpAddress.resolve(io, ip, port);
         return .{
+            .io = io,
             .allocator = allocator,
             .address = address,
             .socket = socket.TcpSocket.init(address.any.family),

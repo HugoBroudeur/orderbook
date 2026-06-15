@@ -6,7 +6,10 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const allocator = b.allocator;
-    const current_dir_abs = b.build_root.handle.realpathAlloc(allocator, ".") catch unreachable;
+    var thread = std.Io.Threaded.init(allocator, .{});
+
+    // Get executable name from current directory name
+    const current_dir_abs = b.build_root.handle.realPathFileAlloc(thread.io(), ".", allocator) catch unreachable;
     defer allocator.free(current_dir_abs);
     const mod_name = std.fs.path.basename(current_dir_abs);
 

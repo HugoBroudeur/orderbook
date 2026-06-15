@@ -17,13 +17,13 @@ pub fn init(allocator: std.mem.Allocator, shard_count: usize) !OrderBook {
         .allocator = allocator,
         .bids = try PriceLevelMap(Side.Buy).init(allocator),
         .asks = try PriceLevelMap(Side.Sell).init(allocator),
-        .orders = Orders.init(allocator),
+        .orders = .empty,
         .shard_count = shard_count,
     };
 }
 
 pub fn deinit(self: *OrderBook) void {
-    self.orders.deinit();
+    self.orders.deinit(self.allocator);
     self.bids.deinit();
     self.asks.deinit();
 }
@@ -121,7 +121,7 @@ pub const Order = struct {
 
 const OrderKey = struct { id: OrderId, price: Price };
 
-const Orders = std.AutoArrayHashMap(OrderKey, Order);
+const Orders = std.array_hash_map.Auto(OrderKey, Order);
 const OrderEntry = struct { key: OrderKey, order: Order };
 
 const OrderModify = struct {
@@ -185,15 +185,15 @@ fn PriceLevelMap(comptime side: Side) type {
     return struct {
         const Self = @This();
         allocator: std.mem.Allocator,
-        levels: std.AutoArrayHashMap(Price, PriceLevel),
+        levels: std.array_hash_map.Auto(Price, PriceLevel),
         sorted_prices: std.ArrayList(Price),
         is_sorted: bool,
         side: Side,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
             return .{
-                .levels = std.AutoArrayHashMap(Price, PriceLevel).init(allocator),
-                .sorted_prices = try std.ArrayList(Price).initCapacity(allocator, 1),
+                .levels = .empty,
+                .sorted_prices = try .initCapacity(allocator, 1),
                 .is_sorted = false,
                 .side = side,
                 .allocator = allocator,
@@ -205,7 +205,7 @@ fn PriceLevelMap(comptime side: Side) type {
         }
 
         pub fn deinit(self: *Self) void {
-            self.levels.deinit();
+            self.levels.deinit(self.allocator);
             self.sorted_prices.deinit(self.allocator);
         }
 
@@ -230,12 +230,12 @@ fn PriceLevelMap(comptime side: Side) type {
             return removed;
         }
 
-        pub fn iterator(self: *Self) std.AutoArrayHashMap(Price, PriceLevel).Iterator {
+        pub fn iterator(self: *Self) std.array_hash_map.Auto(Price, PriceLevel).Iterator {
             return self.levels.iterator();
         }
 
         pub fn put(self: *Self, price: Price, level: PriceLevel) !void {
-            try self.levels.put(price, level);
+            try self.levels.put(self.allocator, price, level);
             self.is_sorted = false;
         }
 
@@ -643,7 +643,7 @@ fn updateMatchedOrder(self: *OrderBook, matched_order: *OrderEntry, matched_amou
     }
 
     try self.updatePriceLevel(matched_order.order.side, execution_price, -@as(i64, @intCast(matched_amount)), 0);
-    try self.orders.put(matched_order.key, matched_order.order);
+    try self.orders.put(self.allocator, matched_order.key, matched_order.order);
 }
 
 // fn matchOrders(self: *Self) !Trades {
@@ -815,17 +815,18 @@ pub fn addOrder(self: *OrderBook, order: Order) !Trades {
 
     const key: OrderKey = .{ .id = order.id, .price = order.price };
     if (self.orders.contains(key)) {
-        return Trades{};
+        return .empty;
     }
 
     if (order.order_type == OrderType.FillAndKill and !try self.canMatch(order.side, order.price)) {
-        return Trades{};
+        return .empty;
     }
 
     // const shard_index = self.priceToShard(order.price);
 
     // Update orders
     try self.orders.put(
+        self.allocator,
         .{ .price = order.price, .id = order.id },
         order,
     );

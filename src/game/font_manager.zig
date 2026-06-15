@@ -11,7 +11,7 @@ pub const fonts: [2][]const u8 = .{
 
 pub const MainFont = "assets/fonts/SNPro/SNPro-Regular.ttf";
 
-loaded_fonts: std.AutoArrayHashMap(FontKey, Font),
+loaded_fonts: std.array_hash_map.Auto(FontKey, Font),
 
 allocator: std.mem.Allocator,
 is_init: bool,
@@ -35,7 +35,7 @@ pub const FontKey = struct {
 pub fn init(allocator: std.mem.Allocator) FontManager {
     return .{
         .allocator = allocator,
-        .loaded_fonts = .init(allocator),
+        .loaded_fonts = .empty,
         .is_init = false,
     };
 }
@@ -45,7 +45,7 @@ pub fn deinit(self: *FontManager) void {
     while (it.next()) |font| {
         font.value_ptr.sdl_font.deinit();
     }
-    self.loaded_fonts.deinit();
+    self.loaded_fonts.deinit(self.allocator);
 
     sdl.ttf.quit();
 }
@@ -97,7 +97,7 @@ fn openFont(self: *FontManager, path: []const u8, size: f32) !FontKey {
 
     const key: FontKey = .{ .id = current_id };
 
-    try self.loaded_fonts.put(key, Font.init(path, sdl_font, size));
+    try self.loaded_fonts.put(self.allocator, key, Font.init(path, sdl_font, size));
     current_id += 1;
 
     return key;

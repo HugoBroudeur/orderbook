@@ -9,13 +9,13 @@ const GraphicsContext = @import("../core/graphics_context.zig");
 const ClayManager = @import("../game/clay_manager.zig");
 const Config = @import("../config.zig");
 const DbManager = @import("../game/db_manager.zig");
-const DrawCommand = @import("../renderer/command.zig"); // 2D
+const DrawCommand = @import("../engine/command.zig"); // 2D
 const EcsManager = @import("../game/ecs_manager.zig");
 const FontManager = @import("../game/font_manager.zig");
 const Layer = @import("../core/layer.zig");
 const MarketManager = @import("../game/market_manager.zig");
-const Renderer2D = @import("../renderer/sdl/renderer_2d.zig");
-const SceneManager = @import("../game/scene_manager.zig");
+const Engine = @import("../engine/sdl/renderer_2d.zig");
+const SceneManager = @import("../engine/scene_manager.zig");
 // const UiManager = @import("../game/ui_manager.zig");
 // const UiSystem = @import("../game/ecs/systems/ui_system.zig");
 
@@ -32,7 +32,7 @@ draw_queue: DrawCommand.DrawQueue = undefined,
 ecs_manager: EcsManager = undefined,
 font_manager: FontManager = undefined,
 market_manager: MarketManager = undefined,
-renderer_2d: Renderer2D = undefined,
+engine: Engine = undefined,
 scene_manager: SceneManager = undefined,
 // ui_manager: UiManager = undefined,
 // ui_system: UiSystem = undefined,
@@ -55,7 +55,7 @@ pub fn deinit(self: *SandboxLayer) void {
     self.market_manager.deinit();
     self.ecs_manager.deinit();
     self.scene_manager.deinit();
-    self.renderer_2d.deinit();
+    self.engine.deinit();
     // self.ui_manager.deinit();
     self.font_manager.deinit();
     self.scene_manager.deinit();
@@ -79,8 +79,8 @@ pub fn onAttach(self: *SandboxLayer) !void {
     // self.ui_manager = UiManager.init(self.allocator, &self.db_manager, &self.ui_system, &self.font_manager);
     self.market_manager = MarketManager.init(self.allocator, &self.db_manager);
     self.clay_manager = try ClayManager.init(self.allocator, &self.font_manager);
-    self.renderer_2d = try Renderer2D.init(self.allocator, self.ctx);
-    self.draw_queue = try DrawCommand.DrawQueue.init(self.allocator, &self.renderer_2d);
+    self.engine = try Engine.init(self.allocator, self.ctx);
+    self.draw_queue = try DrawCommand.DrawQueue.init(self.allocator, &self.engine);
     self.scene_manager = SceneManager.init(&self.draw_queue);
     self.ecs_manager = try EcsManager.init(self.allocator, &self.db_manager, &self.market_manager, &self.scene_manager);
 
@@ -88,7 +88,7 @@ pub fn onAttach(self: *SandboxLayer) !void {
         std.log.err("[App] Can't setup the EcsManager : {}", .{err});
         return err;
     };
-    self.renderer_2d.setup(
+    self.engine.setup(
         &self.font_manager,
         &self.clay_manager,
     ) catch |err| {
@@ -123,12 +123,12 @@ pub fn onUpdate(self: *SandboxLayer) void {
         }
         assert(self.ctx.framerate.update_count > 0); // Make sure at least 1 update happened
         if (self.ctx.framerate.shouldDraw()) {
-            self.renderer_2d.startFrame();
+            self.engine.startFrame();
             self.scene_manager.render(&self.ecs_manager);
         }
     } else {
         self.ecs_manager.progress();
-        self.renderer_2d.startFrame();
+        self.engine.startFrame();
         self.scene_manager.render(&self.ecs_manager);
     }
 }

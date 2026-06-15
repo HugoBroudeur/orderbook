@@ -10,19 +10,20 @@ const GraphicsContext = @import("../core/graphics_context.zig");
 const ClayManager = @import("../game/clay_manager.zig");
 const Config = @import("../config.zig");
 const DbManager = @import("../game/db_manager.zig");
-const DrawCommand = @import("../renderer/command.zig"); // 2D
+const DrawCommand = @import("../engine/command.zig"); // 2D
 const EcsManager = @import("../game/ecs_manager.zig");
 const FontManager = @import("../game/font_manager.zig");
 const Layer = @import("../core/layer.zig");
 const MarketManager = @import("../game/market_manager.zig");
-const Renderer2D = @import("../renderer/vulkan/renderer_2d.zig");
-const SceneManager = @import("../game/scene_manager.zig");
+const Engine = @import("../engine/vulkan/engine.zig");
+const SceneManager = @import("../engine/scene_manager.zig");
 // const UiManager = @import("../game/ui_manager.zig");
 // const UiSystem = @import("../game/ecs/systems/ui_system.zig");
 
 const SandboxLayer = @This();
 
 allocator: std.mem.Allocator,
+io: std.Io,
 label: []const u8 = "Sandbox Layer",
 config: Config,
 ctx: *GraphicsContext,
@@ -33,33 +34,28 @@ draw_queue: DrawCommand.DrawQueue = undefined,
 ecs_manager: EcsManager = undefined,
 font_manager: FontManager = undefined,
 market_manager: MarketManager = undefined,
-renderer_2d: Renderer2D = undefined,
+engine: Engine = undefined,
 scene_manager: SceneManager = undefined,
 // ui_manager: UiManager = undefined,
 // ui_system: UiSystem = undefined,
 
-pub fn init(
-    allocator: std.mem.Allocator,
-    config: Config,
-    ctx: *GraphicsContext,
-) SandboxLayer {
+pub fn init(allocator: std.mem.Allocator, config: Config, ctx: *GraphicsContext, io: std.Io) SandboxLayer {
     return .{
         .allocator = allocator,
         .config = config,
         .ctx = ctx,
+        .io = io,
     };
 }
 
 pub fn deinit(self: *SandboxLayer) void {
-    self.renderer_2d.deinit();
+    self.engine.deinit();
     self.draw_queue.deinit();
     self.db_manager.deinit();
     self.market_manager.deinit();
     self.ecs_manager.deinit();
     self.scene_manager.deinit();
-    // self.ui_manager.deinit();
     self.font_manager.deinit();
-    self.scene_manager.deinit();
     self.clay_manager.deinit();
 }
 
@@ -81,17 +77,17 @@ pub fn onAttach(self: *SandboxLayer) !void {
     // self.ui_manager = UiManager.init(self.allocator, &self.db_manager, &self.ui_system, &self.font_manager);
     self.market_manager = MarketManager.init(self.allocator, &self.db_manager);
     self.clay_manager = try ClayManager.init(self.allocator, &self.font_manager);
-    self.renderer_2d = try Renderer2D.init(self.allocator, self.ctx);
-    self.draw_queue = try DrawCommand.DrawQueue.init(self.allocator, &self.renderer_2d);
-    self.scene_manager = SceneManager.init(&self.draw_queue);
+    self.engine = try Engine.init(self.allocator, self.ctx, self.io);
+    self.draw_queue = try DrawCommand.DrawQueue.init(self.allocator, &self.engine);
+    self.scene_manager = SceneManager.init(&self.draw_queue, self.io);
     self.ecs_manager = try EcsManager.init(self.allocator, &self.db_manager, &self.market_manager, &self.scene_manager);
 
     self.ecs_manager.setup() catch |err| {
         std.log.err("[App] Can't setup the EcsManager : {}", .{err});
         return err;
     };
-    self.renderer_2d.setup() catch |err| {
-        std.log.err("[App] Can't setup the 2D Renderer : {}", .{err});
+    self.engine.setup() catch |err| {
+        std.log.err("[App] Can't setup the Vulkan Engine : {}", .{err});
         return err;
     };
     self.font_manager.setup() catch |err| {
@@ -129,7 +125,7 @@ pub fn onUpdate(self: *SandboxLayer) void {
                 return;
             }
             // self.ui_manager.renderFrame(&self.ecs_manager);
-            self.scene_manager.render(&self.ecs_manager, self.ctx);
+            self.scene_manager.render(&self.ecs_manager, &self.engine);
             // self.ecs_manager.render();
         }
     } else {
@@ -140,7 +136,7 @@ pub fn onUpdate(self: *SandboxLayer) void {
             return;
         }
         // self.ui_manager.renderFrame(&self.ecs_manager);
-        self.scene_manager.render(&self.ecs_manager, self.ctx);
+        self.scene_manager.render(&self.ecs_manager, &self.engine);
         // self.ecs_manager.render();
         // self.ecs_manager.render();
     }

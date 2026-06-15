@@ -37,7 +37,7 @@ Set only `time[0]` at the call site in `scene_manager.zig`.
 
 ## Step 2 — Restore the mesh descriptor layout
 
-**File**: `src/renderer/vulkan/renderer_2d.zig`, `GlobalDescriptor.setup()`
+**File**: `src/renderer/vulkan/engine.zig`, `GlobalDescriptor.setup()`
 
 Uncomment and fix the `// { // Mesh ... }` block (lines ~211–236). The mesh shader (`mesh.slang`) expects:
 
@@ -84,7 +84,7 @@ ctx.device.destroyDescriptorSetLayout(self.vk_mesh_descriptor_set_layout, null);
 
 ## Step 3 — Fix `createMeshPipeline()` set layout
 
-**File**: `src/renderer/vulkan/renderer_2d.zig`, `createMeshPipeline()`
+**File**: `src/renderer/vulkan/engine.zig`, `createMeshPipeline()`
 
 Currently the set_layouts array only contains material (set 0 in practice, but intended for set 1). Fix to match what `draw_mesh()` binds:
 
@@ -112,7 +112,7 @@ try self.createMeshPipeline();
 
 ## Step 4 — Fix `draw_mesh()` to write the scene descriptor and iterate meshes
 
-**File**: `src/renderer/vulkan/renderer_2d.zig`, `draw_mesh()`
+**File**: `src/renderer/vulkan/engine.zig`, `draw_mesh()`
 
 Two problems:
 
@@ -162,7 +162,7 @@ for (self.meshes.items) |*mesh| {
 
 ## Step 5 — Uncomment `draw_mesh()` in `fillCommandBuffers()`
 
-**File**: `src/renderer/vulkan/renderer_2d.zig`, `fillCommandBuffers()`
+**File**: `src/renderer/vulkan/engine.zig`, `fillCommandBuffers()`
 
 ```zig
 // Uncomment:

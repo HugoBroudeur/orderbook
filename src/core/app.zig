@@ -39,8 +39,8 @@ var layer_stack: LayerStack.LayerStack(MAX_LAYERS, MAX_OVERLAYS) = undefined;
 var sandbox_sdl_layer: SandboxSdlLayer = undefined;
 var sandbox_vulkan_layer: SandboxVulkanLayer = undefined;
 
-pub fn init(allocator: std.mem.Allocator, config: Config) !void {
-    errdefer shutdown();
+pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config) !void {
+    errdefer shutdown(io);
     // tracy.frameMarkStart("Main");
 
     graphics_context = try GraphicsContext.init(allocator);
@@ -49,14 +49,14 @@ pub fn init(allocator: std.mem.Allocator, config: Config) !void {
 
     // sandbox_sdl_layer = SandboxSdlLayer.init(allocator, config, &graphics_context);
     // try pushLayer(sandbox_sdl_layer.interface());
-    sandbox_vulkan_layer = SandboxVulkanLayer.init(allocator, config, &graphics_context);
+    sandbox_vulkan_layer = SandboxVulkanLayer.init(allocator, config, &graphics_context, io);
     try pushLayer(sandbox_vulkan_layer.interface());
 
     has_booted = true;
 }
 
-pub fn run() void {
-    defer shutdown();
+pub fn run(io: std.Io) void {
+    defer shutdown(io);
 
     graphics_context.startFramelimiter(FPS_LIMITER);
     while (running) {
@@ -97,7 +97,7 @@ pub fn pollEvent() void {
     }
 }
 
-pub fn shutdown() void {
+pub fn shutdown(io: std.Io) void {
     if (has_booted) {
         for (layer_stack.stack()) |layer| {
             layer.deinit();
@@ -106,7 +106,7 @@ pub fn shutdown() void {
     graphics_context.deinit();
 
     std.log.info("[App] Closing... Good Bye!", .{});
-    tracy.cleanExit();
+    tracy.cleanExit(io);
 }
 
 pub fn pushLayer(layer: Layer) !void {

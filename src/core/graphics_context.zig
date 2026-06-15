@@ -1,5 +1,6 @@
 // This a Graphic Context, using SDL to handle the window and display
 const std = @import("std");
+const log = std.log.scoped(.graphics_context);
 const sdl = @import("sdl3");
 const vk = @import("vulkan");
 
@@ -115,7 +116,7 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
     ctx.allocator = allocator;
     { // Init SDL, must be first
         sdl.init(SDL_INIT_FLAGS) catch |err| {
-            std.log.err("Error: {?s}", .{sdl.errors.get()});
+            log.err("Error: {?s}", .{sdl.errors.get()});
             return err;
         };
         sdl.log.setAllPriorities(.debug);
@@ -124,7 +125,7 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
     { // Create SDL Window + choose Display
         var display: Display = try .init();
         var window = Window.create(.{}) catch |err| {
-            std.log.err("[App] Can't create the Window : {}", .{err});
+            log.err("Can't create the Window : {}", .{err});
             return err;
         };
         display.detectCurrentDisplay(&window);
@@ -137,15 +138,12 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
         ctx.framerate = framerate;
     }
 
-    // ctx.vkb = BaseWrapper.load(c.glfwGetInstanceProcAddress);
-    const a = try sdl.vulkan.getVkGetInstanceProcAddr();
-
     const VkGetInstanceProcAddr = *const fn (
         instance: vk.Instance,
         pName: [*:0]const u8,
     ) callconv(.c) ?*anyopaque;
 
-    const vkGetInstanceProcAddr: VkGetInstanceProcAddr = @ptrCast(a);
+    const vkGetInstanceProcAddr: VkGetInstanceProcAddr = @ptrCast(try sdl.vulkan.getVkGetInstanceProcAddr());
     ctx.vkb = BaseWrapper.load(vkGetInstanceProcAddr);
 
     if (try checkLayerSupport(&ctx.vkb, ctx.allocator) == false) {
@@ -158,13 +156,16 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
 
     var extension_names: std.ArrayList([*:0]const u8) = .empty;
     defer extension_names.deinit(allocator);
+
     for (required_extensions) |extension| {
         try extension_names.append(allocator, extension.name);
-        std.log.debug("[GraphicsContext] Loading Vulkan extension: {s}", .{extension.name});
     }
-
     const sdl_exts = try sdl.vulkan.getInstanceExtensions();
     try extension_names.appendSlice(allocator, sdl_exts);
+
+    for (extension_names.items) |extension| {
+        log.debug("Requiring layer extension: {s}", .{extension});
+    }
 
     const instance = try ctx.vkb.createInstance(&.{
         .p_application_info = &.{
@@ -234,7 +235,7 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
 pub fn deinit(self: *GraphicsContext) void {
     if (self.device_found) {
         self.device.deviceWaitIdle() catch |err| {
-            std.log.err("[GraphicsContext.deinit] Error {}", .{err});
+            log.err("Error {}", .{err});
         };
         self.device.destroyDevice(null);
         self.allocator.destroy(self.vkd);
@@ -274,7 +275,7 @@ pub fn startFramelimiter(self: *GraphicsContext, usage: bool) void {
 fn checkLayerSupport(vkb: *const BaseWrapper, alloc: std.mem.Allocator) !bool {
     const available_layers = try vkb.enumerateInstanceLayerPropertiesAlloc(alloc);
     for (available_layers) |layer| {
-        std.log.debug("[GraphicsContext] Avaiblable Layer: {s}", .{layer.layer_name});
+        log.debug("Avaiblable Layer: {s}", .{layer.layer_name});
     }
     defer alloc.free(available_layers);
     for (required_layer_names) |required_layer| {
@@ -331,7 +332,7 @@ fn initializeCandidate(instance: Instance, candidate: DeviceCandidate) !vk.Devic
         2;
 
     for (required_device_extensions) |extension| {
-        std.log.debug("[GraphicsContext] Loading Vulkan extension: {s}", .{extension});
+        log.debug("Requiring device extension: {s}", .{extension});
     }
 
     return try instance.createDevice(candidate.pdev, &.{
@@ -473,7 +474,7 @@ fn checkExtensionSupport(
     defer allocator.free(propsv);
 
     // for (propsv) |extension| {
-    //     std.log.debug("[GraphicsContext] Avaiblable Extension: {s}", .{extension.extension_name});
+    //     log.debug("Avaiblable device extension: {s}", .{extension.extension_name});
     // }
 
     for (required_device_extensions) |ext| {
@@ -499,7 +500,7 @@ fn checkLayerExtensionSupport(
         defer allocator.free(propsv);
 
         for (propsv) |extension| {
-            std.log.debug("[GraphicsContext] Avaiblable Layer Extension: {s}", .{extension.extension_name});
+            log.debug("Avaiblable instance extension: {s}", .{extension.extension_name});
         }
     }
 

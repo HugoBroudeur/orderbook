@@ -2,7 +2,6 @@ const std = @import("std");
 const sdl = @import("sdl3");
 const clay = @import("zclay");
 const FontManager = @import("font_manager.zig");
-const DrawApi = @import("draw_api.zig");
 
 const Color = @import("colors.zig");
 
@@ -35,7 +34,7 @@ pub fn setup(self: *ClayManager) !void {
     self.font = self.font_manager.getFont(key).?;
 
     // Setup Clay
-    const arena: clay.Arena = clay.createArenaWithCapacityAndMemory(self.buffer);
+    const arena: clay.Arena = .init(self.buffer);
     _ = clay.initialize(arena, .{ .h = 1000, .w = 1000 }, .{});
     clay.setMeasureTextFunction(void, {}, FontManager.measureText);
 }

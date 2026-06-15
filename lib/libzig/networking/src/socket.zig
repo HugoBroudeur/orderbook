@@ -1,30 +1,32 @@
 const std = @import("std");
+const net = std.Io.net;
+const posix = std.posix;
 const networking = @import("main.zig");
 
 const BACKLOG = 128;
 
 pub const UdpSocket = struct {
     const Self = @This();
-    const tpe: std.posix.SOCK = std.posix.SOCK.DGRAM;
-    const protocol: std.posix.IPPROTO = std.posix.IPPROTO.UDP;
-    listener: ?std.posix.socket_t,
+    const tpe: posix.SOCK = posix.SOCK.DGRAM;
+    const protocol: posix.IPPROTO = posix.IPPROTO.UDP;
+    listener: ?posix.socket_t,
 
     pub fn init(domain: u32) Self {
-        return .{ .listener = try std.posix.socket(domain, tpe, protocol) };
+        return .{ .listener = try posix.socket(domain, tpe, protocol) };
     }
     pub fn deinit(self: Self) void {
-        std.posix.close(self.listener);
+        posix.close(self.listener);
     }
 };
 
 pub const TcpSocket = struct {
     const Self = @This();
 
-    const tpe: usize = std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK;
-    const protocol: usize = std.posix.IPPROTO.TCP;
+    const tpe: usize = posix.SOCK.STREAM | posix.SOCK.NONBLOCK;
+    const protocol: usize = posix.IPPROTO.TCP;
 
     domain: u32,
-    listener: ?std.posix.socket_t = null,
+    listener: ?posix.socket_t = null,
 
     pub fn init(domain: u32) Self {
         return .{ .domain = domain };
@@ -34,21 +36,21 @@ pub const TcpSocket = struct {
         if (null != self.listener) {
             return networking.SocketError.AlreadyOpen;
         }
-        self.listener = try std.posix.socket(self.domain, tpe, protocol);
+        self.listener = try posix.socket(self.domain, tpe, protocol);
     }
 
-    pub fn listen(self: *Self, address: *std.net.Address) !void {
+    pub fn listen(self: *Self, address: *net.Address) !void {
         if (null == self.listener) {
             return networking.SocketError.NotOpen;
         }
-        try std.posix.setsockopt(self.listener.?, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
-        try std.posix.bind(self.listener.?, &address.any, address.getOsSockLen());
-        try std.posix.listen(self.listener.?, BACKLOG);
+        try posix.setsockopt(self.listener.?, posix.SOL.SOCKET, posix.SO.REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
+        try posix.bind(self.listener.?, &address.any, address.getOsSockLen());
+        try posix.listen(self.listener.?, BACKLOG);
     }
 
     pub fn deinit(self: Self) void {
         if (null != self.listener) {
-            std.posix.close(self.listener.?);
+            posix.close(self.listener.?);
         }
     }
 };
@@ -56,21 +58,21 @@ pub const TcpSocket = struct {
 pub const ClientSocket = struct {
     const Self = @This();
 
-    socket: std.posix.socket_t = undefined,
-    address: std.net.Address = undefined,
-    address_len: std.posix.socklen_t = undefined,
+    socket: posix.socket_t = undefined,
+    address: net.IpAddress = undefined,
+    address_len: posix.socklen_t = undefined,
     log_level: networking.LogLevel = .Debug,
     buffer: [BACKLOG]u8 = undefined,
 
-    const flags = std.posix.SOCK.NONBLOCK;
+    const flags = posix.SOCK.NONBLOCK;
 
     pub fn wait_for_client(server_socket: TcpSocket) !Self {
         if (null == server_socket.listener) {
             return networking.SocketError.NotOpen;
         }
-        var address: std.net.Address = undefined;
-        var address_len: std.posix.socklen_t = @sizeOf(std.net.Address);
-        const socket = try std.posix.accept(server_socket.listener.?, &address.any, &address_len, flags);
+        var address: net.Address = undefined;
+        var address_len: posix.socklen_t = @sizeOf(net.Address);
+        const socket = try posix.accept(server_socket.listener.?, &address.any, &address_len, flags);
 
         std.log.debug("[DEBUG][ClientSocket.wait_for_client] Client connected ({f})", .{address});
 
@@ -84,7 +86,7 @@ pub const ClientSocket = struct {
     }
 
     pub fn close(self: *Self) void {
-        std.posix.close(self.socket);
+        posix.close(self.socket);
 
         if (self.log_level == .Debug) {
             std.log.debug("[DEBUG][ClientSocket.close] Goodbye client {f}", .{self.address});
@@ -105,14 +107,14 @@ pub const ClientSocket = struct {
         defer @constCast(&self).close();
 
         // Set read timeout
-        const timeout: std.posix.timeval = .{ .sec = 2, .usec = 500000 };
-        try std.posix.setsockopt(self.socket, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, &std.mem.toBytes(timeout));
+        const timeout: posix.timeval = .{ .sec = 2, .usec = 500000 };
+        try posix.setsockopt(self.socket, posix.SOL.SOCKET, posix.SO.RCVTIMEO, &std.mem.toBytes(timeout));
 
         // const msg = try self.readMessage();
         const msg = "Hello mate";
 
         // Set write timeout
-        try std.posix.setsockopt(self.socket, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, &std.mem.toBytes(timeout));
+        try posix.setsockopt(self.socket, posix.SOL.SOCKET, posix.SO.SNDTIMEO, &std.mem.toBytes(timeout));
         try self.writeMessage(msg);
     }
 
@@ -136,7 +138,7 @@ pub const ClientSocket = struct {
     fn readAll(self: Self, buf: []u8) !void {
         var into = buf;
         while (into.len > 0) {
-            const n = try std.posix.read(self.socket, into);
+            const n = try posix.read(self.socket, into);
             if (n == 0) {
                 return networking.SocketError.Closed;
             }
@@ -152,7 +154,7 @@ pub const ClientSocket = struct {
         if (self.log_level == .Debug) {
             std.log.debug("[DEBUG][ClientSocket.writeMessage] Message size: {}, Content: {s}", .{ std.mem.readInt(u32, &buf, .little), msg });
         }
-        var simd_vec = [2]std.posix.iovec_const{
+        var simd_vec = [2]posix.iovec_const{
             .{ .len = buf.len, .base = &buf },
             .{ .len = msg.len, .base = msg.ptr },
         };
@@ -164,10 +166,10 @@ pub const ClientSocket = struct {
         // try self.writeAll(msg);
     }
 
-    fn writeSimd(self: Self, vec: []std.posix.iovec_const) !void {
+    fn writeSimd(self: Self, vec: []posix.iovec_const) !void {
         var i: usize = 0;
         while (true) {
-            var n = try std.posix.writev(self.socket, vec[i..]);
+            var n = try posix.writev(self.socket, vec[i..]);
             while (n >= vec[i].len) {
                 n -= vec[i].len;
                 i += 1;
@@ -182,7 +184,7 @@ pub const ClientSocket = struct {
     fn writeAll(self: Self, msg: []const u8) !void {
         var pos: usize = 0;
         while (pos < msg.len) {
-            const written = try std.posix.write(self.socket, msg[pos..]);
+            const written = try posix.write(self.socket, msg[pos..]);
             if (written == 0) {
                 return networking.SocketError.Closed;
             }
@@ -216,7 +218,7 @@ pub const Reader = struct {
             }
 
             const pos = self.pos;
-            const n = try std.posix.read(self.socket.socket, buf[pos..]);
+            const n = try posix.read(self.socket.socket, buf[pos..]);
             if (n == 0) {
                 return networking.SocketError.Closed;
             }

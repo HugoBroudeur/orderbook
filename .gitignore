@@ -7,7 +7,10 @@
 
 zig-cache/
 .zig-cache/
+zig-pkg/
 zig-out/
+.claude/
+.agents/
 build/
 build-*/
 docgen_tmp/

@@ -12,10 +12,12 @@ pub fn build(b: *std.Build) !void {
         .abi = .gnu,
     } });
     const optimize = b.standardOptimizeOption(.{});
+    const allocator = b.allocator;
+
+    var thread = std.Io.Threaded.init(allocator, .{});
 
     // Get executable name from current directory name
-    const allocator = b.allocator;
-    const abs_path = b.build_root.handle.realpathAlloc(allocator, ".") catch unreachable;
+    const abs_path = b.build_root.handle.realPathFileAlloc(thread.io(), ".", allocator) catch unreachable;
     defer allocator.free(abs_path);
     const exe_name = "Price is Power";
 
@@ -63,20 +65,6 @@ pub fn build(b: *std.Build) !void {
         // .c_sdl_emscripten_pthreads = false,
         // .c_sdl_install_build_config_h = false,
 
-        // Options if `ext_image` is enabled:
-        .image_enable_bmp = true,
-        // .image_enable_gif = true,
-        .image_enable_jpg = true,
-        // .image_enable_lbm = true,
-        // .image_enable_pcx = true,
-        .image_enable_png = true,
-        // .image_enable_pnm = true,
-        // .image_enable_qoi = true,
-        // .image_enable_svg = true,
-        // .image_enable_tga = true,
-        // .image_enable_xcf = true,
-        // .image_enable_xpm = true,
-        // .image_enable_xv = true,
     });
     const dep_zcs = b.dependency("zcs", .{
         .target = target,
@@ -120,7 +108,7 @@ pub fn build(b: *std.Build) !void {
 
     exe.root_module.addImport("sdl3", dep_sdl3.module("sdl3"));
     exe.root_module.addImport("sqlite", dep_sqlite.module("sqlite"));
-    exe.root_module.addImport("zcs", dep_zcs.module("zcs"));
+    exe.root_module.addImport("zcs", dep_zcs.module("mr_ecs"));
     exe.root_module.addImport("zclay", dep_zclay.module("zclay"));
     exe.root_module.addImport("zmath", dep_zmath.module("root"));
     exe.root_module.addImport("vulkan", dep_vulkan.module("vulkan-zig"));
@@ -173,15 +161,15 @@ pub fn build(b: *std.Build) !void {
         exe.addObjectFile(b.path(b.pathJoin(&.{ sdlPath, "lib", "libSDL3.dll.a" })));
     } else if (builtin.target.os.tag == .linux) {
         // exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
-        exe.addLibraryPath(.{ .cwd_relative = "/usr/lib64" });
-        exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+        // exe.addLibraryPath(.{ .cwd_relative = "/usr/lib64" });
+        // exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
         // exe.addLibraryPath(.{ .cwd_relative = "/usr/opt/lib64" });
         // exe.addLibraryPath(.{ .cwd_relative = "/usr/opt/lib" });
         // exe.addLibraryPath(.{ .cwd_relative = "/usr/cuda/lib64" });
         // exe.addLibraryPath(.{ .cwd_relative = "/usr/cuda/lib" });
 
         // exe.root_module.linkSystemLibrary("GL", .{});
-        exe.root_module.linkSystemLibrary("X11", .{});
+        // exe.root_module.linkSystemLibrary("X11", .{});
         // exe.root_module.linkSystemLibrary("SDL3", .{});
         // exe.root_module.linkSystemLibrary("SDL3_ttf", .{});
         // exe.root_module.linkSystemLibrary("sqlite3", .{});

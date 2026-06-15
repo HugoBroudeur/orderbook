@@ -2,13 +2,13 @@ const std = @import("std");
 const DbManager = @import("db_manager.zig");
 // const RendererManager = @import("renderer_manager.zig");
 const MarketManager = @import("market_manager.zig");
-const SceneManager = @import("scene_manager.zig");
+const SceneManager = @import("../engine/scene_manager.zig");
 const Ecs = @import("ecs/ecs.zig");
 const Prefab = @import("ecs/prefabs/prefab.zig");
 const OrderbookSystem = @import("ecs/systems/orderbook_system.zig");
 const MetricSystem = @import("ecs/systems/metric_system.zig");
 const CameraSystem = @import("ecs/systems/camera_system.zig");
-const GraphicsContext = @import("../core/graphics_context.zig");
+const InputSystem = @import("ecs/systems/input_system.zig");
 const Event = @import("../events/event.zig");
 
 const zcs = @import("zcs");
@@ -24,6 +24,7 @@ entities: zcs.Entities,
 cmd_buf: zcs.CmdBuf,
 
 camera_system: CameraSystem = undefined,
+input_system: InputSystem = undefined,
 
 pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, market_manager: *MarketManager, scene_manager: *SceneManager) !EcsManager {
     var es = try zcs.Entities.init(.{ .gpa = allocator });
@@ -49,6 +50,7 @@ pub fn deinit(self: *EcsManager) void {
     self.cmd_buf.deinit(self.allocator, &self.entities);
     self.entities.deinit(self.allocator);
     self.camera_system.deinit();
+    self.input_system.deinit();
 }
 
 pub fn setup(self: *EcsManager) !void {
@@ -60,6 +62,8 @@ pub fn setup(self: *EcsManager) !void {
     self.flush_cmd_buf();
 
     // Register Systems
+    self.input_system = InputSystem.init(self);
+    self.input_system.setup();
     self.camera_system = CameraSystem.init(self);
     self.camera_system.setup();
 }
@@ -67,6 +71,7 @@ pub fn setup(self: *EcsManager) !void {
 pub fn progress(self: *EcsManager) void {
     self.entities.forEach("system_update_env_info", MetricSystem.system_update_env_info, .{});
 
+    self.input_system.update();
     self.camera_system.update();
 
     self.entities.forEach("system_place_order", OrderbookSystem.system_place_order, .{
@@ -90,6 +95,7 @@ pub fn get_singleton(self: *EcsManager, comptime T: type) *T {
 }
 
 pub fn handleEvent(self: *EcsManager, ev: Event) void {
+    self.input_system.process(ev);
     self.camera_system.process(ev);
 }
 

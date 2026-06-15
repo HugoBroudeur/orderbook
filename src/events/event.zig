@@ -262,7 +262,7 @@ pub fn CategoryEvent(comptime s: EventCategory) type {
     }
 
     // Build our union
-    return @Type(.{ .@"union" = .{
+    return @typeInfo(.{ .@"union" = .{
         .layout = .auto,
         .tag_type = null,
         .fields = fields[0..i],

@@ -7,24 +7,24 @@ const MarketManager = @This();
 
 allocator: std.mem.Allocator,
 db_manager: *DbManager,
-market_categories: std.AutoArrayHashMap(usize, Ecs.components.MarketCategory),
-market_sub_categories: std.AutoArrayHashMap(usize, Ecs.components.SubMarketCategory),
-market_items: std.AutoArrayHashMap(usize, Ecs.components.MarketItem),
+market_categories: std.array_hash_map.Auto(usize, Ecs.components.MarketCategory),
+market_sub_categories: std.array_hash_map.Auto(usize, Ecs.components.SubMarketCategory),
+market_items: std.array_hash_map.Auto(usize, Ecs.components.MarketItem),
 
 pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager) MarketManager {
     return .{
         .allocator = allocator,
         .db_manager = db_manager,
-        .market_categories = .init(allocator),
-        .market_sub_categories = .init(allocator),
-        .market_items = .init(allocator),
+        .market_categories = .empty,
+        .market_sub_categories = .empty,
+        .market_items = .empty,
     };
 }
 
 pub fn deinit(self: *MarketManager) void {
-    self.market_categories.deinit();
-    self.market_sub_categories.deinit();
-    self.market_items.deinit();
+    self.market_categories.deinit(self.allocator);
+    self.market_sub_categories.deinit(self.allocator);
+    self.market_items.deinit(self.allocator);
 }
 
 pub fn setup(self: *MarketManager, ecs_manager: *EcsManager) !void {
@@ -59,7 +59,7 @@ fn fetch_market_categories(self: *MarketManager) !void {
     const market_categories = try tx.all(Ecs.components.MarketCategory, self.allocator, .{}, .{});
     defer self.allocator.free(market_categories);
     for (market_categories) |mc| {
-        try self.market_categories.put(mc.id, mc);
+        try self.market_categories.put(self.allocator, mc.id, mc);
     }
 }
 
@@ -70,7 +70,7 @@ fn fetch_market_sub_categories(self: *MarketManager) !void {
     const market_sub_categories = try tx.all(Ecs.components.SubMarketCategory, self.allocator, .{}, .{});
     defer self.allocator.free(market_sub_categories);
     for (market_sub_categories) |msc| {
-        try self.market_sub_categories.put(msc.id, msc);
+        try self.market_sub_categories.put(self.allocator, msc.id, msc);
     }
 }
 
@@ -81,7 +81,7 @@ fn fetch_market_items(self: *MarketManager) !void {
     const market_items = try tx.all(Ecs.components.MarketItem, self.allocator, .{}, .{});
     defer self.allocator.free(market_items);
     for (market_items) |im| {
-        try self.market_items.put(im.id, im);
+        try self.market_items.put(self.allocator, im.id, im);
     }
 }
 

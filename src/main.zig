@@ -3,11 +3,10 @@ const networking = @import("networking");
 const env = @import("config.zig");
 const app = @import("core/app.zig");
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const allocator = arena.allocator();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const allocator = init.arena.allocator();
+    defer init.arena.deinit();
 
     // var gpa = std.heap.DebugAllocator(.{
     //     .safety = true, // Enable safety checks
@@ -25,26 +24,27 @@ pub fn main() !void {
     // var tracy_allocator: tracy.Allocator = .{ .parent = arena.allocator() };
     // const allocator = tracy_allocator.allocator();
 
-    const config = env.init();
+    const config = env.init(init.environ_map);
 
-    var tcp_server = try networking.server.TcpServer.init(allocator, .{
-        .ip = "127.0.0.1",
-        .port = 3000,
-        .max_threads_count = config.http_max_threads_count,
-        .max_client_connections = 4096,
-    });
-    defer tcp_server.deinit();
+    // var tcp_server = try networking.server.TcpServer.init(allocator, io, .{
+    //     .ip = "127.0.0.1",
+    //     .port = 3000,
+    //     .max_threads_count = config.http_max_threads_count,
+    //     .max_client_connections = 4096,
+    // });
+    // defer tcp_server.deinit();
 
     try app.init(
         allocator,
+        io,
         config,
     );
 
-    app.run();
+    app.run(io);
 }
 
 test {
     _ = @import("core/app.zig");
     _ = @import("data_structure.zig");
-    _ = @import("renderer/vulkan/mesh.zig");
+    _ = @import("engine/vulkan/mesh.zig");
 }
