@@ -60,30 +60,7 @@ pub fn render(self: *SceneManager, ecs_manager: *const EcsManager, engine: *Engi
     // } });
     // command_queue.push(.{.draw_mesh});
 
-    // Draw Rect
-    self.draw_queue.push(.{ .quad = .{
-        .p1 = .{ .x = -1, .y = 0 },
-        .p2 = .{ .x = 0, .y = 0 },
-        .p3 = .{ .x = 0, .y = -1 },
-        .p4 = .{ .x = -1, .y = -1 },
-        .color = .Red,
-    } });
-
-    for (0..100) |i| {
-        const r = self.random.float(f32) * 2 - 1; // generate [-1, 1]
-        const offset = std.math.clamp(1 + r, -1, 1);
-        _ = i;
-        self.draw_queue.push(.{ .quad_fill = .{
-            .p1 = .{ .x = r, .y = offset },
-            .p2 = .{ .x = offset, .y = offset },
-            .p3 = .{ .x = offset, .y = r },
-            .p4 = .{ .x = r, .y = r },
-            .color1 = .Red,
-            .color2 = .Yellow,
-            .color3 = .Teal,
-            .color4 = .Blue,
-        } });
-    }
+    // 2D test quads commented out — were blending over the 3D scene causing a colour tint
 
     self.endScene();
 }
@@ -115,18 +92,11 @@ pub fn beginScene(self: *SceneManager, engine: *Engine, ecs_manager: *const EcsM
 
         var scene_data: SceneData = .{};
 
-        // scene_data.view = zm.translation(0, 0, -5);
         scene_data.view = camera.getViewMatrix();
-
         scene_data.proj = camera.getProjectionMatrix();
-        // invert the Y direction on projection matrix so that we are more similar
-        // to opengl and gltf axis
-        scene_data.proj[1][1] *= -1;
-
-        // scene_data.view_proj = zm.mul(scene_data.view, scene_data.proj);
         scene_data.view_proj = camera.getViewProjMatrix();
 
-        scene_data.ambient_color = .{ .r = 1, .g = 0.1, .b = 0.1, .a = 0.1 };
+        scene_data.ambient_color = .{ .r = 1, .g = 1, .b = 1, .a = 0.1 };
         scene_data.sunlight_color = Color.White;
         scene_data.sunlight_direction = .{ 0, 1, 0.5, 1 };
 

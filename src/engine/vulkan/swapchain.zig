@@ -1,7 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.Swapchain);
 const vk = @import("vulkan");
-const GraphicsContext = @import("../../core/graphics_context.zig");
+const Engine = @import("engine.zig");
 const Allocator = std.mem.Allocator;
 const Frame = @import("frames.zig");
 
@@ -11,7 +11,6 @@ pub const Swapchain = struct {
         suboptimal,
     };
 
-    ctx: *const GraphicsContext,
     allocator: Allocator,
 
     surface_format: vk.SurfaceFormatKHR,
@@ -19,42 +18,44 @@ pub const Swapchain = struct {
     extent: vk.Extent2D,
     handle: vk.SwapchainKHR,
 
-    swap_images: []Frame.SwapImage,
+    frames: []Frame,
     image_index: u32,
     next_image_acquired: vk.Semaphore,
 
     // Flag if a window resize has happened
     resize_requested: bool = false,
 
-    pub fn init(ctx: *const GraphicsContext, allocator: Allocator) !Swapchain {
-        const width, const heigth = try ctx.window.ptr.getMaximumSize();
+    pub fn init(engine: *Engine, allocator: Allocator) !Swapchain {
+        const width, const heigth = try engine.ctx.window.ptr.getMaximumSize();
         const extent: vk.Extent2D = .{ .width = @intCast(width), .height = @intCast(heigth) };
-        return try initRecycle(ctx, allocator, extent, .null_handle);
+        const swapchain = try initRecycle(engine, allocator, extent, .null_handle);
+
+        return swapchain;
     }
 
-    pub fn initRecycle(ctx: *const GraphicsContext, allocator: Allocator, extent: vk.Extent2D, old_handle: vk.SwapchainKHR) !Swapchain {
-        const caps = try ctx.instance.getPhysicalDeviceSurfaceCapabilitiesKHR(ctx.physical_device, ctx.surface);
+    pub fn initRecycle(engine: *Engine, allocator: Allocator, extent: vk.Extent2D, old_handle: vk.SwapchainKHR) !Swapchain {
+        const caps = try engine.ctx.instance.getPhysicalDeviceSurfaceCapabilitiesKHR(engine.ctx.physical_device, engine.ctx.surface);
         const actual_extent = findActualExtent(caps, extent);
         if (actual_extent.width == 0 or actual_extent.height == 0) {
             return error.InvalidSurfaceDimensions;
         }
 
-        const surface_format = try findSurfaceFormat(ctx, allocator);
-        const present_mode = try findPresentMode(ctx, allocator);
+        const surface_format = try findSurfaceFormat(engine, allocator);
+        const present_mode = try findPresentMode(engine, allocator);
 
         var image_count = caps.min_image_count + 1;
         if (caps.max_image_count > 0) {
             image_count = @min(image_count, caps.max_image_count);
         }
 
-        const qfi = [_]u32{ ctx.graphics_queue.family, ctx.present_queue.family };
-        const sharing_mode: vk.SharingMode = if (ctx.graphics_queue.family != ctx.present_queue.family)
+        const qfi = [_]u32{ engine.ctx.graphics_queue.family, engine.ctx.present_queue.family };
+        const sharing_mode: vk.SharingMode = if (engine.ctx.graphics_queue.family != engine.ctx.present_queue.family)
             .concurrent
         else
             .exclusive;
 
-        const handle = ctx.device.createSwapchainKHR(&.{
-            .surface = ctx.surface,
+        const handle = engine.ctx.device.createSwapchainKHR(&.{
+            .surface = engine.ctx.surface,
             .min_image_count = image_count,
             .image_format = surface_format.format,
             .image_color_space = surface_format.color_space,
@@ -72,23 +73,23 @@ pub const Swapchain = struct {
         }, null) catch {
             return error.SwapchainCreationFailed;
         };
-        errdefer ctx.device.destroySwapchainKHR(handle, null);
+        errdefer engine.ctx.device.destroySwapchainKHR(handle, null);
 
         if (old_handle != .null_handle) {
             // Apparently, the old swapchain handle still needs to be destroyed after recreating.
-            ctx.device.destroySwapchainKHR(old_handle, null);
+            engine.ctx.device.destroySwapchainKHR(old_handle, null);
         }
 
-        const swap_images = try Frame.initSwapchainImages(ctx, handle, surface_format.format, allocator);
+        const frames = try Frame.initSwapchainFrames(engine, handle, surface_format.format, allocator);
         errdefer {
-            for (swap_images) |si| si.deinit(ctx);
-            allocator.free(swap_images);
+            for (frames) |*frame| frame.destroy(engine);
+            allocator.free(frames);
         }
 
-        var next_image_acquired = try ctx.device.createSemaphore(&.{}, null);
-        errdefer ctx.device.destroySemaphore(next_image_acquired, null);
+        var next_image_acquired = try engine.ctx.device.createSemaphore(&.{}, null);
+        errdefer engine.ctx.device.destroySemaphore(next_image_acquired, null);
 
-        const result = try ctx.device.acquireNextImageKHR(handle, std.math.maxInt(u64), next_image_acquired, .null_handle);
+        const result = try engine.ctx.device.acquireNextImageKHR(handle, std.math.maxInt(u64), next_image_acquired, .null_handle);
         // event with a .suboptimal_khr we can still go on to present
         // if we error even for .suboptimal_khr the example will crash and segfault
         // on resize, since even the recreated swapchain can be suboptimal during a
@@ -97,42 +98,40 @@ pub const Swapchain = struct {
             return error.ImageAcquireFailed;
         }
 
-        std.mem.swap(vk.Semaphore, &swap_images[result.image_index].image_acquired, &next_image_acquired);
+        std.mem.swap(vk.Semaphore, &frames[result.image_index].swap_image.image_acquired, &next_image_acquired);
         return Swapchain{
-            .ctx = ctx,
             .allocator = allocator,
             .surface_format = surface_format,
             .present_mode = present_mode,
             .extent = actual_extent,
             .handle = handle,
-            .swap_images = swap_images,
+            .frames = frames,
             .image_index = result.image_index,
             .next_image_acquired = next_image_acquired,
             .resize_requested = false,
         };
     }
 
-    fn deinitExceptSwapchain(self: Swapchain) void {
+    fn deinitExceptSwapchain(self: Swapchain, engine: *Engine) void {
         log.debug("call deinitExceptSwapchain", .{});
-        for (self.swap_images) |si| si.deinit(self.ctx);
-        self.allocator.free(self.swap_images);
-        self.ctx.device.destroySemaphore(self.next_image_acquired, null);
+        for (self.frames) |*frame| frame.destroy(engine);
+        self.allocator.free(self.frames);
+        engine.ctx.device.destroySemaphore(self.next_image_acquired, null);
     }
 
     pub fn waitForAllFences(self: Swapchain) !void {
-        for (self.swap_images) |si| si.waitForFence(self.ctx) catch {};
+        for (self.frames) |si| si.waitForFence(self.ctx) catch {};
     }
 
-    pub fn deinit(self: Swapchain) void {
+    pub fn deinit(self: Swapchain, engine: *Engine) void {
         // if we have no swapchain none of these should exist and we can just return
         if (self.handle == .null_handle) return;
-        self.deinitExceptSwapchain();
-        self.ctx.device.destroySwapchainKHR(self.handle, null);
+        self.deinitExceptSwapchain(engine);
+        engine.ctx.device.destroySwapchainKHR(self.handle, null);
     }
 
-    pub fn recreate(self: *Swapchain, new_extent: vk.Extent2D) !void {
+    pub fn recreate(self: *Swapchain, engine: *Engine, new_extent: vk.Extent2D) !void {
         log.debug("call recreate, {}", .{new_extent});
-        const gc = self.ctx;
         const allocator = self.allocator;
         const old_handle = self.handle;
         // Drain the device before destroying per-image semaphores and the old
@@ -140,31 +139,35 @@ pub const Swapchain = struct {
         // semaphores belonging to other swap images may still be referenced by
         // submitted batches, and the presented image is still owned by the
         // present queue until the device is idle.
-        try gc.device.deviceWaitIdle();
-        self.deinitExceptSwapchain();
+        try engine.ctx.device.deviceWaitIdle();
+        self.deinitExceptSwapchain(engine);
         // set current handle to NULL_HANDLE to signal that the current swapchain does no longer need to be
         // de-initialized if we fail to recreate it.
         self.handle = .null_handle;
-        self.* = initRecycle(gc, allocator, new_extent, old_handle) catch |err| switch (err) {
+        self.* = initRecycle(engine, allocator, new_extent, old_handle) catch |err| switch (err) {
             error.SwapchainCreationFailed => {
                 // we failed while recreating so our current handle still exists,
                 // but we won't destroy it in the deferred deinit of this object.
-                gc.device.destroySwapchainKHR(old_handle, null);
+                engine.ctx.device.destroySwapchainKHR(old_handle, null);
                 return err;
             },
             else => return err,
         };
     }
 
-    pub fn currentImage(self: Swapchain) vk.Image {
-        return self.swap_images[self.image_index].image;
+    pub fn getCurrentFrame(self: *Swapchain) *Frame {
+        return &self.frames[self.image_index];
     }
 
-    pub fn currentSwapImage(self: Swapchain) *const Frame.SwapImage {
-        return &self.swap_images[self.image_index];
+    pub fn currentImage(self: *Swapchain) vk.Image {
+        return self.currentSwapImage().image;
     }
 
-    pub fn present(self: *Swapchain, cmdbuf: vk.CommandBuffer) !PresentState {
+    pub fn currentSwapImage(self: *Swapchain) *const Frame.SwapImage {
+        return &self.getCurrentFrame().swap_image;
+    }
+
+    pub fn present(self: *Swapchain, engine: *Engine) !PresentState {
         // Simple method:
         // 1) Acquire next image
         // 2) Wait for and reset fence of the acquired image
@@ -183,9 +186,10 @@ pub const Swapchain = struct {
         // so we keep an extra auxilery semaphore that is swapped around
 
         // Step 1: Make sure the current frame has finished rendering
-        const current = self.currentSwapImage();
-        try current.waitForFence(self.ctx);
-        try self.ctx.device.resetFences(&.{current.frame_fence});
+        const current = engine.getCurrentFrame().swap_image;
+        const cmdbuf = engine.getCurrentFrame().cmd_buf;
+        try current.waitForFence(engine);
+        try engine.ctx.device.resetFences(&.{current.frame_fence});
 
         // Step 2: Submit the command buffer
         var wait_info = Swapchain.createSemaphoreSubmitInfo(.{ .color_attachment_output_bit = true }, current.image_acquired);
@@ -195,8 +199,8 @@ pub const Swapchain = struct {
 
         // submit command buffer to the queue and execute it.
         // current.frame_fence will now block until the graphic commands finish execution
-        try self.ctx.device.queueSubmit2(
-            self.ctx.graphics_queue.handle,
+        try engine.ctx.device.queueSubmit2(
+            engine.ctx.graphics_queue.handle,
             &[_]vk.SubmitInfo2{submit_info},
             current.frame_fence,
         );
@@ -205,7 +209,7 @@ pub const Swapchain = struct {
         // this will put the image we just rendered to into the visible window.
         // we want to wait on the current.render_finished semaphore for that,
         // as its necessary that drawing commands have finished before the image is displayed to the user
-        const queue_result = try self.ctx.device.queuePresentKHR(self.ctx.present_queue.handle, &.{
+        const queue_result = try engine.ctx.device.queuePresentKHR(engine.ctx.present_queue.handle, &.{
             .wait_semaphore_count = 1,
             .p_wait_semaphores = @ptrCast(&current.render_finished),
             .swapchain_count = 1,
@@ -218,7 +222,7 @@ pub const Swapchain = struct {
         }
 
         // Step 4: Acquire next frame
-        const result = self.ctx.device.acquireNextImageKHR(
+        const result = engine.ctx.device.acquireNextImageKHR(
             self.handle,
             std.math.maxInt(u64),
             self.next_image_acquired,
@@ -230,7 +234,7 @@ pub const Swapchain = struct {
             return err;
         };
 
-        std.mem.swap(vk.Semaphore, &self.swap_images[result.image_index].image_acquired, &self.next_image_acquired);
+        std.mem.swap(vk.Semaphore, &self.frames[result.image_index].swap_image.image_acquired, &self.next_image_acquired);
         self.image_index = result.image_index;
 
         return switch (result.result) {
@@ -255,20 +259,19 @@ pub const Swapchain = struct {
         };
     }
 
-    pub fn isRecreateNeeded(self: *Swapchain) bool {
-        const cur_window_size = self.ctx.window.toExtend2D();
+    pub fn isRecreateNeeded(self: *Swapchain, cur_window_size: vk.Extent2D) bool {
         return cur_window_size.width != self.extent.width or cur_window_size.height != self.extent.height or self.resize_requested;
     }
 };
 
-fn findSurfaceFormat(ctx: *const GraphicsContext, allocator: Allocator) !vk.SurfaceFormatKHR {
+fn findSurfaceFormat(engine: *Engine, allocator: Allocator) !vk.SurfaceFormatKHR {
     const preferred = vk.SurfaceFormatKHR{
         // .format = .r16g16b16a16_sfloat,
         .format = .r8g8b8a8_unorm,
         .color_space = .srgb_nonlinear_khr,
     };
 
-    const surface_formats = try ctx.instance.getPhysicalDeviceSurfaceFormatsAllocKHR(ctx.physical_device, ctx.surface, allocator);
+    const surface_formats = try engine.ctx.instance.getPhysicalDeviceSurfaceFormatsAllocKHR(engine.ctx.physical_device, engine.ctx.surface, allocator);
     defer allocator.free(surface_formats);
 
     for (surface_formats) |sfmt| {
@@ -280,8 +283,8 @@ fn findSurfaceFormat(ctx: *const GraphicsContext, allocator: Allocator) !vk.Surf
     return surface_formats[0]; // There must always be at least one supported surface format
 }
 
-fn findPresentMode(ctx: *const GraphicsContext, allocator: Allocator) !vk.PresentModeKHR {
-    const present_modes = try ctx.instance.getPhysicalDeviceSurfacePresentModesAllocKHR(ctx.physical_device, ctx.surface, allocator);
+fn findPresentMode(engine: *Engine, allocator: Allocator) !vk.PresentModeKHR {
+    const present_modes = try engine.ctx.instance.getPhysicalDeviceSurfacePresentModesAllocKHR(engine.ctx.physical_device, engine.ctx.surface, allocator);
     defer allocator.free(present_modes);
 
     const preferred = [_]vk.PresentModeKHR{

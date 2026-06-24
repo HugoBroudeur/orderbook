@@ -6,7 +6,6 @@ const app = @import("core/app.zig");
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const allocator = init.arena.allocator();
-    defer init.arena.deinit();
 
     // var gpa = std.heap.DebugAllocator(.{
     //     .safety = true, // Enable safety checks

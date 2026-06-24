@@ -108,7 +108,7 @@ pub fn process(self: *CameraSystem, event: Event) void {
                 vw.rotation.yaw += event.ptr.mouse_motion.x_rel / MOUSE_SENSITIVITY;
                 const max_pitch = std.math.pi / 2.0 - 0.01;
                 vw.rotation.pitch = std.math.clamp(
-                    vw.rotation.pitch + event.ptr.mouse_motion.y_rel / MOUSE_SENSITIVITY,
+                    vw.rotation.pitch - event.ptr.mouse_motion.y_rel / MOUSE_SENSITIVITY,
                     -max_pitch,
                     max_pitch,
                 );

@@ -69,6 +69,10 @@ pub fn Camera(comptime T: CameraType) type {
                 ),
             };
 
+            // invert the Y direction on projection matrix so that we are more similar
+            // to opengl and gltf axis
+            self.projection_matrix[1][1] *= -1;
+
             // zmath uses row-vector convention: zm.mul(A, B) means apply A then B.
             // So view-then-projection composes as zm.mul(view, projection).
             self.mvp = zm.mul(self.view_matrix, self.projection_matrix);
@@ -82,13 +86,10 @@ pub fn Camera(comptime T: CameraType) type {
         }
 
         pub fn setLookAt(self: *Self, yaw: f32, pitch: f32) void {
-            // fairly typical FPS style camera. we join the pitch and yaw rotations into
-            // the final rotation matrix
-
             const yaw_rotation = zm.quatFromAxisAngle(.{ 0, -1, 0, 0 }, yaw);
             const pitch_rotation = zm.quatFromAxisAngle(.{ 1, 0, 0, 0 }, pitch);
 
-            self.look_at = zm.qmul(yaw_rotation, pitch_rotation);
+            self.look_at = zm.qmul(pitch_rotation, yaw_rotation);
 
             self.need_compute = true;
         }

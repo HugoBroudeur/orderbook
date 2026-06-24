@@ -1,40 +1,20 @@
 module scene;
 
-// struct SceneData {
-//   float4x4 view;
-//   float4x4 proj;
-//   float4x4 viewproj;
-//   float4 ambientColor;
-//   float4 sunlightDirection; // w for sun power
-//   float4 sunlightColor;
-// };
-//
-// struct MetalData {
-//   float4 colorFactors;
-//   float4 metal_rough_factors;
-//   int colorTexID;
-//   int metalRoughTexID;
-// };
-//
-// [[vk::binding(0, 0)]]
-// ConstantBuffer<SceneData> sceneData;
-//
-// #ifdef USE_BINDLESS
-// [[vk::binding(1, 0)]]
-// Sampler2D allTextures[];
-// #else
-// [[vk::binding(1, 1)]]
-// Sampler2D colorTex;
-// [[vk::binding(2, 1)]]
-// Sampler2D metalRoughTex;
-// #endif
-//
-// [[vk::binding(0, 1)]]
-// ConstantBuffer<MetalData> materialData;
-//
-//
-//
-//
+public struct Vertex {
+  public float3 position : POSITION;
+  public float1 uv_x;
+  public float3 normal;
+  public float1 uv_y;
+  public float4 color : COLOR1;
+};
+
+public struct Fragment {
+  public float4 position : SV_Position;
+  public float3 world_position;
+  public float3 normal;
+  public float3 color : COLOR1;
+  public float2 uv;
+}
 
 public struct SceneData {
   public float4x4 view;
@@ -49,9 +29,9 @@ public struct SceneData {
 public struct MetalData {
   public float4 colorFactors;
   public float4 metalRoughFactors;
-  public int colorTexID; // matches CPU MaterialData.color_tex_id at offset 16
-  // public float4 metal_rough_factors;
-  // public int metalRoughTexID;
+  public uint colorTexID;
+  public uint metalRoughTexID;
+  // 16 public float4 metal_rough_factors; public int metalRoughTexID;
 };
 
 // Interface defining what any SceneParams implementation must provide

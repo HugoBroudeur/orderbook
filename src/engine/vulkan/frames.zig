@@ -1,14 +1,32 @@
 const std = @import("std");
 const log = std.log.scoped(.Swapchain);
 const vk = @import("vulkan");
-const GraphicsContext = @import("../../core/graphics_context.zig");
 const Allocator = std.mem.Allocator;
 
+const Engine = @import("engine.zig");
 const Swapchain = @import("swapchain.zig").Swapchain;
 const CommandPool = @import("command_pool.zig");
 const DescriptorAllocator = @import("descriptor.zig").DescriptorAllocator;
 const SceneData = @import("../command.zig").SceneData;
 const Buffer = @import("buffer.zig");
+
+const Frame = @This();
+
+swap_image: SwapImage,
+
+clear_color: vk.ClearValue = .{ .color = .{ .float_32 = .{ 0, 0, 0, 1 } } },
+/// Contains the state if the last swapchain got an error
+swapchain_state: Swapchain.PresentState = .optimal,
+viewport: vk.Viewport = .{ .x = 0, .y = 0, .width = 0, .height = 0, .min_depth = 0, .max_depth = 1 },
+scissor: vk.Rect2D = .{ .offset = .{ .x = 0, .y = 0 }, .extent = .{ .height = 0, .width = 0 } },
+
+cmd_pool: CommandPool = undefined,
+cmd_buf: vk.CommandBuffer = undefined,
+
+frame_descriptor: DescriptorAllocator = undefined,
+
+scene_data: SceneData = .{},
+scene_data_buffer: Buffer = undefined,
 
 pub const SwapImage = struct {
     image: vk.Image,
@@ -17,8 +35,8 @@ pub const SwapImage = struct {
     render_finished: vk.Semaphore,
     frame_fence: vk.Fence,
 
-    pub fn init(ctx: *const GraphicsContext, image: vk.Image, format: vk.Format) !SwapImage {
-        const view = try ctx.device.createImageView(&.{
+    pub fn init(engine: *Engine, image: vk.Image, format: vk.Format) !SwapImage {
+        const view = try engine.ctx.device.createImageView(&.{
             .image = image,
             .view_type = .@"2d",
             .format = format,
@@ -31,16 +49,16 @@ pub const SwapImage = struct {
                 .layer_count = 1,
             },
         }, null);
-        errdefer ctx.device.destroyImageView(view, null);
+        errdefer engine.ctx.device.destroyImageView(view, null);
 
-        const image_acquired = try ctx.device.createSemaphore(&.{}, null);
-        errdefer ctx.device.destroySemaphore(image_acquired, null);
+        const image_acquired = try engine.ctx.device.createSemaphore(&.{}, null);
+        errdefer engine.ctx.device.destroySemaphore(image_acquired, null);
 
-        const render_finished = try ctx.device.createSemaphore(&.{}, null);
-        errdefer ctx.device.destroySemaphore(render_finished, null);
+        const render_finished = try engine.ctx.device.createSemaphore(&.{}, null);
+        errdefer engine.ctx.device.destroySemaphore(render_finished, null);
 
-        const frame_fence = try ctx.device.createFence(&.{ .flags = .{ .signaled_bit = true } }, null);
-        errdefer ctx.device.destroyFence(frame_fence, null);
+        const frame_fence = try engine.ctx.device.createFence(&.{ .flags = .{ .signaled_bit = true } }, null);
+        errdefer engine.ctx.device.destroyFence(frame_fence, null);
 
         return SwapImage{
             .image = image,
@@ -51,77 +69,72 @@ pub const SwapImage = struct {
         };
     }
 
-    pub fn deinit(self: SwapImage, ctx: *const GraphicsContext) void {
-        self.waitForFence(ctx) catch return;
-        ctx.device.destroyImageView(self.view, null);
-        ctx.device.destroySemaphore(self.image_acquired, null);
-        ctx.device.destroySemaphore(self.render_finished, null);
-        ctx.device.destroyFence(self.frame_fence, null);
+    pub fn deinit(self: SwapImage, engine: *Engine) void {
+        self.waitForFence(engine) catch return;
+        engine.ctx.device.destroyImageView(self.view, null);
+        engine.ctx.device.destroySemaphore(self.image_acquired, null);
+        engine.ctx.device.destroySemaphore(self.render_finished, null);
+        engine.ctx.device.destroyFence(self.frame_fence, null);
     }
 
-    pub fn waitForFence(self: SwapImage, ctx: *const GraphicsContext) !void {
-        _ = try ctx.device.waitForFences(&.{self.frame_fence}, .true, std.math.maxInt(u64));
+    pub fn waitForFence(self: SwapImage, engine: *Engine) !void {
+        _ = try engine.ctx.device.waitForFences(&.{self.frame_fence}, .true, std.math.maxInt(u64));
     }
 };
 
-pub fn initSwapchainImages(ctx: *const GraphicsContext, swapchain: vk.SwapchainKHR, format: vk.Format, allocator: Allocator) ![]SwapImage {
-    const images = try ctx.device.getSwapchainImagesAllocKHR(swapchain, allocator);
+pub fn initSwapchainFrames(engine: *Engine, swapchain: vk.SwapchainKHR, format: vk.Format, allocator: Allocator) ![]Frame {
+    const images = try engine.ctx.device.getSwapchainImagesAllocKHR(swapchain, allocator);
     defer allocator.free(images);
 
-    const swap_images = try allocator.alloc(SwapImage, images.len);
-    errdefer allocator.free(swap_images);
+    const frames = try allocator.alloc(Frame, images.len);
+    errdefer allocator.free(frames);
 
-    var i: usize = 0;
-    errdefer for (swap_images[0..i]) |si| si.deinit(ctx);
+    errdefer for (frames[0..0]) |*frame| frame.destroy(engine);
 
-    for (images) |image| {
-        swap_images[i] = try SwapImage.init(ctx, image, format);
-        i += 1;
+    for (images, 0..) |image, i| {
+        try frames[i].setup(engine, allocator, try SwapImage.init(engine, image, format));
     }
 
-    return swap_images;
+    return frames;
 }
 
-pub const FrameData = struct {
-    clear_color: vk.ClearValue = .{ .color = .{ .float_32 = .{ 0, 0, 0, 1 } } },
-    /// Contains the state if the last swapchain got an error
-    swapchain_state: Swapchain.PresentState = .optimal,
-    viewport: vk.Viewport = .{ .x = 0, .y = 0, .width = 0, .height = 0, .min_depth = 0, .max_depth = 1 },
-    scissor: vk.Rect2D = .{ .offset = .{ .x = 0, .y = 0 }, .extent = .{ .height = 0, .width = 0 } },
+pub fn setup(self: *Frame, engine: *Engine, allocator: std.mem.Allocator, swap_image: SwapImage) !void {
+    self.swap_image = swap_image;
+    self.cmd_pool = try CommandPool.create(engine);
 
-    cmd_pool: CommandPool = undefined,
-    cmd_buf: vk.CommandBuffer = undefined,
+    const frame_sizes = &[_]DescriptorAllocator.PoolSizeRatio{
+        .{ .vk_type = .storage_image, .ratio = 3 },
+        .{ .vk_type = .storage_buffer, .ratio = 3 },
+        .{ .vk_type = .uniform_buffer, .ratio = 3 },
+        .{ .vk_type = .combined_image_sampler, .ratio = 4 },
+    };
+    self.frame_descriptor = try DescriptorAllocator.init(allocator, engine.ctx, 1000, frame_sizes);
 
-    desc_allocator: DescriptorAllocator = undefined,
+    self.scene_data_buffer = try Buffer.create(engine.ctx, @sizeOf(SceneData), .{
+        .uniform_buffer_bit = true,
+    }, .{ .host_visible_bit = true, .device_local_bit = true });
 
-    scene_data: SceneData = .{},
-    scene_data_buffer: Buffer = undefined,
+    try engine.createCommandBuffers(self);
+}
 
-    pub fn setup(self: *FrameData, ctx: *const GraphicsContext, allocator: std.mem.Allocator) !void {
-        self.cmd_pool = try CommandPool.create(ctx);
+pub fn resize(self: *Frame, extent: vk.Extent2D) void {
+    self.viewport = .{
+        .x = 0,
+        .y = 0,
+        .width = @floatFromInt(extent.width),
+        .height = @floatFromInt(extent.height),
+        .min_depth = 0,
+        .max_depth = 1,
+    };
+    self.scissor = .{
+        .offset = .{ .x = 0, .y = 0 },
+        .extent = extent,
+    };
+}
 
-        const frame_sizes = &[_]DescriptorAllocator.PoolSizeRatio{
-            .{ .vk_type = .storage_image, .ratio = 3 },
-            .{ .vk_type = .storage_buffer, .ratio = 3 },
-            .{ .vk_type = .uniform_buffer, .ratio = 3 },
-            .{ .vk_type = .combined_image_sampler, .ratio = 4 },
-        };
-        self.desc_allocator = try DescriptorAllocator.init(allocator, ctx, 1000, frame_sizes);
-
-        self.scene_data_buffer = try Buffer.create(ctx, @sizeOf(SceneData), .{
-            .uniform_buffer_bit = true,
-        }, .{ .host_visible_bit = true, .device_local_bit = true });
-    }
-
-    pub fn resize(self: *FrameData, extent: vk.Extent2D) void {
-        self.viewport.width = @floatFromInt(extent.width);
-        self.viewport.height = @floatFromInt(extent.height);
-        self.scissor.extent = extent;
-    }
-
-    pub fn destroy(self: *FrameData, ctx: *const GraphicsContext) void {
-        self.cmd_pool.destroy(ctx);
-        self.desc_allocator.destroy(ctx);
-        self.scene_data_buffer.destroy(ctx);
-    }
-};
+pub fn destroy(self: *Frame, engine: *Engine) void {
+    self.swap_image.deinit(engine);
+    self.cmd_pool.destroy(engine);
+    self.frame_descriptor.destroy(engine.ctx);
+    self.scene_data_buffer.destroy(engine.ctx);
+}

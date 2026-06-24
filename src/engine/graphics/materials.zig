@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.materials);
 const vk = @import("vulkan");
 const materials = @import("materials.zig");
 const descriptor = @import("../vulkan/descriptor.zig");
@@ -33,14 +34,19 @@ pub const MetallicRoughness = struct {
     material_layout: vk.DescriptorSetLayout,
 
     pub const MaterialConstants = struct {
-        color_factors: @Vector(4, f32),
-        metal_rough_factors: @Vector(4, f32),
+        color_factors: [4]f32,
+        metal_rough_factors: [4]f32,
+        color_tex_id: u32,
+        metal_rough_tex_id: u32,
+        pad_1: u32 = 0,
+        pad_2: u32 = 0,
+        // Padding to 256 bytes (minUniformBufferOffsetAlignment on all target GPUs).
+        extra: [13][4]f32 = [_][4]f32{.{ 0, 0, 0, 0 }} ** 13,
 
-        // In vulkan, when you want to bind a uniform buffer,
-        // it needs to meet a minimum requirement for its alignment.
-        // 256 bytes is a good default alignment for this which all the gpus we target meet,
-        // so we are adding those vec4s to pad the structure to 256 bytes.
-        extra: [14]@Vector(4, f32), // padding to reach 256 bytes
+        comptime {
+            if (@offsetOf(MaterialConstants, "color_tex_id") != 32) @compileError("color_tex_id must be at offset 32 (std140 layout)");
+            if (@sizeOf(MaterialConstants) != 256) @compileError("MaterialConstants must be 256 bytes");
+        }
     };
 
     pub fn createMaterialPushConstantsBuffer(engine: *const Engine, size: u32) !Buffer {
@@ -83,13 +89,11 @@ pub const MetallicRoughness = struct {
         defer layout_builder.deinit();
 
         try layout_builder.addBinding(0, .uniform_buffer);
-        try layout_builder.addBinding(1, .combined_image_sampler);
-        try layout_builder.addBinding(2, .combined_image_sampler);
 
         self.material_layout = try layout_builder.build(engine.ctx, .{ .vertex_bit = true, .fragment_bit = true }, .{}, null);
 
         const layouts = [_]vk.DescriptorSetLayout{
-            engine.descriptor.vk_mesh_descriptor_set_layout,
+            engine.descriptor.vk_global_descriptor_set_layout,
             self.material_layout,
         };
 
@@ -113,7 +117,7 @@ pub const MetallicRoughness = struct {
         pipeline_builder.setCullMode(vk.CullModeFlags{}, .clockwise);
         pipeline_builder.setMultisamplingNone();
         pipeline_builder.disableBlending();
-        pipeline_builder.enableDepthTest(.true, .greater_or_equal);
+        pipeline_builder.enableDepthTest(.true, .less_or_equal);
 
         // render format
         pipeline_builder.setColorAttachmentFormat(engine.draw_image.format);
@@ -127,7 +131,7 @@ pub const MetallicRoughness = struct {
 
         // Create the transparent variant
         pipeline_builder.enableBlendingAdditive();
-        pipeline_builder.enableDepthTest(.false, .greater_or_equal);
+        pipeline_builder.enableDepthTest(.false, .less_or_equal);
 
         self.transparent_pipeline.pipeline = try pipeline_builder.buildPipeline(engine.ctx);
     }
@@ -154,10 +158,9 @@ pub const MetallicRoughness = struct {
 
         material_data.material_set = try desc_allocator.allocate(engine.ctx, self.material_layout, null);
 
+        log.info("Write material image size: {} bytes", .{resources.color_image.size});
         engine.descriptor.writer.clear();
         try engine.descriptor.writer.writeBuffer(0, resources.data_buffer, @sizeOf(MaterialConstants), resources.data_buffer_offset, .uniform_buffer);
-        try engine.descriptor.writer.writeImage(1, resources.color_image, resources.color_sampler, .shader_read_only_optimal, .combined_image_sampler);
-        try engine.descriptor.writer.writeImage(2, resources.metal_rough_image, resources.metal_rough_sampler, .shader_read_only_optimal, .combined_image_sampler);
 
         engine.descriptor.writer.updateSet(engine.ctx, material_data.material_set);
 

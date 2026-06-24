@@ -1,18 +1,18 @@
 const std = @import("std");
+const log = std.log.scoped(.stats);
 const sdl = @import("sdl3");
 
 const Stats = @This();
 
 pub const Timer = enum {
-    transfer,
-    render_passes,
-    render_pass_2d,
-    render_pass_ui,
-    render_pass_triangle,
-    copy_pass,
-    frame,
-    acquire_cmd_buf,
-    acquire_texture,
+    frame, // total CPU frame time (already used)
+    fence_wait, // waitForAllFences() — GPU-CPU sync stall
+    scene_build, // scene-graph traversal → opaque_surfaces list build
+    compute_pass, // draw_background() compute dispatch
+    render_pass_3d, // cmdBeginRendering … cmdEndRendering for 3D objects
+    blit, // draw_image → swapchain blit + layout transitions
+    present, // queueSubmit2 + queuePresentKHR + acquireNextImageKHR
+    transfer, // kept: GPU mesh/image uploads (immediateSubmit)
 };
 pub const Clock = struct {
     last: u64 = 0,
@@ -62,10 +62,16 @@ frame_index: u64 = 0,
 skip_calculation: bool = false,
 
 // per-frame accumulators
-frame_vertices: u32 = 0,
+frame_triangles: u32 = 0,
 frame_indices: u32 = 0,
 frame_draw_calls: u32 = 0,
 frame_skipped_draws: u32 = 0,
+
+frame_opaque_objects: u32 = 0,
+frame_transparent_objects: u32 = 0,
+frame_pipeline_binds: u32 = 0,
+frame_material_binds: u32 = 0,
+frame_index_buffer_binds: u32 = 0,
 
 // per-second counters
 sec_start_ticks: u64 = 0,
@@ -107,10 +113,16 @@ pub fn startFrame(self: *Stats) void {
     self.frame_index += 1;
 
     // === Reset per-frame counters ===
-    self.frame_vertices = 0;
+    self.frame_triangles = 0;
     self.frame_indices = 0;
     self.frame_draw_calls = 0;
     self.frame_skipped_draws = 0;
+
+    self.frame_opaque_objects = 0;
+    self.frame_transparent_objects = 0;
+    self.frame_pipeline_binds = 0;
+    self.frame_material_binds = 0;
+    self.frame_index_buffer_binds = 0;
 }
 
 pub fn endFrame(self: *Stats) void {
@@ -122,7 +134,7 @@ pub fn endFrame(self: *Stats) void {
     // ==============================
     if (!self.skip_calculation) {
         updateStats(
-            self.frame_vertices,
+            self.frame_triangles,
             &self.high_num_vertices_per_frame,
             &self.low_num_vertices_per_frame,
             &self.average_num_vertices_per_frame,
@@ -204,10 +216,10 @@ pub fn endFrame(self: *Stats) void {
     }
 }
 
-pub fn addDrawCall(self: *Stats, vertices: u32, indices: u32) void {
+pub fn addDrawCall(self: *Stats, triangles: u32, indices: u32) void {
     self.frame_draw_calls += 1;
     self.draw_call_per_frame += 1;
-    self.frame_vertices += vertices;
+    self.frame_triangles += triangles;
     self.frame_indices += indices;
 }
 
@@ -228,8 +240,24 @@ pub fn samplePrint(self: *Stats, interval: u64) void {
     }
 }
 
+pub fn addOpaqueObject(self: *Stats) void {
+    self.frame_opaque_objects += 1;
+}
+pub fn addTransparentObject(self: *Stats) void {
+    self.frame_transparent_objects += 1;
+}
+pub fn addPipelineBind(self: *Stats) void {
+    self.frame_pipeline_binds += 1;
+}
+pub fn addMaterialBind(self: *Stats) void {
+    self.frame_material_binds += 1;
+}
+pub fn addIndexBufferBind(self: *Stats) void {
+    self.frame_index_buffer_binds += 1;
+}
+
 pub fn print(self: *Stats) void {
-    std.log.info(
+    log.debug(
         \\==================== Renderer Stats ====================
         \\Total:
         \\  Frames:            : {d:>6}
@@ -237,15 +265,23 @@ pub fn print(self: *Stats) void {
         \\  Ratio:             : {d:>6.2}% Success
         \\Frame: (id: {d})
         \\  Draw Calls        : {d:>6}   (skipped {d})
-        \\  Vertices          : {d:>6}   avg {d:>6}   min {d:>6}   max {d:>6}
+        \\  Triangles         : {d:>6}   avg {d:>6}   min {d:>6}   max {d:>6}
         \\  Indices           : {d:>6}   avg {d:>6}   min {d:>6}   max {d:>6}
+        \\
+        \\ Scene:
+        \\  Opaque objects    :     {d}
+        \\  Transparent objs  :     {d}
+        \\  Pipeline binds    :     {d}
+        \\  Material binds    :     {d}
+        \\  Index buf binds   :     {d}
+        \\  Draw calls        :     {d}   (skipped {d})
         \\
         \\Per Second:
         \\  FPS               : {d:>6}
         \\  Draw Calls        : {d:>6}
         \\  Skipped Draws     : {d:>6}
         \\
-        \\Timings (ms):
+        \\ Timings (ms):           avg      min      max
     ,
         .{
             self.frame_index,
@@ -256,7 +292,7 @@ pub fn print(self: *Stats) void {
             self.draw_call_per_frame,
             self.skip_draw_per_frame,
 
-            self.frame_vertices,
+            self.frame_triangles,
             self.average_num_vertices_per_frame,
             self.low_num_vertices_per_frame,
             self.high_num_vertices_per_frame,
@@ -265,6 +301,14 @@ pub fn print(self: *Stats) void {
             self.average_num_indices_per_frame,
             self.low_num_indices_per_frame,
             self.high_num_indices_per_frame,
+
+            self.frame_opaque_objects,
+            self.frame_transparent_objects,
+            self.frame_pipeline_binds,
+            self.frame_material_binds,
+            self.frame_index_buffer_binds,
+            self.frame_draw_calls,
+            self.frame_skipped_draws,
 
             self.frame_per_sec,
             self.draw_call_per_sec,
@@ -278,8 +322,8 @@ pub fn print(self: *Stats) void {
         const timer_name = @tagName(entry.key);
         const c = entry.value;
 
-        std.log.info(
-            "  {s:<20} | avg {d:>6.2} | min {d:>6.2} | max {d:>6.2}",
+        log.debug(
+            "  {s:<20}          | {d:>6.2} | {d:>6.2} | {d:>6.2}",
             .{
                 timer_name,
                 c.average_ms,
@@ -289,7 +333,7 @@ pub fn print(self: *Stats) void {
         );
     }
 
-    std.log.info(
+    log.debug(
         "==========================================================",
         .{},
     );

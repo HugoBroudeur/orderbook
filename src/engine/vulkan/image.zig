@@ -15,6 +15,7 @@ const Image = @This();
 
 pub const ImageFormat = enum {
     jpg,
+    png,
     pub fn fromExtension(extension: []const u8) ?ImageFormat {
         // var ext = std.fs.path.extension(extension);
         var ext = extension;
@@ -28,28 +29,28 @@ pub const ImageFormat = enum {
 
 vk_image: vk.Image,
 vk_image_memory: vk.DeviceMemory,
-vk_memory_property: vk.MemoryPropertyFlags,
 view: vk.ImageView,
-usage: vk.ImageUsageFlags,
 format: vk.Format,
-width: u32 = 0,
-height: u32 = 0,
+dimension: vk.Extent3D,
 size: usize = 0,
+mip_levels: u32 = 1,
 
 pub fn create(
-    ctx: *const GraphicsContext,
-    usage: vk.ImageUsageFlags,
-    properties: vk.MemoryPropertyFlags,
-    extent: vk.Extent3D,
+    engine: *Engine,
+    size: vk.Extent3D,
     format: vk.Format,
+    usage: vk.ImageUsageFlags,
+    is_mipmapped: bool,
 ) !Image {
+    const mip_levels = if (is_mipmapped) calculateMipLevels(size.width, size.height) else 1;
+
     const image_info = vk.ImageCreateInfo{
         .flags = .{},
         .queue_family_index_count = 0,
         .p_queue_family_indices = undefined,
         .image_type = .@"2d",
-        .extent = extent,
-        .mip_levels = 1,
+        .extent = size,
+        .mip_levels = mip_levels,
         .array_layers = 1,
         .format = format,
         .tiling = .optimal,
@@ -58,13 +59,13 @@ pub fn create(
         .samples = .{ .@"1_bit" = true },
         .sharing_mode = .exclusive,
     };
-    const vk_image = try ctx.device.createImage(&image_info, null);
+    const vk_image = try engine.ctx.device.createImage(&image_info, null);
 
-    const mem_requirements = ctx.device.getImageMemoryRequirements(vk_image);
-    var alloc_info = try ctx.createMemoryAllocateInfo(mem_requirements, properties, false);
+    const mem_requirements = engine.ctx.device.getImageMemoryRequirements(vk_image);
+    var alloc_info = try engine.ctx.createMemoryAllocateInfo(mem_requirements, .{ .device_local_bit = true }, false);
 
-    const image_memory = try ctx.device.allocateMemory(&alloc_info, null);
-    try ctx.device.bindImageMemory(vk_image, image_memory, 0);
+    const image_memory = try engine.ctx.device.allocateMemory(&alloc_info, null);
+    try engine.ctx.device.bindImageMemory(vk_image, image_memory, 0);
 
     var aspect_flag: vk.ImageAspectFlags = .{ .color_bit = true };
     if (format == .d32_sfloat) {
@@ -81,21 +82,19 @@ pub fn create(
             .base_mip_level = 0,
             .base_array_layer = 0,
             .layer_count = 1,
-            .level_count = 1,
+            .level_count = mip_levels,
         },
     };
     // Must be call after ctx.device.bindImageMemory(vk_image, image_memory, 0);
-    const view = try ctx.device.createImageView(&view_info, null);
+    const view = try engine.ctx.device.createImageView(&view_info, null);
 
     return .{
         .vk_image = vk_image,
         .vk_image_memory = image_memory,
-        .vk_memory_property = properties,
         .view = view,
-        .usage = usage,
-        .width = extent.width,
-        .height = extent.height,
+        .dimension = size,
         .format = format,
+        .mip_levels = mip_levels,
         // .size = extent.width * extent.height *
     };
 }
@@ -104,27 +103,19 @@ pub fn createFromSurface(
     engine: *Engine,
     surface: sdl.surface.Surface,
     usage: vk.ImageUsageFlags,
-    properties: vk.MemoryPropertyFlags,
 ) !Image {
     var _usage = usage;
     _usage.transfer_src_bit = true;
     _usage.transfer_dst_bit = true;
 
-    var image = try create(
-        engine.ctx,
-        _usage,
-        properties,
+    return Image.createFromBytes(
+        engine,
+        surface.getPixels().?,
         .{ .width = @intCast(surface.getWidth()), .height = @intCast(surface.getHeight()), .depth = 1 },
         toVulkanFormat(surface.getFormat().?),
+        _usage,
+        true,
     );
-
-    image.size = surface.getPixels().?.len;
-
-    var cmd = try TransferToGpuCmd.create(&image, surface.getPixels().?, engine.ctx);
-    defer cmd.destroy();
-    try engine.getCurrentFrame().cmd_pool.immediateSubmit(engine.ctx, .graphic, &.{cmd.interface()});
-
-    return image;
 }
 
 pub fn createFromPath(
@@ -132,63 +123,59 @@ pub fn createFromPath(
     path: []const u8,
     pixel_format: sdl.pixels.Format,
     usage: vk.ImageUsageFlags,
-    properties: vk.MemoryPropertyFlags,
 ) !Image {
     const surface = try loadImageAsset(path, pixel_format);
-    return try Image.createFromSurface(engine, surface, usage, properties);
+    return try Image.createFromSurface(engine, surface, usage);
 }
 
 pub fn createFromColor(
-    ctx: *const GraphicsContext,
-    cmd_pool: *const CommandPool,
+    engine: *Engine,
     color: Primitive.Color,
     size: vk.Extent3D,
     format: vk.Format,
     usage: vk.ImageUsageFlags,
-    properties: vk.MemoryPropertyFlags,
 ) !Image {
     var _usage = usage;
     _usage.transfer_src_bit = true;
     _usage.transfer_dst_bit = true;
 
-    var image = try create(ctx, _usage, properties, size, format);
-
-    image.size = size.width * size.height;
-
-    var cmd = try TransferToGpuCmd.create(&image, &color.toBytes(), ctx);
-    defer cmd.destroy();
-    try cmd_pool.immediateSubmit(ctx, .graphic, &.{cmd.interface()});
-
-    return image;
+    return Image.createFromBytes(
+        engine,
+        &color.toBytes(),
+        size,
+        format,
+        _usage,
+        false,
+    );
 }
 
-pub fn createFromRawBytes(
+pub fn createFromBytes(
     engine: *Engine,
     data: []const u8,
     size: vk.Extent3D,
     format: vk.Format,
     usage: vk.ImageUsageFlags,
-    properties: vk.MemoryPropertyFlags,
+    is_mipmapped: bool,
 ) !Image {
     var _usage = usage;
     _usage.transfer_src_bit = true;
     _usage.transfer_dst_bit = true;
 
-    var image = try create(engine.ctx, _usage, properties, size, format);
-    image.size = size.width * size.height;
+    var image = try create(engine, size, format, _usage, is_mipmapped);
+    // image.size = size.width * size.height;
+    image.size = data.len;
 
-    var cmd = try TransferToGpuCmd.create(&image, data, engine.ctx);
+    var cmd = try TransferToGpuCmd.create(engine, &image, data, is_mipmapped);
     defer cmd.destroy();
-    try engine.getCurrentFrame().cmd_pool.immediateSubmit(engine.ctx, .graphic, &.{cmd.interface()});
+    try engine.immediateSubmit(.graphic, &.{cmd.interface()});
 
     return image;
 }
 
-pub fn createFromImageBytes(
+pub fn createFromBytesWithSDL(
     engine: *Engine,
     data: []const u8,
     usage: vk.ImageUsageFlags,
-    properties: vk.MemoryPropertyFlags,
 ) !Image {
     const stream = try sdl.io_stream.Stream.initFromConstMem(data);
     const surface = sdl.image.loadIo(stream, true) catch |err| {
@@ -197,7 +184,8 @@ pub fn createFromImageBytes(
     };
     defer surface.deinit();
     const surface_rgba = try surface.convertFormat(.array_rgba_32);
-    return Image.createFromSurface(engine, surface_rgba, usage, properties);
+    defer surface_rgba.deinit();
+    return Image.createFromSurface(engine, surface_rgba, usage);
 }
 
 pub fn destroy(self: *Image, ctx: *const GraphicsContext) void {
@@ -225,6 +213,7 @@ pub fn loadImageAsset(image_path: []const u8, pixel_format: sdl.pixels.Format) !
 
     const surface = switch (format.?) {
         .jpg => try sdl.image.loadJpgIo(stream),
+        .png => try sdl.image.loadPngIo(stream),
     };
     defer surface.deinit();
 
@@ -250,6 +239,72 @@ pub fn loadImageAsset(image_path: []const u8, pixel_format: sdl.pixels.Format) !
     return surface_formated;
 }
 
+fn calculateMipLevels(width: u32, height: u32) u32 {
+    return std.math.log2(@max(width, height)) + 1;
+}
+
+fn generateMipmaps(
+    image: *const Image,
+    engine: *Engine,
+) void {
+    const mip_levels = calculateMipLevels(image.dimension.width, image.dimension.height);
+    var mip_width: u32 = @intCast(image.dimension.width);
+    var mip_height: u32 = @intCast(image.dimension.height);
+
+    for (0..mip_levels) |i| {
+        const mip: u32 = @intCast(i);
+
+        const half_size: vk.Extent3D = .{
+            .width = @max(mip_width / 2, 1),
+            .height = @max(mip_height / 2, 1),
+            .depth = 1,
+        };
+
+        vkTransitionToLayout(engine, image.vk_image, .transfer_dst_optimal, .transfer_src_optimal, mip);
+
+        if (mip < mip_levels - 1) {
+            const blit = vk.ImageBlit2{
+                .src_subresource = .{
+                    .aspect_mask = .{ .color_bit = true },
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                    .mip_level = mip,
+                },
+                .src_offsets = .{
+                    .{ .x = 0, .y = 0, .z = 0 },
+                    .{ .x = @intCast(mip_width), .y = @intCast(mip_height), .z = 1 },
+                },
+                .dst_subresource = .{
+                    .aspect_mask = .{ .color_bit = true },
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                    .mip_level = mip + 1,
+                },
+                .dst_offsets = .{
+                    .{ .x = 0, .y = 0, .z = 0 },
+                    .{ .x = @intCast(half_size.width), .y = @intCast(half_size.height), .z = 1 },
+                },
+            };
+
+            engine.ctx.device.cmdBlitImage2(engine.getCurrentFrame().cmd_buf, &.{
+                .src_image = image.vk_image,
+                .src_image_layout = .transfer_src_optimal,
+                .dst_image = image.vk_image,
+                .dst_image_layout = .transfer_dst_optimal,
+                .filter = .linear,
+                .region_count = 1,
+                .p_regions = @ptrCast(&blit),
+            });
+
+            mip_width = half_size.width;
+            mip_height = half_size.height;
+        }
+    }
+
+    // transition all mip levels into the final read_only layout
+    image.transitionToLayout(engine, .transfer_src_optimal, .shader_read_only_optimal);
+}
+
 fn toVulkanFormat(sdl_format: sdl.pixels.Format) vk.Format {
     if (sdl_format == sdl.pixels.Format.array_rgba_32) return .r8g8b8a8_unorm;
 
@@ -261,7 +316,7 @@ fn toVulkanFormat(sdl_format: sdl.pixels.Format) vk.Format {
     };
 }
 
-pub fn transitionToLayout(self: *const Image, ctx: *const GraphicsContext, cmd: vk.CommandBuffer, old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) void {
+pub fn transitionToLayout(self: *const Image, engine: *Engine, old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) void {
     const aspect_mask: vk.ImageAspectFlags = if (new_layout == .depth_attachment_optimal) .{ .depth_bit = true } else .{ .color_bit = true };
 
     const barrier: vk.ImageMemoryBarrier2 = .{
@@ -288,10 +343,10 @@ pub fn transitionToLayout(self: *const Image, ctx: *const GraphicsContext, cmd: 
         .p_image_memory_barriers = @ptrCast(&barrier),
     };
 
-    ctx.device.cmdPipelineBarrier2(cmd, &dep_info);
+    engine.ctx.device.cmdPipelineBarrier2(engine.getCurrentFrame().cmd_buf, &dep_info);
 }
 
-pub fn vkTransitionToLayout(img: vk.Image, ctx: *const GraphicsContext, cmd: vk.CommandBuffer, old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) void {
+pub fn vkTransitionToLayout(engine: *Engine, img: vk.Image, old_layout: vk.ImageLayout, new_layout: vk.ImageLayout, mip_level: u32) void {
     const aspect_mask: vk.ImageAspectFlags = if (new_layout == .depth_attachment_optimal) .{ .depth_bit = true } else .{ .color_bit = true };
 
     const barrier: vk.ImageMemoryBarrier2 = .{
@@ -308,8 +363,9 @@ pub fn vkTransitionToLayout(img: vk.Image, ctx: *const GraphicsContext, cmd: vk.
             .aspect_mask = aspect_mask,
             .base_array_layer = 0,
             .layer_count = vk.REMAINING_ARRAY_LAYERS,
-            .base_mip_level = 0,
-            .level_count = vk.REMAINING_MIP_LEVELS,
+            .base_mip_level = mip_level,
+            // .level_count = vk.REMAINING_MIP_LEVELS,
+            .level_count = 1,
         },
     };
 
@@ -318,7 +374,7 @@ pub fn vkTransitionToLayout(img: vk.Image, ctx: *const GraphicsContext, cmd: vk.
         .p_image_memory_barriers = @ptrCast(&barrier),
     };
 
-    ctx.device.cmdPipelineBarrier2(cmd, &dep_info);
+    engine.ctx.device.cmdPipelineBarrier2(engine.getCurrentFrame().cmd_buf, &dep_info);
 }
 
 pub fn copyToImage(self: *Image, ctx: *const GraphicsContext, cmd: vk.CommandBuffer, destination: *Image) void {
@@ -358,7 +414,7 @@ pub fn copyToImage(self: *Image, ctx: *const GraphicsContext, cmd: vk.CommandBuf
     ctx.device.cmdBlitImage2(cmd, &blit_info);
 }
 
-pub fn vkCopyImageToImage(ctx: *const GraphicsContext, cmd: vk.CommandBuffer, src_img: vk.Image, dst_img: vk.Image, src_size: vk.Extent2D, dst_size: vk.Extent2D) void {
+pub fn copyImageToImage(engine: *Engine, src_img: vk.Image, dst_img: vk.Image, src_size: vk.Extent2D, dst_size: vk.Extent2D) void {
     const blit_region: vk.ImageBlit2 = .{
         .src_offsets = .{
             .{ .x = 0, .y = 0, .z = 0 },
@@ -392,7 +448,7 @@ pub fn vkCopyImageToImage(ctx: *const GraphicsContext, cmd: vk.CommandBuffer, sr
         .p_regions = &.{blit_region},
     };
 
-    ctx.device.cmdBlitImage2(cmd, &blit_info);
+    engine.ctx.device.cmdBlitImage2(engine.getCurrentFrame().cmd_buf, &blit_info);
 }
 
 pub fn createDescriptorImageInfo(self: *const Image) vk.DescriptorImageInfo {
@@ -401,34 +457,34 @@ pub fn createDescriptorImageInfo(self: *const Image) vk.DescriptorImageInfo {
 
 pub const TransferToGpuCmd = struct {
     staging_buffer: Buffer,
-    ctx: *const GraphicsContext,
+    engine: *Engine,
     image: *const Image,
-    pixels: []const u8,
+    is_mipmapped: bool,
 
-    pub fn create(image: *const Image, pixels: []const u8, ctx: *const GraphicsContext) !TransferToGpuCmd {
+    pub fn create(engine: *Engine, image: *const Image, data: []const u8, is_mipmapped: bool) !TransferToGpuCmd {
         var staging_buffer = try Buffer.create(
-            ctx,
-            @intCast(pixels.len),
+            engine.ctx,
+            @intCast(data.len),
             .{ .transfer_src_bit = true },
             .{ .host_visible_bit = true, .host_coherent_bit = true },
         );
 
-        try staging_buffer.copyInto(ctx, pixels, 0);
+        try staging_buffer.copyInto(engine.ctx, data, 0);
 
         return .{
-            .ctx = ctx,
+            .engine = engine,
             .staging_buffer = staging_buffer,
-            .pixels = pixels,
             .image = image,
+            .is_mipmapped = is_mipmapped,
         };
     }
 
     pub fn destroy(self: *TransferToGpuCmd) void {
-        self.staging_buffer.destroy(self.ctx);
+        self.staging_buffer.destroy(self.engine.ctx);
     }
 
-    pub fn execute(self: *TransferToGpuCmd, cmd: vk.CommandBuffer) void {
-        self.image.transitionToLayout(self.ctx, cmd, .undefined, .transfer_dst_optimal);
+    pub fn execute(self: *TransferToGpuCmd, engine: *Engine) void {
+        self.image.transitionToLayout(engine, .undefined, .transfer_dst_optimal);
 
         const copy_region: vk.BufferImageCopy = .{
             .buffer_offset = 0,
@@ -440,11 +496,7 @@ pub const TransferToGpuCmd = struct {
                 .base_array_layer = 0,
                 .layer_count = 1,
             },
-            .image_extent = .{
-                .depth = 1,
-                .width = self.image.width,
-                .height = self.image.height,
-            },
+            .image_extent = self.image.dimension,
             .image_offset = .{
                 .x = 0,
                 .y = 0,
@@ -452,15 +504,19 @@ pub const TransferToGpuCmd = struct {
             },
         };
 
-        self.ctx.device.cmdCopyBufferToImage(
-            cmd,
+        self.engine.ctx.device.cmdCopyBufferToImage(
+            engine.getCurrentFrame().cmd_buf,
             self.staging_buffer.vk_buffer,
             self.image.vk_image,
             .transfer_dst_optimal,
             &.{copy_region},
         );
 
-        self.image.transitionToLayout(self.ctx, cmd, .transfer_dst_optimal, .shader_read_only_optimal);
+        if (self.is_mipmapped) {
+            self.image.generateMipmaps(engine);
+        } else {
+            self.image.transitionToLayout(engine, .transfer_dst_optimal, .shader_read_only_optimal);
+        }
     }
 
     pub fn interface(self: *TransferToGpuCmd) CommandPool.GpuCommand {

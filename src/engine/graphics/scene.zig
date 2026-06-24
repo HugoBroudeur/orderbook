@@ -45,7 +45,7 @@ pub const BasicNode = struct {
     }
 
     pub fn refreshTransform(self: *BasicNode, parent_matrix: zm.Mat) void {
-        self.world_transform = zm.mul(parent_matrix, self.local_transform);
+        self.world_transform = zm.mul(self.local_transform, parent_matrix);
         for (self.child_nodes.items) |child| {
             child.refreshTransform(self.world_transform);
         }
@@ -82,7 +82,6 @@ pub const MeshNode = struct {
     pub fn deinit(self: *MeshNode) void {
         self.parent_node = null;
         self.mesh = null;
-        self.node.deinit();
         self.child_nodes.deinit(self.allocator);
     }
 
@@ -99,14 +98,14 @@ pub const MeshNode = struct {
     }
 
     pub fn refreshTransform(self: *MeshNode, parent_matrix: zm.Mat) void {
-        self.world_transform = zm.mul(parent_matrix, self.local_transform);
+        self.world_transform = zm.mul(self.local_transform, parent_matrix);
         for (self.child_nodes.items) |child| {
             child.refreshTransform(self.world_transform);
         }
     }
 
     pub fn draw(self: *MeshNode, top_matrix: *zm.Mat, ctx: *DrawContext) !void {
-        const node_matrix = zm.mul(top_matrix.*, self.world_transform);
+        var node_matrix = zm.mul(top_matrix.*, self.world_transform);
 
         if (self.mesh) |m| {
             for (m.surfaces.items) |surface| {
@@ -118,6 +117,7 @@ pub const MeshNode = struct {
                         .vertex_buffer = m.buffers.vertex.?,
                         .material = &surface.material.?.data,
                         .transform = node_matrix,
+                        .bounds = surface.bounds,
                     };
                     const list = switch (ro.material.pass_type) {
                         .Transparent => &ctx.transparent_surfaces,
@@ -129,7 +129,7 @@ pub const MeshNode = struct {
         }
 
         for (self.child_nodes.items) |child| {
-            try child.draw(top_matrix, ctx);
+            try child.draw(&node_matrix, ctx);
         }
     }
 
@@ -144,7 +144,7 @@ pub const LoadedGLTF = struct {
     // storage for all the data on a given glTF file
     meshes: std.array_hash_map.String(*Mesh),
     nodes: std.array_hash_map.String(*IRenderable),
-    images: std.array_hash_map.String(Image),
+    images: std.array_hash_map.String(*Image),
     materials: std.array_hash_map.String(*Mesh.GLTFMaterial),
 
     // nodes that dont have a parent, for iterating through the file in tree order
@@ -177,25 +177,11 @@ pub const LoadedGLTF = struct {
         }
     }
 
-    // pub fn deinitA(self: *LoadedGLTF) void {
-    //     self.images.deinit();
-    //     self.materials.deinit();
-    //     self.top_nodes.deinit(self.allocator);
-    //     self.samplers.deinit(self.allocator);
-    //     self.meshes.deinit();
-    //     self.nodes.deinit();
-    // }
-    //
     pub fn deinit(self: *LoadedGLTF) void {
         const ctx = self.creator.ctx;
 
         for (self.samplers.items) |*s| s.destroy(ctx);
         self.samplers.deinit(self.allocator);
-
-        var images_it = self.images.iterator();
-        while (images_it.next()) |entry| {
-            entry.value_ptr.destroy(self.creator.ctx);
-        }
         self.images.deinit(self.allocator);
 
         self.material_data_buffer.destroy(ctx);
@@ -213,17 +199,50 @@ pub const DrawContext = struct {
     opaque_surfaces: std.ArrayList(objects.RenderObject),
     transparent_surfaces: std.ArrayList(objects.RenderObject),
 
+    _opaque_sufaces_sorted: std.ArrayList(u64),
+
     pub fn init(allocator: std.mem.Allocator) !DrawContext {
         return .{
             .allocator = allocator,
-            .opaque_surfaces = try .initCapacity(allocator, 0),
-            .transparent_surfaces = try .initCapacity(allocator, 0),
+            .opaque_surfaces = .empty,
+            .transparent_surfaces = .empty,
+            ._opaque_sufaces_sorted = .empty,
         };
     }
 
     pub fn deinit(self: *DrawContext) void {
         self.opaque_surfaces.deinit(self.allocator);
         self.transparent_surfaces.deinit(self.allocator);
+        self._opaque_sufaces_sorted.deinit(self.allocator);
+    }
+
+    // Sort the opaque_surfaces by materials and index buffers for reusing the same buffers when rendering
+    pub fn sort(self: *DrawContext) void {
+        const SortCtx = struct {
+            draw_ctx: *DrawContext,
+
+            pub fn lessThan(ctx: @This(), a: u64, b: u64) bool {
+                const roa = &ctx.draw_ctx.opaque_surfaces.items[a];
+                const rob = &ctx.draw_ctx.opaque_surfaces.items[b];
+                if (@intFromPtr(roa.material) == @intFromPtr(rob.material)) {
+                    return @intFromPtr(&roa.index_buffer) < @intFromPtr(&rob.index_buffer);
+                }
+                return @intFromPtr(roa.material) < @intFromPtr(rob.material);
+            }
+        };
+
+        std.mem.sort(u64, self._opaque_sufaces_sorted.items, SortCtx{ .draw_ctx = self }, SortCtx.lessThan);
+    }
+
+    pub fn frustumCulling(self: *DrawContext, scene_view_proj: zm.Mat) !void {
+        self._opaque_sufaces_sorted.clearRetainingCapacity();
+        try self._opaque_sufaces_sorted.ensureTotalCapacity(self.allocator, self.opaque_surfaces.items.len);
+
+        for (self.opaque_surfaces.items, 0..) |*ro, i| {
+            if (ro.isVisible(scene_view_proj)) {
+                self._opaque_sufaces_sorted.appendAssumeCapacity(i);
+            }
+        }
     }
 };
 

@@ -191,6 +191,18 @@ pub const DescriptorWriter = struct {
         layout: vk.ImageLayout,
         descriptor_type: vk.DescriptorType,
     ) !void {
+        return self.writeImageAt(binding, 0, image, sampler, layout, descriptor_type);
+    }
+
+    pub fn writeImageAt(
+        self: *DescriptorWriter,
+        binding: u32,
+        array_element: u32,
+        image: Image,
+        sampler: Sampler,
+        layout: vk.ImageLayout,
+        descriptor_type: vk.DescriptorType,
+    ) !void {
         const image_info = vk.DescriptorImageInfo{
             .sampler = sampler.vk_sampler,
             .image_view = image.view,
@@ -201,7 +213,7 @@ pub const DescriptorWriter = struct {
         const write = vk.WriteDescriptorSet{
             .dst_binding = binding,
             .dst_set = .null_handle, // Will be set in updateSet
-            .dst_array_element = 0,
+            .dst_array_element = array_element,
             .descriptor_count = 1,
             .descriptor_type = descriptor_type,
             .p_image_info = @ptrCast(&self.image_infos.items[self.image_infos.items.len - 1]),
