@@ -9,6 +9,7 @@ const zm = @import("zmath");
 const UiManager = @import("../../game/ui_manager.zig");
 const EcsManager = @import("../../game/ecs_manager.zig");
 const materials = @import("../graphics/materials.zig");
+const ComputeEffect = @import("../graphics/effects.zig").ComputeEffect;
 const Scene = @import("../graphics/scene.zig");
 const DrawContext = Scene.DrawContext;
 const IRenderable = Scene.IRenderable;
@@ -53,7 +54,7 @@ pub const DrawPassType = enum { demo, ui, shadow, ssao, sky, solid, raycast, tra
 pub const TransferBufferType = enum { atlas_buffer_data, atlas_texture_data };
 pub const ImageType = enum { atlas, black, white, grey, error_checker };
 pub const SamplerType = enum { nearest, linear };
-pub const PipelineType = enum { compute, _2d };
+pub const PipelineType = enum { _2d };
 
 pub const FRAME_OVERLAP = 2;
 
@@ -148,6 +149,8 @@ loaded_nodes: std.StringHashMap(IRenderable),
 material_constants_buffer: Buffer = undefined,
 metal_rough_material: materials.MetallicRoughness = .create(),
 
+compute_effect: ComputeEffect = .create(),
+
 // Draw optimisation
 last_pipeline: ?*materials.MaterialPipeline = null,
 last_material: ?*materials.MaterialInstance = null,
@@ -216,6 +219,7 @@ pub fn deinit(self: *Engine) void {
     self.batcher.deinit();
 
     self.metal_rough_material.destroy(self);
+    self.compute_effect.destroy(self);
     self.loaded_nodes.deinit();
     self.draw_context.deinit();
     self.texture_cache.deinit(self.allocator);
@@ -240,7 +244,8 @@ pub fn setup(self: *Engine) !void {
     // Create Pipelines
     try self.create2DPipeline();
     try self.metal_rough_material.buildPipeline(self);
-    try self.createComputePipeline();
+
+    try self.compute_effect.buildPipeline(self);
 
     self.material_constants_buffer = try materials.MetallicRoughness.createMaterialPushConstantsBuffer(self, 1);
 
@@ -445,7 +450,7 @@ fn fillCommandBuffers(self: *Engine) !void {
         self.stats.startClock(.compute_pass);
 
         draw_image.transitionToLayout(self, .undefined, .general);
-        self.draw_background();
+        self.draw_effects();
 
         self.stats.tickClock(.compute_pass);
     }
@@ -680,15 +685,12 @@ fn draw_render_object(
     self.stats.addDrawCall(ro.index_count / 3, ro.index_count);
 }
 
-pub fn draw_background(self: *Engine) void {
-    // const draw_image = self.images.getPtr(.draw);
-    // const current_frame = self.getCurrentFrame();
-
-    self.ctx.device.cmdBindPipeline(self.getCurrentFrame().cmd_buf, .compute, self.pipelines.get(.compute).vk_pipeline);
+pub fn draw_effects(self: *Engine) void {
+    self.ctx.device.cmdBindPipeline(self.getCurrentFrame().cmd_buf, .compute, self.compute_effect.effect_pipeline.pipeline.vk_pipeline);
     self.ctx.device.cmdBindDescriptorSets(
         self.getCurrentFrame().cmd_buf,
         .compute,
-        self.pipeline_layouts.get(.compute),
+        self.compute_effect.effect_pipeline.pipeline_layout,
         0,
         &.{self.descriptor.draw_image_descriptor},
         null,
@@ -852,26 +854,4 @@ fn create2DPipeline(self: *Engine) !void {
 
     self.pipelines.set(._2d, pipeline);
     self.pipeline_layouts.set(._2d, pipeline_layout);
-}
-
-fn createComputePipeline(self: *Engine) !void {
-    // var compute = try Shader.create(self.ctx, .{ .name = "compute.spv", .stage = .compute });
-    var compute = try Shader.create(self, .{ .name = "sky.spv", .stage = .compute });
-    defer compute.destroy(self.ctx);
-
-    // self.descriptor
-    // const pipeline = try Pipeline.createComputePipeline(self.ctx, compute, try Pipeline.createPipelineLayout(self.ctx));
-
-    const pipeline_layout = try self.ctx.device.createPipelineLayout(&.{
-        .flags = .{},
-        .set_layout_count = 1,
-        .p_set_layouts = @ptrCast(&self.descriptor.draw_image_descriptor_layout),
-        .push_constant_range_count = 0,
-        .p_push_constant_ranges = undefined,
-    }, null);
-
-    const pipeline = try Pipeline.createComputePipeline(self.ctx, compute, pipeline_layout);
-
-    self.pipelines.set(.compute, pipeline);
-    self.pipeline_layouts.set(.compute, pipeline_layout);
 }
