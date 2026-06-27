@@ -1,7 +1,7 @@
 const std = @import("std");
 const networking = @import("networking");
 const env = @import("config.zig");
-const app = @import("core/app.zig");
+const App = @import("core/app.zig");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -33,13 +33,13 @@ pub fn main(init: std.process.Init) !void {
     // });
     // defer tcp_server.deinit();
 
-    try app.init(
+    var app = try App.init(
         allocator,
         io,
         config,
     );
 
-    app.run(io);
+    app.run();
 }
 
 test {

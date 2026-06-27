@@ -75,6 +75,10 @@
             .url = "git+https://github.com/kooparse/zgltf#ec52d477db346af99d4cdced4e35e67e1670023f",
             .hash = "zgltf-0.1.0-sX6QAt0SAgDzMQCCG-N181hVbx8JnwFYZ3luQigQpVBM",
         },
+        .dvui = .{
+            .url = "git+https://github.com/david-vanderson/dvui?ref=main#7f40780b90870c62d13c2f20495ea491211c3394",
+            .hash = "dvui-0.5.0-dev-AQFJmcBC9wC3_Ld2s7Iw5dlBYLU1G5EkJndZzN7CJKBg",
+        },
     },
     .paths = .{
         "build.zig",

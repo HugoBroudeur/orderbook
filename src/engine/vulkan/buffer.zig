@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const vk = @import("vulkan");
 
 const Logger = @import("../../core/log.zig").MaxLogs(50);
-const CommandPool = @import("command_pool.zig");
+const CommandPool = @import("command_pool.zig").CommandPool;
 const GraphicsContext = @import("../../core/graphics_context.zig");
 const Shader = @import("shader.zig");
 

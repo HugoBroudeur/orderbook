@@ -187,7 +187,7 @@ pub const Swapchain = struct {
 
         // Step 1: Make sure the current frame has finished rendering
         const current = engine.getCurrentFrame().swap_image;
-        const cmdbuf = engine.getCurrentFrame().cmd_buf;
+        const cmdbuf = engine.getCurrentFrame().cmd_buf.vk_command_buffer;
         try current.waitForFence(engine);
         try engine.ctx.device.resetFences(&.{current.frame_fence});
 

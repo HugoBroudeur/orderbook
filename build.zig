@@ -90,6 +90,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    const dvui_dep = b.dependency("dvui", .{ .target = target, .optimize = optimize, .backend = .sdl3gpu });
 
     // Generate Zig code from .proto
     // const gen_proto = b.step("gen-proto", "generate zig files from protocol buffer definitions");
@@ -113,6 +114,8 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addImport("zmath", dep_zmath.module("root"));
     exe.root_module.addImport("vulkan", dep_vulkan.module("vulkan-zig"));
     exe.root_module.addImport("zgltf", dep_zgltf.module("zgltf"));
+    exe.root_module.addImport("dvui", dvui_dep.module("dvui_sdl3gpu"));
+    exe.root_module.addImport("sdl3gpu-backend", dvui_dep.module("sdl3")); // Required for ZLS autocomplete
 
     exe.root_module.addImport("tracy", dep_tracy.module("tracy"));
     // Tracy (should be disable for Release)

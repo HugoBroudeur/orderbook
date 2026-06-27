@@ -29,7 +29,7 @@ const Batcher = @import("batcher.zig");
 const Buffer = @import("buffer.zig");
 const Camera = @import("../camera.zig");
 const Command = @import("../command.zig");
-const CommandPool = @import("command_pool.zig");
+const VulkanCommand = @import("command_pool.zig");
 const Data = @import("../data.zig");
 const DescriptorAllocator = @import("descriptor.zig").DescriptorAllocator;
 const DescriptorWriter = @import("descriptor.zig").DescriptorWriter;
@@ -436,7 +436,7 @@ fn fillCommandBuffers(self: *Engine) !void {
 
     const draw_image = &self.draw_image;
     const depth_image = &self.depth_image;
-    const cmdbuf = &current_frame.cmd_buf;
+    const cmdbuf = &current_frame.cmd_buf.vk_command_buffer;
     try current_frame.frame_descriptor.clear(self.ctx);
 
     const cmd_begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .one_time_submit_bit = true } };
@@ -449,7 +449,7 @@ fn fillCommandBuffers(self: *Engine) !void {
     {
         self.stats.startClock(.compute_pass);
 
-        draw_image.transitionToLayout(self, .undefined, .general);
+        draw_image.transitionToLayout(self, current_frame.cmd_buf, .undefined, .general);
         self.draw_effects();
 
         self.stats.tickClock(.compute_pass);
@@ -459,9 +459,9 @@ fn fillCommandBuffers(self: *Engine) !void {
     {
         self.stats.startClock(.render_pass_3d);
 
-        draw_image.transitionToLayout(self, .general, .color_attachment_optimal);
-        depth_image.transitionToLayout(self, .undefined, .depth_attachment_optimal);
-        self.images.getPtr(.atlas).transitionToLayout(self, .undefined, .shader_read_only_optimal);
+        draw_image.transitionToLayout(self, current_frame.cmd_buf, .general, .color_attachment_optimal);
+        depth_image.transitionToLayout(self, current_frame.cmd_buf, .undefined, .depth_attachment_optimal);
+        self.images.getPtr(.atlas).transitionToLayout(self, current_frame.cmd_buf, .undefined, .shader_read_only_optimal);
         try self.draw_geometry();
 
         self.stats.tickClock(.render_pass_3d);
@@ -471,12 +471,12 @@ fn fillCommandBuffers(self: *Engine) !void {
     {
         self.stats.startClock(.blit);
 
-        draw_image.transitionToLayout(self, .color_attachment_optimal, .transfer_src_optimal);
+        draw_image.transitionToLayout(self, current_frame.cmd_buf, .color_attachment_optimal, .transfer_src_optimal);
 
-        Image.vkTransitionToLayout(self, self.swapchain.currentImage(), .undefined, .transfer_dst_optimal, 0);
-        Image.copyImageToImage(self, draw_image.vk_image, self.swapchain.currentImage(), self.draw_extent, self.swapchain.extent);
-        Image.vkTransitionToLayout(self, self.swapchain.currentImage(), .transfer_dst_optimal, .color_attachment_optimal, 0);
-        Image.vkTransitionToLayout(self, self.swapchain.currentImage(), .color_attachment_optimal, .present_src_khr, 0);
+        Image.vkTransitionToLayout(self, current_frame.cmd_buf, self.swapchain.currentImage(), .undefined, .transfer_dst_optimal, 0);
+        Image.copyImageToImage(self, current_frame.cmd_buf, draw_image.vk_image, self.swapchain.currentImage(), self.draw_extent, self.swapchain.extent);
+        Image.vkTransitionToLayout(self, current_frame.cmd_buf, self.swapchain.currentImage(), .transfer_dst_optimal, .color_attachment_optimal, 0);
+        Image.vkTransitionToLayout(self, current_frame.cmd_buf, self.swapchain.currentImage(), .color_attachment_optimal, .present_src_khr, 0);
         try self.ctx.device.endCommandBuffer(cmdbuf.*);
 
         self.stats.tickClock(.blit);
@@ -493,36 +493,33 @@ pub fn createCommandBuffers(self: *Engine, frame: *Frame) !void {
         .command_pool = frame.cmd_pool.vk_cmd_pool,
         .level = .primary,
         .command_buffer_count = 1,
-    }, @ptrCast(&frame.cmd_buf));
+    }, @ptrCast(&frame.cmd_buf.vk_command_buffer));
 }
 
 pub fn resetCommandBuffers(self: *Engine) !void {
     var frame = self.getCurrentFrame();
     frame.swapchain_state = .optimal;
 
-    self.ctx.device.freeCommandBuffers(frame.cmd_pool.vk_cmd_pool, &.{frame.cmd_buf});
+    self.ctx.device.freeCommandBuffers(frame.cmd_pool.vk_cmd_pool, &.{frame.cmd_buf.vk_command_buffer});
     try self.createCommandBuffers(frame);
 }
 
 // This pattern is not very efficient: we are waiting for the GPU command to fully execute before continuing with the CPU side logic.
 // Recommended to run in seperate thread to load the data
-pub fn immediateSubmit(self: *Engine, queue_family: GraphicsContext.QueueFamily, cmds: []const CommandPool.GpuCommand) !void {
-    try self.createCommandBuffers(self.getCurrentFrame());
-    defer self.ctx.device.freeCommandBuffers(self.getCurrentFrame().cmd_pool.vk_cmd_pool, &.{self.getCurrentFrame().cmd_buf});
-
+pub fn immediateSubmit(self: *Engine, queue_family: GraphicsContext.QueueFamily, immediate_cmd: VulkanCommand.ImmediateCommands) !void {
     const begin_info = vk.CommandBufferBeginInfo{
         .flags = .{ .one_time_submit_bit = true },
         .p_inheritance_info = null,
     };
 
     { // Issue commands
-        try self.ctx.device.beginCommandBuffer(self.getCurrentFrame().cmd_buf, &begin_info);
+        try self.ctx.device.beginCommandBuffer(immediate_cmd.buffer.vk_command_buffer, &begin_info);
 
-        for (cmds) |cmd| {
+        for (immediate_cmd.commands.items) |cmd| {
             try cmd.execute(self);
         }
 
-        try self.ctx.device.endCommandBuffer(self.getCurrentFrame().cmd_buf);
+        try self.ctx.device.endCommandBuffer(immediate_cmd.buffer.vk_command_buffer);
     }
 
     const submit_infos = [_]vk.SubmitInfo{.{
@@ -530,7 +527,7 @@ pub fn immediateSubmit(self: *Engine, queue_family: GraphicsContext.QueueFamily,
         .p_wait_semaphores = undefined,
         .p_wait_dst_stage_mask = undefined,
         .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast(&self.getCurrentFrame().cmd_buf),
+        .p_command_buffers = @ptrCast(&immediate_cmd.buffer.vk_command_buffer),
         .signal_semaphore_count = 0,
         .p_signal_semaphores = undefined,
     }};
@@ -629,7 +626,7 @@ pub fn draw_geometry(self: *Engine) !void {
     self.last_material = null;
     self.last_index_buffer = null;
 
-    self.ctx.device.cmdBeginRendering(self.getCurrentFrame().cmd_buf, &rendering_info);
+    self.ctx.device.cmdBeginRendering(self.getCurrentFrame().cmd_buf.vk_command_buffer, &rendering_info);
 
     for (self.draw_context._opaque_sufaces_sorted.items) |i| {
         self.draw_render_object(self.getCurrentFrame().cmd_buf, &self.draw_context.opaque_surfaces.items[i], frame_descriptor_set);
@@ -639,12 +636,12 @@ pub fn draw_geometry(self: *Engine) !void {
         self.draw_render_object(self.getCurrentFrame().cmd_buf, render_object, frame_descriptor_set);
     }
 
-    self.ctx.device.cmdEndRendering(self.getCurrentFrame().cmd_buf);
+    self.ctx.device.cmdEndRendering(self.getCurrentFrame().cmd_buf.vk_command_buffer);
 }
 
 fn draw_render_object(
     self: *Engine,
-    cmdbuf: vk.CommandBuffer,
+    cmdbuf: VulkanCommand.AllocatedCommandBuffer,
     ro: *RenderObject,
     frame_descriptor_set: vk.DescriptorSet,
 ) void {
@@ -659,36 +656,36 @@ fn draw_render_object(
             self.last_pipeline = ro.material.pipeline;
             self.stats.addPipelineBind();
 
-            self.ctx.device.cmdBindPipeline(cmdbuf, .graphics, pipeline.pipeline.vk_pipeline);
-            self.ctx.device.cmdBindDescriptorSets(cmdbuf, .graphics, pipeline.pipeline_layout, 0, &.{frame_descriptor_set}, null);
+            self.ctx.device.cmdBindPipeline(cmdbuf.vk_command_buffer, .graphics, pipeline.pipeline.vk_pipeline);
+            self.ctx.device.cmdBindDescriptorSets(cmdbuf.vk_command_buffer, .graphics, pipeline.pipeline_layout, 0, &.{frame_descriptor_set}, null);
 
-            self.ctx.device.cmdSetViewport(cmdbuf, 0, &.{self.getCurrentFrame().viewport});
-            self.ctx.device.cmdSetScissor(cmdbuf, 0, &.{self.getCurrentFrame().scissor});
+            self.ctx.device.cmdSetViewport(cmdbuf.vk_command_buffer, 0, &.{self.getCurrentFrame().viewport});
+            self.ctx.device.cmdSetScissor(cmdbuf.vk_command_buffer, 0, &.{self.getCurrentFrame().scissor});
         }
 
-        self.ctx.device.cmdBindDescriptorSets(cmdbuf, .graphics, pipeline.pipeline_layout, 1, &.{ro.material.material_set}, null);
+        self.ctx.device.cmdBindDescriptorSets(cmdbuf.vk_command_buffer, .graphics, pipeline.pipeline_layout, 1, &.{ro.material.material_set}, null);
     }
 
     // rebind index buffer if needed
     if (@intFromPtr(&ro.index_buffer) != @intFromPtr(self.last_index_buffer)) {
         self.last_index_buffer = &ro.index_buffer;
         self.stats.addIndexBufferBind();
-        self.ctx.device.cmdBindIndexBuffer(cmdbuf, ro.index_buffer.vk_buffer, 0, .uint32);
+        self.ctx.device.cmdBindIndexBuffer(cmdbuf.vk_command_buffer, ro.index_buffer.vk_buffer, 0, .uint32);
     }
     const push_constant: GPUDrawPushConstants = .{
         .render_matrix = ro.transform,
         .vb_address = ro.vertex_buffer.address.?,
     };
 
-    self.ctx.device.cmdPushConstants(cmdbuf, pipeline.pipeline_layout, .{ .vertex_bit = true }, 0, @sizeOf(GPUDrawPushConstants), @ptrCast(&push_constant));
-    self.ctx.device.cmdDrawIndexed(cmdbuf, ro.index_count, 1, ro.first_index, 0, 0);
+    self.ctx.device.cmdPushConstants(cmdbuf.vk_command_buffer, pipeline.pipeline_layout, .{ .vertex_bit = true }, 0, @sizeOf(GPUDrawPushConstants), @ptrCast(&push_constant));
+    self.ctx.device.cmdDrawIndexed(cmdbuf.vk_command_buffer, ro.index_count, 1, ro.first_index, 0, 0);
     self.stats.addDrawCall(ro.index_count / 3, ro.index_count);
 }
 
 pub fn draw_effects(self: *Engine) void {
-    self.ctx.device.cmdBindPipeline(self.getCurrentFrame().cmd_buf, .compute, self.compute_effect.effect_pipeline.pipeline.vk_pipeline);
+    self.ctx.device.cmdBindPipeline(self.getCurrentFrame().cmd_buf.vk_command_buffer, .compute, self.compute_effect.effect_pipeline.pipeline.vk_pipeline);
     self.ctx.device.cmdBindDescriptorSets(
-        self.getCurrentFrame().cmd_buf,
+        self.getCurrentFrame().cmd_buf.vk_command_buffer,
         .compute,
         self.compute_effect.effect_pipeline.pipeline_layout,
         0,
@@ -699,7 +696,7 @@ pub fn draw_effects(self: *Engine) void {
     const group_count_x: u32 = (@max(self.draw_extent.width, 1) + 15) / 16;
     const group_count_y: u32 = (@max(self.draw_extent.height, 1) + 15) / 16;
 
-    self.ctx.device.cmdDispatch(self.getCurrentFrame().cmd_buf, group_count_x, group_count_y, 1);
+    self.ctx.device.cmdDispatch(self.getCurrentFrame().cmd_buf.vk_command_buffer, group_count_x, group_count_y, 1);
 }
 
 pub fn update_scene(self: *Engine, draw_queue: *Command.DrawQueue) void {
@@ -733,6 +730,13 @@ pub fn update_scene(self: *Engine, draw_queue: *Command.DrawQueue) void {
 
 pub fn draw(self: *Engine, batches: []Batcher.Batch) !void {
     Logger.info("[Engine.draw] Drawing {} batches", .{batches.len});
+
+    // Swapchain may be null after a failed recreate; skip the frame rather than
+    // accessing self.frames which was freed by deinitExceptSwapchain.
+    if (self.swapchain.handle == .null_handle) {
+        return;
+    }
+
     var current_frame = self.getCurrentFrame();
 
     self.stats.startFrame();

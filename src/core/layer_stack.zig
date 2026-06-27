@@ -1,44 +1,53 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const Layer = @import("layer.zig");
 
-pub fn LayerStack(comptime max_layers: usize, comptime max_overlays: usize) type {
-    return struct {
-        const This = @This();
-        layers: Stack(Layer, max_layers),
-        overlays: Stack(Layer, max_overlays),
+pub const LayerStack = struct {
+    _stack: std.ArrayList(Layer),
 
-        pub fn init() !This {
-            return .{
-                .layers = .init(),
-                .overlays = .init(),
-            };
+    cur_layer_len: usize = 0,
+    cur_overlay_len: usize = 0,
+
+    pub fn init() LayerStack {
+        return .{
+            ._stack = .empty,
+        };
+    }
+
+    pub fn stack(self: *LayerStack) *std.ArrayList(Layer) {
+        return &self._stack;
+    }
+
+    pub fn pushLayer(self: *LayerStack, allocator: std.mem.Allocator, layer: Layer) !void {
+        try self._stack.insert(allocator, self.cur_layer_len, layer);
+        self.cur_layer_len += 1;
+    }
+
+    pub fn pushOverlay(self: *LayerStack, allocator: std.mem.Allocator, overlay: Layer) !void {
+        try self._stack.insert(allocator, self.cur_layer_len + self.cur_overlay_len, overlay);
+        self.cur_overlay_len += 1;
+    }
+
+    pub fn popLayer(self: *LayerStack, layer: Layer) void {
+        assert(self.cur_layer_len > 0);
+        for (self._stack.items[0..self.cur_layer_len], 0..) |l, i| {
+            if (std.mem.eql(u8, layer.getLabel(), l.getLabel())) {
+                self._stack.orderedRemove(i);
+                self.cur_layer_len -= 1;
+            }
         }
+    }
 
-        pub fn stack(self: *This) [max_layers + max_overlays]Layer {
-            var out: [max_layers + max_overlays]Layer = undefined;
-
-            out[0..max_layers].* = self.layers.items();
-            out[max_layers .. max_layers + max_overlays].* = self.overlays.items();
-            return out;
+    pub fn popOverlay(self: *LayerStack, overlay: Layer) void {
+        assert(self.cur_overlay_len > 0);
+        for (self._stack.items[self.cur_layer_len..], 0..) |l, i| {
+            if (std.mem.eql(u8, overlay.getLabel(), l.getLabel())) {
+                self._stack.orderedRemove(i);
+                self.cur_overlay_len -= 1;
+            }
         }
-
-        pub fn pushLayer(self: *This, layer: Layer) void {
-            self.layers.push(layer);
-        }
-
-        pub fn pushOverlay(self: *This, overlay: Layer) void {
-            self.overlays.push(overlay);
-        }
-
-        pub fn popLayer(self: *This, layer: Layer) void {
-            self.layers.pop(layer);
-        }
-
-        pub fn popOverlay(self: *This, overlay: Layer) void {
-            self.overlays.pop(overlay);
-        }
-    };
-}
+    }
+};
 
 fn Stack(comptime T: type, comptime size: usize) type {
     return struct {
@@ -50,8 +59,8 @@ fn Stack(comptime T: type, comptime size: usize) type {
             return .{ .cur_pos = 0, .stack = @splat(undefined) };
         }
 
-        pub fn items(self: *Self) [size]T {
-            return self.stack;
+        pub fn items(self: *Self) []T {
+            return self.stack[0..self.cur_pos];
         }
 
         fn push(self: *Self, el: T) void {

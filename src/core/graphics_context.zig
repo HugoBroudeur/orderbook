@@ -8,7 +8,6 @@ const GraphicsContext = @This();
 
 const Window = @import("window.zig");
 const Display = @import("display.zig");
-const Framerate = @import("framerate.zig");
 
 const SDL_INIT_FLAGS: sdl.InitFlags = .{ .video = true, .gamepad = true, .audio = true };
 
@@ -90,7 +89,6 @@ const Device = vk.DeviceProxy;
 allocator: std.mem.Allocator,
 
 display: Display,
-framerate: Framerate,
 window: Window,
 
 vkb: BaseWrapper,
@@ -109,7 +107,6 @@ device_found: bool = false,
 compute_queue: Queue,
 graphics_queue: Queue,
 present_queue: Queue,
-// memory: vk.DeviceMemory,
 
 pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
     var ctx: GraphicsContext = undefined;
@@ -131,11 +128,9 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
         display.detectCurrentDisplay(&window);
         window.center(display);
         try window.setIcon("assets/favicon.ico");
-        const framerate = Framerate.init(@intFromFloat(display.refresh_rate));
 
         ctx.display = display;
         ctx.window = window;
-        ctx.framerate = framerate;
     }
 
     const VkGetInstanceProcAddr = *const fn (
@@ -255,21 +250,8 @@ pub fn isWindowHandled(self: *GraphicsContext, window: ?sdl.video.Window) bool {
     return false;
 }
 
-pub fn handleDisplayChanged(self: *GraphicsContext) void {
-    self.display.detectCurrentDisplay(&self.window);
-    self.framerate.setTargetFps(@intFromFloat(self.display.refresh_rate));
-}
-
-pub fn getWindowId(self: *GraphicsContext) u32 {
+pub fn getWindowId(self: *const GraphicsContext) u32 {
     return self.window.ptr.getId() catch 0;
-}
-
-pub fn startFramelimiter(self: *GraphicsContext, usage: bool) void {
-    if (usage) {
-        self.framerate.on();
-    } else {
-        self.framerate.off();
-    }
 }
 
 fn checkLayerSupport(vkb: *const BaseWrapper, alloc: std.mem.Allocator) !bool {
