@@ -12,6 +12,9 @@ pub const GPUDrawPushConstants2D = extern struct {
     translate: Data.Translate2D,
     vb_address: vk.DeviceAddress = undefined,
 };
+pub const DvuiPushConstants = extern struct {
+    vb_address: vk.DeviceAddress = undefined,
+};
 
 // Vertex Data sent in Vertex buffers
 pub const Vertex = extern struct {

@@ -13,6 +13,8 @@ pub const SamplerOption = struct {
     min_lod: f32 = 0,
     max_lod: f32 = 0,
     mipmap_mode: SamplerType = .nearest,
+    address_mode_u: vk.SamplerAddressMode = .clamp_to_edge,
+    address_mode_v: vk.SamplerAddressMode = .clamp_to_edge,
 };
 
 vk_sampler: vk.Sampler,
@@ -35,8 +37,8 @@ pub fn create(ctx: *const GraphicsContext, option: SamplerOption) !Sampler {
             .nearest => .nearest,
             .linear => .linear,
         },
-        .address_mode_u = .clamp_to_edge,
-        .address_mode_v = .clamp_to_edge,
+        .address_mode_u = option.address_mode_u,
+        .address_mode_v = option.address_mode_v,
         .address_mode_w = .clamp_to_edge,
         .anisotropy_enable = vk.Bool32.false,
         .max_anisotropy = ctx.props.limits.max_sampler_anisotropy,

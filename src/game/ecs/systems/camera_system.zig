@@ -67,7 +67,7 @@ pub fn update(self: *CameraSystem) void {
     }
 }
 
-pub fn process(self: *CameraSystem, event: Event) void {
+pub fn process(self: *CameraSystem, event: Event) bool {
     var iter = self.ecs.entities.iterator(struct {
         camera: *Camera.PerspectiveCamera,
         velocity: *Ecs.components.Velocity,
@@ -116,9 +116,12 @@ pub fn process(self: *CameraSystem, event: Event) void {
             .mouse_wheel => {
                 vw.camera.setFov(vw.camera.fov + event.ptr.mouse_wheel.scroll_y);
             },
-            else => {},
+            else => {
+                return false;
+            },
         }
     }
+    return true;
 }
 
 pub fn deinit(self: *CameraSystem) void {

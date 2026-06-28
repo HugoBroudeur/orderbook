@@ -61,6 +61,11 @@ pub fn setTargetFps(self: *Framerate, target_fps: u32) void {
     self.last_tick = sdl.timer.getPerformanceCounter();
 }
 
+pub fn resetTick(self: *Framerate) void {
+    self.last_tick = sdl.timer.getPerformanceCounter();
+    self.accumulated = 0;
+}
+
 pub fn shouldWait(self: *Framerate) bool {
     const pc = sdl.timer.getPerformanceCounter();
     self.accumulated += pc - self.last_tick;
@@ -104,8 +109,9 @@ pub fn shouldDraw(self: *Framerate) bool {
         if (self.frame_lag == 0) {
             self.running_slow = false;
         } else if (self.frame_lag > 10) {
-            // Supress rendering, give `update` chance to catch up
             self.draw_skip += 1;
+            // Decrement lag here too so the game can actually recover
+            if (self.frame_lag > 0 and self.update_count == 1) self.frame_lag -= 1;
             return false;
         }
     } else if (self.frame_lag >= 5) {

@@ -322,13 +322,13 @@ pub const Builder = struct {
     }
 
     pub fn disableBlending(self: *Builder) void {
-        self.color_blend_attachment.color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true };
         self.color_blend_attachment.blend_enable = .false;
+        self.color_blend_attachment.color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true };
     }
 
     pub fn enableBlendingAdditive(self: *Builder) void {
-        self.color_blend_attachment.color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true };
         self.color_blend_attachment.blend_enable = .true;
+        self.color_blend_attachment.color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true };
         self.color_blend_attachment.src_color_blend_factor = .src_alpha;
         self.color_blend_attachment.dst_color_blend_factor = .one;
         self.color_blend_attachment.color_blend_op = .add;
@@ -338,13 +338,24 @@ pub const Builder = struct {
     }
 
     pub fn enableBlendingAlphablend(self: *Builder) void {
-        self.color_blend_attachment.color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true };
         self.color_blend_attachment.blend_enable = .true;
+        self.color_blend_attachment.color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true };
         self.color_blend_attachment.src_color_blend_factor = .src_alpha;
         self.color_blend_attachment.dst_color_blend_factor = .one_minus_src_alpha;
         self.color_blend_attachment.color_blend_op = .add;
         self.color_blend_attachment.src_alpha_blend_factor = .one;
         self.color_blend_attachment.dst_alpha_blend_factor = .zero;
+        self.color_blend_attachment.alpha_blend_op = .add;
+    }
+
+    pub fn enableBlendingPremultipliedAlpha(self: *Builder) void {
+        self.color_blend_attachment.blend_enable = .true;
+        self.color_blend_attachment.color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true };
+        self.color_blend_attachment.src_color_blend_factor = .one;
+        self.color_blend_attachment.dst_color_blend_factor = .one_minus_src_alpha;
+        self.color_blend_attachment.color_blend_op = .add;
+        self.color_blend_attachment.src_alpha_blend_factor = .one;
+        self.color_blend_attachment.dst_alpha_blend_factor = .one_minus_src_alpha;
         self.color_blend_attachment.alpha_blend_op = .add;
     }
 

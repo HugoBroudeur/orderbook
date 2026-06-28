@@ -113,7 +113,6 @@ pub const Swapchain = struct {
     }
 
     fn deinitExceptSwapchain(self: Swapchain, engine: *Engine) void {
-        log.debug("call deinitExceptSwapchain", .{});
         for (self.frames) |*frame| frame.destroy(engine);
         self.allocator.free(self.frames);
         engine.ctx.device.destroySemaphore(self.next_image_acquired, null);
@@ -124,7 +123,6 @@ pub const Swapchain = struct {
     }
 
     pub fn deinit(self: Swapchain, engine: *Engine) void {
-        // if we have no swapchain none of these should exist and we can just return
         if (self.handle == .null_handle) return;
         self.deinitExceptSwapchain(engine);
         engine.ctx.device.destroySwapchainKHR(self.handle, null);
@@ -187,7 +185,7 @@ pub const Swapchain = struct {
 
         // Step 1: Make sure the current frame has finished rendering
         const current = engine.getCurrentFrame().swap_image;
-        const cmdbuf = engine.getCurrentFrame().cmd_buf;
+        const cmdbuf = engine.getCurrentFrame().cmd_buf.vk_command_buffer;
         try current.waitForFence(engine);
         try engine.ctx.device.resetFences(&.{current.frame_fence});
 

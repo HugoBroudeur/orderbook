@@ -7,9 +7,14 @@ const vk = @import("vulkan");
 const sdl = @import("sdl3");
 const zm = @import("zmath");
 
+const Config = @import("../../config.zig");
 const Engine = @import("engine.zig");
 const Buffer = @import("buffer.zig");
-const CommandPool = @import("command_pool.zig");
+const VulkanCommand = @import("command_pool.zig");
+const CommandPool = VulkanCommand.CommandPool;
+const GpuCommand = VulkanCommand.GpuCommand;
+const AllocatedCommandBuffer = VulkanCommand.AllocatedCommandBuffer;
+const ImmediateCommands = VulkanCommand.ImmediateCommands;
 const Image = @import("image.zig");
 const GraphicsContext = @import("../../core/graphics_context.zig");
 const Vertex = @import("../graphics/buffers.zig").Vertex;
@@ -61,9 +66,15 @@ pub fn uploadMesh(
     try self.setVerticeBuffer(engine.ctx, @intCast(vertice_bytes.len));
     try self.setIndiceBuffer(engine.ctx, @intCast(indice_bytes.len));
 
-    var cmd = try TransferBuffersCmd.create(self, engine, vertice_bytes, indice_bytes);
-    try engine.immediateSubmit(.graphic, &.{cmd.interface()});
-    cmd.destroy();
+    var immediate_cmd = try ImmediateCommands.init(engine, engine.getCurrentFrame().cmd_pool);
+    defer immediate_cmd.deinit(engine);
+
+    var gpu_cmd = try TransferBuffersCmd.create(self, engine, &immediate_cmd.buffer, vertice_bytes, indice_bytes);
+    defer gpu_cmd.destroy();
+
+    try immediate_cmd.addCommand(engine.allocator, gpu_cmd.interface());
+
+    try engine.immediateSubmit(.graphic, immediate_cmd);
 }
 
 // Helper Creation function for a Quad Mesh
@@ -109,8 +120,9 @@ pub const TransferBuffersCmd = struct {
     indice_bytes: []const u8,
     mesh: *const Mesh,
     engine: *Engine,
+    cmd_buffer: *AllocatedCommandBuffer,
 
-    pub fn create(mesh: *const Mesh, engine: *Engine, vertice_bytes: []const u8, indice_bytes: []const u8) !TransferBuffersCmd {
+    pub fn create(mesh: *const Mesh, engine: *Engine, cmd_buffer: *AllocatedCommandBuffer, vertice_bytes: []const u8, indice_bytes: []const u8) !TransferBuffersCmd {
         var staging_buffer = try Buffer.create(
             engine.ctx,
             @intCast(vertice_bytes.len + indice_bytes.len),
@@ -127,6 +139,7 @@ pub const TransferBuffersCmd = struct {
             .vertice_bytes = vertice_bytes,
             .indice_bytes = indice_bytes,
             .mesh = mesh,
+            .cmd_buffer = cmd_buffer,
         };
     }
 
@@ -141,9 +154,11 @@ pub const TransferBuffersCmd = struct {
                 .dst_offset = 0,
                 .size = self.vertice_bytes.len,
             }};
-            engine.ctx.device.cmdCopyBuffer(engine.getCurrentFrame().cmd_buf, self.staging_buffer.vk_buffer, self.mesh.buffers.vertex.?.vk_buffer, &vertex_copy);
+            engine.ctx.device.cmdCopyBuffer(self.cmd_buffer.vk_command_buffer, self.staging_buffer.vk_buffer, self.mesh.buffers.vertex.?.vk_buffer, &vertex_copy);
 
-            log.info("Copy Mesh {} bytes of vertices into VB addr {}", .{ self.vertice_bytes.len, self.mesh.buffers.vertex.?.address.? });
+            if (Config.log.mesh) {
+                log.info("Copy Mesh {} bytes of vertices into VB addr {}", .{ self.vertice_bytes.len, self.mesh.buffers.vertex.?.address.? });
+            }
         }
 
         if (self.mesh.buffers.index != null) {
@@ -152,13 +167,15 @@ pub const TransferBuffersCmd = struct {
                 .dst_offset = 0,
                 .size = self.indice_bytes.len,
             }};
-            engine.ctx.device.cmdCopyBuffer(engine.getCurrentFrame().cmd_buf, self.staging_buffer.vk_buffer, self.mesh.buffers.index.?.vk_buffer, &index_copy);
-            log.info("Copy Mesh {} bytes of indices from offset {}", .{ self.indice_bytes.len, self.vertice_bytes.len });
+            engine.ctx.device.cmdCopyBuffer(self.cmd_buffer.vk_command_buffer, self.staging_buffer.vk_buffer, self.mesh.buffers.index.?.vk_buffer, &index_copy);
+            if (Config.log.mesh) {
+                log.info("Copy Mesh {} bytes of indices from offset {}", .{ self.indice_bytes.len, self.vertice_bytes.len });
+            }
         }
     }
 
-    pub fn interface(self: *TransferBuffersCmd) CommandPool.GpuCommand {
-        return CommandPool.GpuCommand.interface(self);
+    pub fn interface(self: *TransferBuffersCmd) GpuCommand {
+        return GpuCommand.interface(self);
     }
 };
 

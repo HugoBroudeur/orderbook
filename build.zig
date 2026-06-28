@@ -90,6 +90,14 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    const dep_zgui = b.dependency("zgui", .{
+        .target = target,
+        .optimize = optimize,
+        .backend = .sdl3_vulkan,
+        .vulkan_include = b.dependency("vulkan_headers", .{}).path("include").getPath(b),
+        .with_implot = true,
+        .with_node_editor = true,
+    });
 
     // Generate Zig code from .proto
     // const gen_proto = b.step("gen-proto", "generate zig files from protocol buffer definitions");
@@ -113,6 +121,9 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addImport("zmath", dep_zmath.module("root"));
     exe.root_module.addImport("vulkan", dep_vulkan.module("vulkan-zig"));
     exe.root_module.addImport("zgltf", dep_zgltf.module("zgltf"));
+
+    exe.root_module.addImport("zgui", dep_zgui.module("root"));
+    exe.root_module.linkLibrary(dep_zgui.artifact("imgui"));
 
     exe.root_module.addImport("tracy", dep_tracy.module("tracy"));
     // Tracy (should be disable for Release)

@@ -118,7 +118,7 @@ pub const DrawQueue = struct {
     }
 
     pub fn submit(self: *DrawQueue) void {
-        self.engine.update_scene(self);
+        self.engine.updateScene(self);
     }
 };
 

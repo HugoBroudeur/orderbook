@@ -5,7 +5,8 @@ const Allocator = std.mem.Allocator;
 
 const Engine = @import("engine.zig");
 const Swapchain = @import("swapchain.zig").Swapchain;
-const CommandPool = @import("command_pool.zig");
+const CommandPool = @import("command_pool.zig").CommandPool;
+const AllocatedCommandBuffer = @import("command_pool.zig").AllocatedCommandBuffer;
 const DescriptorAllocator = @import("descriptor.zig").DescriptorAllocator;
 const SceneData = @import("../command.zig").SceneData;
 const Buffer = @import("buffer.zig");
@@ -21,7 +22,7 @@ viewport: vk.Viewport = .{ .x = 0, .y = 0, .width = 0, .height = 0, .min_depth =
 scissor: vk.Rect2D = .{ .offset = .{ .x = 0, .y = 0 }, .extent = .{ .height = 0, .width = 0 } },
 
 cmd_pool: CommandPool = undefined,
-cmd_buf: vk.CommandBuffer = undefined,
+cmd_buf: AllocatedCommandBuffer = undefined,
 
 frame_descriptor: DescriptorAllocator = undefined,
 
@@ -89,10 +90,12 @@ pub fn initSwapchainFrames(engine: *Engine, swapchain: vk.SwapchainKHR, format: 
     const frames = try allocator.alloc(Frame, images.len);
     errdefer allocator.free(frames);
 
-    errdefer for (frames[0..0]) |*frame| frame.destroy(engine);
+    var initialized: usize = 0;
+    errdefer for (frames[0..initialized]) |*frame| frame.destroy(engine);
 
     for (images, 0..) |image, i| {
         try frames[i].setup(engine, allocator, try SwapImage.init(engine, image, format));
+        initialized += 1;
     }
 
     return frames;
@@ -114,7 +117,7 @@ pub fn setup(self: *Frame, engine: *Engine, allocator: std.mem.Allocator, swap_i
         .uniform_buffer_bit = true,
     }, .{ .host_visible_bit = true, .device_local_bit = true });
 
-    try engine.createCommandBuffers(self);
+    self.cmd_buf = try .allocate(engine, self.cmd_pool);
 }
 
 pub fn resize(self: *Frame, extent: vk.Extent2D) void {
@@ -133,8 +136,9 @@ pub fn resize(self: *Frame, extent: vk.Extent2D) void {
 }
 
 pub fn destroy(self: *Frame, engine: *Engine) void {
-    self.swap_image.deinit(engine);
+    self.cmd_buf.destroy(engine);
     self.cmd_pool.destroy(engine);
     self.frame_descriptor.destroy(engine.ctx);
     self.scene_data_buffer.destroy(engine.ctx);
+    self.swap_image.deinit(engine);
 }

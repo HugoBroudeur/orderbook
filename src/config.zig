@@ -4,6 +4,11 @@ const Config = @This();
 http_max_threads_count: usize,
 sqlite_game_db_path: [:0]const u8,
 
+pub const log: struct {
+    mesh: bool = false,
+    buffer: bool = false,
+} = .{};
+
 pub fn init(map: *std.process.Environ.Map) Config {
     const val = map.get("HTTP_MAX_THREAD_COUNT");
     const threads = if (val != null) std.fmt.parseInt(usize, val.?, 10) catch 1 else 1;
