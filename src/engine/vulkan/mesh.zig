@@ -7,6 +7,7 @@ const vk = @import("vulkan");
 const sdl = @import("sdl3");
 const zm = @import("zmath");
 
+const Config = @import("../../config.zig");
 const Engine = @import("engine.zig");
 const Buffer = @import("buffer.zig");
 const VulkanCommand = @import("command_pool.zig");
@@ -155,7 +156,9 @@ pub const TransferBuffersCmd = struct {
             }};
             engine.ctx.device.cmdCopyBuffer(self.cmd_buffer.vk_command_buffer, self.staging_buffer.vk_buffer, self.mesh.buffers.vertex.?.vk_buffer, &vertex_copy);
 
-            log.info("Copy Mesh {} bytes of vertices into VB addr {}", .{ self.vertice_bytes.len, self.mesh.buffers.vertex.?.address.? });
+            if (Config.log.mesh) {
+                log.info("Copy Mesh {} bytes of vertices into VB addr {}", .{ self.vertice_bytes.len, self.mesh.buffers.vertex.?.address.? });
+            }
         }
 
         if (self.mesh.buffers.index != null) {
@@ -165,7 +168,9 @@ pub const TransferBuffersCmd = struct {
                 .size = self.indice_bytes.len,
             }};
             engine.ctx.device.cmdCopyBuffer(self.cmd_buffer.vk_command_buffer, self.staging_buffer.vk_buffer, self.mesh.buffers.index.?.vk_buffer, &index_copy);
-            log.info("Copy Mesh {} bytes of indices from offset {}", .{ self.indice_bytes.len, self.vertice_bytes.len });
+            if (Config.log.mesh) {
+                log.info("Copy Mesh {} bytes of indices from offset {}", .{ self.indice_bytes.len, self.vertice_bytes.len });
+            }
         }
     }
 

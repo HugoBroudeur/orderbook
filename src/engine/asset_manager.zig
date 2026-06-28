@@ -12,6 +12,7 @@ const Buffer = @import("vulkan/buffer.zig");
 const MetallicRoughness = @import("graphics/materials.zig").MetallicRoughness;
 const MaterialPass = @import("graphics/materials.zig").MaterialPass;
 
+const Config = @import("../config.zig");
 const Scene = @import("graphics/scene.zig");
 const LoadedGLTF = Scene.LoadedGLTF;
 const BasicNode = Scene.BasicNode;
@@ -125,26 +126,36 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, filename: []const u8)
     const bindless_slots = try self.allocator.alloc(u32, gltf.data.images.len);
     defer self.allocator.free(bindless_slots);
 
-    log.info("[DBG] GLTF images: {d}, materials: {d}, textures: {d}", .{ gltf.data.images.len, gltf.data.materials.len, gltf.data.textures.len });
+    if (Config.log.mesh) {
+        log.info("[DBG] GLTF images: {d}, materials: {d}, textures: {d}", .{ gltf.data.images.len, gltf.data.materials.len, gltf.data.textures.len });
+    }
 
     // Load Textures
     for (gltf.data.images, 0..) |*img, i| {
         const name = img.name orelse "";
 
         const image = if (img.uri) |uri| blk: {
-            log.info("[DBG] image[{d}] uri={s}", .{ i, uri });
+            if (Config.log.mesh) {
+                log.info("[DBG] image[{d}] uri={s}", .{ i, uri });
+            }
             break :blk try Image.createFromPath(engine, uri, .packed_rgba_8_8_8_8, .{ .sampled_bit = true });
         } else if (img.data) |bytes| blk: {
-            log.info("[DBG] image[{d}] embedded {d} bytes mime={?s}", .{ i, bytes.len, img.mime_type });
+            if (Config.log.mesh) {
+                log.info("[DBG] image[{d}] embedded {d} bytes mime={?s}", .{ i, bytes.len, img.mime_type });
+            }
             break :blk try Image.createFromBytesWithSDL(engine, bytes, .{ .sampled_bit = true });
         } else blk: {
-            log.warn("[DBG] image[{d}] MISSING — using error_checker", .{i});
+            if (Config.log.mesh) {
+                log.warn("[DBG] image[{d}] MISSING — using error_checker", .{i});
+            }
             break :blk engine.images.get(.error_checker);
         };
 
         self.images.appendAssumeCapacity(image);
         bindless_slots[i] = try engine.registerTexture(self.images.items[current_img_idx + i], engine.samplers.get(.linear));
-        log.info("[DBG] image[{d}] '{s}' → bindless slot {d}", .{ i, name, bindless_slots[i] });
+        if (Config.log.mesh) {
+            log.info("[DBG] image[{d}] '{s}' → bindless slot {d}", .{ i, name, bindless_slots[i] });
+        }
         try loaded_gltf.images.put(self.allocator, name, &self.images.items[current_img_idx + i]);
     }
 
@@ -203,10 +214,12 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, filename: []const u8)
             break :blk 0;
         } else 0;
 
-        log.info("[DBG] mat[{d}] '{s}' color_tex_id={d} metal_rough_tex_id={d} colorFactors={d:.2},{d:.2},{d:.2},{d:.2}", .{
-            i,                                           name,                                        color_tex_id,                                metal_rough_tex_id,
-            mat.metallic_roughness.base_color_factor[0], mat.metallic_roughness.base_color_factor[1], mat.metallic_roughness.base_color_factor[2], mat.metallic_roughness.base_color_factor[3],
-        });
+        if (Config.log.mesh) {
+            log.info("[DBG] mat[{d}] '{s}' color_tex_id={d} metal_rough_tex_id={d} colorFactors={d:.2},{d:.2},{d:.2},{d:.2}", .{
+                i,                                           name,                                        color_tex_id,                                metal_rough_tex_id,
+                mat.metallic_roughness.base_color_factor[0], mat.metallic_roughness.base_color_factor[1], mat.metallic_roughness.base_color_factor[2], mat.metallic_roughness.base_color_factor[3],
+            });
+        }
 
         scene_material_constants[i] = .{
             .color_factors = mat.metallic_roughness.base_color_factor,

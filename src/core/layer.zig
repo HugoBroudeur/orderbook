@@ -14,7 +14,7 @@ pub const VTable = struct {
     getLabel: *const fn (*anyopaque) []const u8,
     onAttach: *const fn (*anyopaque) anyerror!void,
     onUpdate: *const fn (*anyopaque) void,
-    onEvent: *const fn (*anyopaque, ev: Event) void,
+    onEvent: *const fn (*anyopaque, ev: Event) bool,
     deinit: *const fn (*anyopaque) void,
 };
 
@@ -28,7 +28,7 @@ pub fn onAttach(self: Layer) !void {
 pub fn onUpdate(self: Layer) void {
     return self.vtable.onUpdate(self.ptr);
 }
-pub fn onEvent(self: Layer, ev: Event) void {
+pub fn onEvent(self: Layer, ev: Event) bool {
     return self.vtable.onEvent(self.ptr, ev);
 }
 pub fn deinit(self: Layer) void {
@@ -51,7 +51,7 @@ pub fn init(ptr: anytype) Layer {
             const self: T = @ptrCast(@alignCast(impl));
             return ptr_info.pointer.child.onUpdate(self);
         }
-        fn onEvent(impl: *anyopaque, ev: Event) void {
+        fn onEvent(impl: *anyopaque, ev: Event) bool {
             const self: T = @ptrCast(@alignCast(impl));
             return ptr_info.pointer.child.onEvent(self, ev);
         }

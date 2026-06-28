@@ -14,8 +14,8 @@ const Layer = @import("layer.zig");
 const LayerStack = @import("layer_stack.zig").LayerStack;
 const Framerate = @import("framerate.zig");
 const SandboxSdlLayer = @import("../layers/sandbox_sdl.zig");
-const RuntimeLayer = @import("../layers/runtime.zig");
-const EditorLayer = @import("../layers/editor.zig");
+const GameLayer = @import("../layers/game_layer.zig");
+const EditorLayer = @import("../layers/editor_layer.zig");
 const GraphicsContext = @import("graphics_context.zig");
 const Engine = @import("../engine/vulkan/engine.zig");
 const Event = @import("../events/event.zig");
@@ -39,31 +39,28 @@ running: bool = true,
 layer_stack: LayerStack,
 engine: Engine = undefined,
 sandbox_sdl_layer: SandboxSdlLayer = undefined,
-runtime_layer: RuntimeLayer = undefined,
+game_layer: GameLayer = undefined,
 editor_layer: EditorLayer = undefined,
 
-pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config) !App {
+// init operates on *App so all internal pointers (&self.engine, &self.framerate, etc.)
+// are stable — they point into the caller's frame, not a stack-local copy.
+pub fn init(self: *App, config: Config) !void {
     // tracy.frameMarkStart("Main");
 
-    var app: App = .{ .allocator = allocator, .io = io, .layer_stack = .init() };
-    errdefer app.shutdown();
-
-    app.graphics_context = try GraphicsContext.init(allocator);
-    app.engine = try Engine.init(allocator, &app.graphics_context, io);
-    app.engine.setup() catch |err| {
+    self.graphics_context = try GraphicsContext.init(self.allocator);
+    self.engine = try Engine.init(self.allocator, &self.graphics_context, self.io);
+    self.engine.setup() catch |err| {
         log.err("Can't setup the Vulkan Engine : {}", .{err});
         return err;
     };
-    app.framerate = Framerate.init(@intFromFloat(app.graphics_context.display.refresh_rate));
-    app.framerate.on();
+    self.framerate = Framerate.init(@intFromFloat(self.graphics_context.display.refresh_rate));
+    self.framerate.on();
 
-    app.runtime_layer = RuntimeLayer.init(allocator, io, config, &app.engine, &app.framerate);
-    try app.pushLayer(app.runtime_layer.interface());
+    self.game_layer = GameLayer.init(self.allocator, self.io, config, &self.engine, &self.framerate);
+    try self.pushLayer(self.game_layer.interface());
 
-    // app.editor_layer = EditorLayer.init(allocator, io, config, &app.engine);
-    // try app.pushLayer(app.editor_layer.interface());
-
-    return app;
+    self.editor_layer = EditorLayer.init(self.allocator, self.io, config, &self.engine);
+    try self.pushLayer(self.editor_layer.interface());
 }
 
 pub fn run(self: *App) void {
@@ -77,6 +74,11 @@ pub fn run(self: *App) void {
             layer.onUpdate();
         }
 
+        self.engine.draw() catch |err| {
+            log.err("CRASH WHILE DRAWING FRAME {}, EXITING NOW", .{err});
+            return;
+        };
+
         if (self.framerate.skipDrawThreasholdReached()) {
             log.err("PREVENTING FRAME LAG, EXITING NOW", .{});
             return;
@@ -89,8 +91,11 @@ pub fn pollEvent(self: *App) void {
         // _ = impl_sdl3.ImGui_ImplSDL3_ProcessEvent(@ptrCast(&event.toSdl()));
         const ev = Event.create(event);
 
+        var event_swallowed = false;
         for (self.layer_stack.stack().items) |layer| {
-            layer.onEvent(ev);
+            if (!event_swallowed) {
+                event_swallowed = layer.onEvent(ev);
+            }
         }
 
         switch (event) {

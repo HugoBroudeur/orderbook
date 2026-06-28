@@ -28,7 +28,7 @@ pub fn update(self: *InputSystem) void {
     _ = self;
 }
 
-pub fn process(self: *InputSystem, event: Event) void {
+pub fn process(self: *InputSystem, event: Event) bool {
     switch (event.ptr) {
         .mouse_button_down => {
             const state = self.ecs.get_singleton(MouseState);
@@ -46,8 +46,11 @@ pub fn process(self: *InputSystem, event: Event) void {
             }
             sdl.mouse.show() catch {};
         },
-        else => {},
+        else => {
+            return false;
+        },
     }
+    return true;
 }
 
 pub fn deinit(self: *InputSystem) void {

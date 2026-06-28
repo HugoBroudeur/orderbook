@@ -94,9 +94,11 @@ pub fn get_singleton(self: *EcsManager, comptime T: type) *T {
     unreachable;
 }
 
-pub fn handleEvent(self: *EcsManager, ev: Event) void {
-    self.input_system.process(ev);
-    self.camera_system.process(ev);
+pub fn handleEvent(self: *EcsManager, ev: Event) bool {
+    const input_processed = self.input_system.process(ev);
+    const camera_processed = self.camera_system.process(ev);
+
+    return input_processed or camera_processed;
 }
 
 pub fn create_single_component_entity(self: *EcsManager, comptime C: type, value: C) void {

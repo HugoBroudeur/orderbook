@@ -11,6 +11,8 @@ const Display = @import("display.zig");
 
 const SDL_INIT_FLAGS: sdl.InitFlags = .{ .video = true, .gamepad = true, .audio = true };
 
+const vulkan_api_version = vk.API_VERSION_1_3;
+
 const required_layer_names = [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"};
 const required_device_extensions = [_][*:0]const u8{
     vk.extensions.khr_swapchain.name,
@@ -96,6 +98,7 @@ vkd: *DeviceWrapper,
 vki: *InstanceWrapper,
 
 instance: Instance,
+api_version: vk.Version,
 debug_messenger: vk.DebugUtilsMessengerEXT,
 surface: vk.SurfaceKHR,
 physical_device: vk.PhysicalDevice,
@@ -162,13 +165,14 @@ pub fn init(allocator: std.mem.Allocator) !GraphicsContext {
         log.debug("Requiring layer extension: {s}", .{extension});
     }
 
+    ctx.api_version = vulkan_api_version;
     const instance = try ctx.vkb.createInstance(&.{
         .p_application_info = &.{
             .p_application_name = ctx.window.title,
             .application_version = @bitCast(vk.makeApiVersion(0, 0, 0, 0)),
             .p_engine_name = ctx.window.title,
             .engine_version = @bitCast(vk.makeApiVersion(0, 0, 0, 0)),
-            .api_version = @bitCast(vk.API_VERSION_1_3),
+            .api_version = @bitCast(vulkan_api_version),
         },
         .enabled_layer_count = required_layer_names.len,
         .pp_enabled_layer_names = @ptrCast(&required_layer_names),
@@ -447,6 +451,22 @@ fn checkSurfaceSupport(
     return format_count > 0 and present_mode_count > 0;
 }
 
+pub fn getSwapchainFormatCount(
+    self: *GraphicsContext,
+) u32 {
+    var format_count: u32 = undefined;
+    _ = try self.instance.getPhysicalDeviceSurfaceFormatsKHR(self.physical_device, self.surface, &format_count, null);
+    return format_count;
+}
+
+pub fn getDepthFormatCount(
+    self: *GraphicsContext,
+) u32 {
+    var present_mode_count: u32 = undefined;
+    _ = try self.instance.getPhysicalDeviceSurfacePresentModesKHR(self.physical_device, self.surface, &present_mode_count, null);
+    return present_mode_count;
+}
+
 fn checkExtensionSupport(
     instance: Instance,
     pdev: vk.PhysicalDevice,
@@ -515,4 +535,10 @@ pub fn findMemoryTypeIndex(self: *const GraphicsContext, memory_requirements: vk
     }
 
     return error.NoSuitableMemoryType;
+}
+
+pub fn vkImguiLoader(fn_name: [*:0]const u8, user_data: ?*anyopaque) callconv(.c) ?*anyopaque {
+    const ctx: *const GraphicsContext = @ptrCast(@alignCast(user_data.?));
+    const fp = ctx.vkb.dispatch.vkGetInstanceProcAddr.?(ctx.instance.handle, fn_name);
+    return @ptrCast(@constCast(fp));
 }

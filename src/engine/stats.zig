@@ -10,6 +10,7 @@ pub const Timer = enum {
     scene_build, // scene-graph traversal → opaque_surfaces list build
     compute_pass, // draw_background() compute dispatch
     render_pass_3d, // cmdBeginRendering … cmdEndRendering for 3D objects
+    editor_pass, // draw_gui_editor()
     blit, // draw_image → swapchain blit + layout transitions
     present, // queueSubmit2 + queuePresentKHR + acquireNextImageKHR
     transfer, // kept: GPU mesh/image uploads (immediateSubmit)

@@ -8,10 +8,12 @@ const Engine = @import("engine.zig");
 
 pub const AllocatedCommandBuffer = struct {
     vk_command_buffer: vk.CommandBuffer,
+    pool: CommandPool,
 
     pub fn allocate(engine: *Engine, pool: CommandPool) !AllocatedCommandBuffer {
         var allocated_command_buffer: AllocatedCommandBuffer = .{
             .vk_command_buffer = undefined,
+            .pool = pool,
         };
 
         try engine.ctx.device.allocateCommandBuffers(&.{
@@ -24,7 +26,7 @@ pub const AllocatedCommandBuffer = struct {
     }
 
     pub fn destroy(self: *AllocatedCommandBuffer, engine: *Engine) void {
-        engine.ctx.device.freeCommandBuffers(engine.getCurrentFrame().cmd_pool.vk_cmd_pool, &.{self.vk_command_buffer});
+        engine.ctx.device.freeCommandBuffers(self.pool.vk_cmd_pool, &.{self.vk_command_buffer});
     }
 };
 

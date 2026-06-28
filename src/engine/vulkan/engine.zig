@@ -29,6 +29,7 @@ const Batcher = @import("batcher.zig");
 const Buffer = @import("buffer.zig");
 const Camera = @import("../camera.zig");
 const Command = @import("../command.zig");
+const Config = @import("../../config.zig");
 const VulkanCommand = @import("command_pool.zig");
 const Data = @import("../data.zig");
 const DescriptorAllocator = @import("descriptor.zig").DescriptorAllocator;
@@ -133,8 +134,10 @@ samplers: std.EnumArray(SamplerType, Sampler) = .initUndefined(),
 
 // imgui_draw_data: *ig.ImDrawData = undefined,
 imgui_draw_data: *anyopaque = undefined,
+gui_render_fn: ?*const fn (vk.CommandBuffer) void = null,
 
 batcher: Batcher,
+pending_batches: []Batcher.Batch = &.{},
 is_minimised: bool = false,
 draw_extent: vk.Extent2D,
 render_scale: f32 = 1.0,
@@ -183,6 +186,10 @@ pub fn deinit(self: *Engine) void {
         unreachable;
     };
 
+    // Destroy swapchain first (frames, command buffers, semaphores, fences)
+    // before any other GPU resource cleanup.
+    self.swapchain.deinit(self);
+
     for (&self.pipelines.values) |*pipeline| {
         pipeline.destroy(self.ctx);
     }
@@ -223,8 +230,6 @@ pub fn deinit(self: *Engine) void {
     self.loaded_nodes.deinit();
     self.draw_context.deinit();
     self.texture_cache.deinit(self.allocator);
-
-    self.swapchain.deinit(self);
 }
 
 pub fn setup(self: *Engine) !void {
@@ -418,6 +423,87 @@ pub fn getCurrentFrame(self: *Engine) *Frame {
     return self.swapchain.getCurrentFrame();
 }
 
+pub fn draw(self: *Engine) !void {
+    // // Skip if no work was prepared (minimised window etc.)
+    // defer self.pending_batches = &.{};
+    // Swapchain may be null after a failed recreate; skip the frame rather than
+    // accessing self.frames which was freed by deinitExceptSwapchain.
+    if (self.swapchain.handle == .null_handle) {
+        return;
+    }
+
+    var current_frame = self.getCurrentFrame();
+
+    self.stats.startFrame();
+    self.stats.startClock(.frame);
+    defer {
+        self.stats.tickClock(.frame);
+        self.stats.endFrame();
+        self.stats.samplePrint(5000); // print every 5000 frames
+    }
+
+    // Copy Pass just upload vertices + indexes
+    // First pass: calculate total sizes
+    var total_vertex_bytes: u32 = 0;
+    var total_index_bytes: u32 = 0;
+    var total_indices: u32 = 0;
+    var total_vertices: u32 = 0;
+
+    for (self.pending_batches) |*batch| {
+        assert(batch.cur_indices <= batch.indices.items.len); // Debug just in case
+        total_vertex_bytes += @intCast(batch.vertices.sizeInBytes());
+        total_index_bytes += @intCast(batch.getCurrentIndicesInBytes());
+        total_indices += batch.cur_indices;
+        total_vertices += @intCast(batch.vertices.cur_pos);
+    }
+
+    const cur_window_size = self.ctx.window.toExtend2D();
+
+    if (current_frame.swapchain_state == .suboptimal or self.swapchain.isRecreateNeeded(cur_window_size)) {
+        self.swapchain.recreate(self, cur_window_size) catch {
+            self.stats.addSkippedDraw();
+            return;
+        };
+
+        self.resetCommandBuffers() catch {
+            self.stats.addSkippedDraw();
+            return;
+        };
+
+        // Re-fetch: recreate freed the old frames slice, old pointer is dangling.
+        current_frame = self.getCurrentFrame();
+    }
+
+    self.draw_extent = .{
+        .width = @intFromFloat(@as(f32, @floatFromInt(@min(self.swapchain.extent.width, self.draw_image.dimension.width))) * self.render_scale),
+        .height = @intFromFloat(@as(f32, @floatFromInt(@min(self.swapchain.extent.height, self.draw_image.dimension.height))) * self.render_scale),
+    };
+    current_frame.resize(self.draw_extent);
+
+    self.fillCommandBuffers() catch {
+        current_frame.swapchain_state = .suboptimal;
+        self.stats.addSkippedDraw();
+        return;
+    };
+
+    // Present to Swapchain
+    {
+        self.stats.startClock(.present);
+
+        current_frame.swapchain_state = self.swapchain.present(self) catch |err| blk: {
+            self.stats.addSkippedDraw();
+            break :blk switch (err) {
+                error.OutOfDateKHR => Swapchain.PresentState.suboptimal,
+                else => |narrow| return narrow,
+            };
+        };
+
+        self.stats.tickClock(.present);
+    }
+
+    self.frame_number += 1;
+}
+
 fn fillCommandBuffers(self: *Engine) !void {
     const current_frame = self.getCurrentFrame();
 
@@ -450,7 +536,7 @@ fn fillCommandBuffers(self: *Engine) !void {
         self.stats.startClock(.compute_pass);
 
         draw_image.transitionToLayout(self, current_frame.cmd_buf, .undefined, .general);
-        self.draw_effects();
+        self.drawEffects();
 
         self.stats.tickClock(.compute_pass);
     }
@@ -462,27 +548,38 @@ fn fillCommandBuffers(self: *Engine) !void {
         draw_image.transitionToLayout(self, current_frame.cmd_buf, .general, .color_attachment_optimal);
         depth_image.transitionToLayout(self, current_frame.cmd_buf, .undefined, .depth_attachment_optimal);
         self.images.getPtr(.atlas).transitionToLayout(self, current_frame.cmd_buf, .undefined, .shader_read_only_optimal);
-        try self.draw_geometry();
-
-        self.stats.tickClock(.render_pass_3d);
-    }
-
-    // Blit to swapchain
-    {
-        self.stats.startClock(.blit);
+        try self.drawGeometry();
 
         draw_image.transitionToLayout(self, current_frame.cmd_buf, .color_attachment_optimal, .transfer_src_optimal);
 
         Image.vkTransitionToLayout(self, current_frame.cmd_buf, self.swapchain.currentImage(), .undefined, .transfer_dst_optimal, 0);
         Image.copyImageToImage(self, current_frame.cmd_buf, draw_image.vk_image, self.swapchain.currentImage(), self.draw_extent, self.swapchain.extent);
         Image.vkTransitionToLayout(self, current_frame.cmd_buf, self.swapchain.currentImage(), .transfer_dst_optimal, .color_attachment_optimal, 0);
+
+        self.stats.tickClock(.render_pass_3d);
+    }
+
+    // Editor GUI
+    {
+        self.stats.startClock(.editor_pass);
+
+        self.drawGuiEditor();
+
+        self.stats.tickClock(.editor_pass);
+    }
+
+    // Transition blit to swapchain + close command buffer
+    {
+        self.stats.startClock(.blit);
+
         Image.vkTransitionToLayout(self, current_frame.cmd_buf, self.swapchain.currentImage(), .color_attachment_optimal, .present_src_khr, 0);
         try self.ctx.device.endCommandBuffer(cmdbuf.*);
 
         self.stats.tickClock(.blit);
     }
 
-    { // Clear queues
+    // Clear queues
+    {
         self.draw_context.opaque_surfaces.clearRetainingCapacity();
         self.draw_context.transparent_surfaces.clearRetainingCapacity();
     }
@@ -537,7 +634,7 @@ pub fn immediateSubmit(self: *Engine, queue_family: GraphicsContext.QueueFamily,
     try self.ctx.device.queueWaitIdle(queue);
 }
 
-pub fn draw_geometry(self: *Engine) !void {
+pub fn drawGeometry(self: *Engine) !void {
     const current_frame = self.getCurrentFrame();
 
     // Populate draw context from the scene graph each frame
@@ -629,17 +726,17 @@ pub fn draw_geometry(self: *Engine) !void {
     self.ctx.device.cmdBeginRendering(self.getCurrentFrame().cmd_buf.vk_command_buffer, &rendering_info);
 
     for (self.draw_context._opaque_sufaces_sorted.items) |i| {
-        self.draw_render_object(self.getCurrentFrame().cmd_buf, &self.draw_context.opaque_surfaces.items[i], frame_descriptor_set);
+        self.drawRenderObject(self.getCurrentFrame().cmd_buf, &self.draw_context.opaque_surfaces.items[i], frame_descriptor_set);
     }
 
     for (self.draw_context.transparent_surfaces.items) |*render_object| {
-        self.draw_render_object(self.getCurrentFrame().cmd_buf, render_object, frame_descriptor_set);
+        self.drawRenderObject(self.getCurrentFrame().cmd_buf, render_object, frame_descriptor_set);
     }
 
     self.ctx.device.cmdEndRendering(self.getCurrentFrame().cmd_buf.vk_command_buffer);
 }
 
-fn draw_render_object(
+fn drawRenderObject(
     self: *Engine,
     cmdbuf: VulkanCommand.AllocatedCommandBuffer,
     ro: *RenderObject,
@@ -682,7 +779,7 @@ fn draw_render_object(
     self.stats.addDrawCall(ro.index_count / 3, ro.index_count);
 }
 
-pub fn draw_effects(self: *Engine) void {
+pub fn drawEffects(self: *Engine) void {
     self.ctx.device.cmdBindPipeline(self.getCurrentFrame().cmd_buf.vk_command_buffer, .compute, self.compute_effect.effect_pipeline.pipeline.vk_pipeline);
     self.ctx.device.cmdBindDescriptorSets(
         self.getCurrentFrame().cmd_buf.vk_command_buffer,
@@ -699,8 +796,39 @@ pub fn draw_effects(self: *Engine) void {
     self.ctx.device.cmdDispatch(self.getCurrentFrame().cmd_buf.vk_command_buffer, group_count_x, group_count_y, 1);
 }
 
-pub fn update_scene(self: *Engine, draw_queue: *Command.DrawQueue) void {
-    Logger.debug("[Engine.update_scene] {} Draw Commands", .{draw_queue.cmds.cur_pos});
+pub fn drawGuiEditor(self: *Engine) void {
+    if (self.gui_render_fn) |render_fn| {
+        const color_attachment = vk.RenderingAttachmentInfo{
+            .clear_value = .{
+                .color = .{
+                    .float_32 = [_]f32{ 0, 0, 0, 0 }, // 0,0,0,0 transparent
+                },
+            },
+            .image_view = self.getCurrentFrame().swap_image.view,
+            .image_layout = .color_attachment_optimal,
+            .load_op = .load, // preserve blitted 3D content
+            .store_op = .store,
+            .resolve_mode = .{},
+            .resolve_image_view = .null_handle,
+            .resolve_image_layout = .undefined,
+        };
+        const rendering_info = vk.RenderingInfo{
+            .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = self.swapchain.extent },
+            .layer_count = 1,
+            .view_mask = 0,
+            .color_attachment_count = 1,
+            .p_color_attachments = @ptrCast(&color_attachment),
+            .p_depth_attachment = null,
+            .p_stencil_attachment = null,
+        };
+        self.ctx.device.cmdBeginRendering(self.getCurrentFrame().cmd_buf.vk_command_buffer, &rendering_info);
+        render_fn(self.getCurrentFrame().cmd_buf.vk_command_buffer);
+        self.ctx.device.cmdEndRendering(self.getCurrentFrame().cmd_buf.vk_command_buffer);
+    }
+}
+
+pub fn updateScene(self: *Engine, draw_queue: *Command.DrawQueue) void {
+    // Logger.debug("[Engine.update_scene] {} Draw Commands", .{draw_queue.cmds.cur_pos});
     // draw_queue.sort() // optimise draw calls ?
 
     self.getCurrentFrame().scene_data = draw_queue.scene_data;
@@ -718,96 +846,11 @@ pub fn update_scene(self: *Engine, draw_queue: *Command.DrawQueue) void {
         }
     }
 
-    const batches = self.batcher.end();
+    self.pending_batches = self.batcher.end();
 
     // TODO, if can't draw all in 1 batch, process max cmd as possible using a pointer to count how many commands are left
     // For now, rewind to 0
     draw_queue.cmds.rewind(0);
-
-    // TODO, remove panic?
-    self.draw(batches) catch |err| @panic(@errorName(err));
-}
-
-pub fn draw(self: *Engine, batches: []Batcher.Batch) !void {
-    Logger.info("[Engine.draw] Drawing {} batches", .{batches.len});
-
-    // Swapchain may be null after a failed recreate; skip the frame rather than
-    // accessing self.frames which was freed by deinitExceptSwapchain.
-    if (self.swapchain.handle == .null_handle) {
-        return;
-    }
-
-    var current_frame = self.getCurrentFrame();
-
-    self.stats.startFrame();
-    self.stats.startClock(.frame);
-    defer {
-        self.stats.tickClock(.frame);
-        self.stats.endFrame();
-        self.stats.samplePrint(5000); // print every 5000 frames
-    }
-
-    // Copy Pass just upload vertices + indexes
-    // First pass: calculate total sizes
-    var total_vertex_bytes: u32 = 0;
-    var total_index_bytes: u32 = 0;
-    var total_indices: u32 = 0;
-    var total_vertices: u32 = 0;
-
-    for (batches) |*batch| {
-        assert(batch.cur_indices <= batch.indices.items.len); // Debug just in case
-        total_vertex_bytes += @intCast(batch.vertices.sizeInBytes());
-        total_index_bytes += @intCast(batch.getCurrentIndicesInBytes());
-        total_indices += batch.cur_indices;
-        total_vertices += @intCast(batch.vertices.cur_pos);
-    }
-
-    const cur_window_size = self.ctx.window.toExtend2D();
-
-    if (current_frame.swapchain_state == .suboptimal or self.swapchain.isRecreateNeeded(cur_window_size)) {
-        self.swapchain.recreate(self, cur_window_size) catch {
-            self.stats.addSkippedDraw();
-            return;
-        };
-
-        self.resetCommandBuffers() catch {
-            self.stats.addSkippedDraw();
-            return;
-        };
-
-        // Re-fetch: recreate freed the old frames slice, old pointer is dangling.
-        current_frame = self.getCurrentFrame();
-    }
-
-    self.draw_extent = .{
-        .width = @intFromFloat(@as(f32, @floatFromInt(@min(self.swapchain.extent.width, self.draw_image.dimension.width))) * self.render_scale),
-        .height = @intFromFloat(@as(f32, @floatFromInt(@min(self.swapchain.extent.height, self.draw_image.dimension.height))) * self.render_scale),
-    };
-    current_frame.resize(self.draw_extent);
-
-    self.fillCommandBuffers() catch {
-        current_frame.swapchain_state = .suboptimal;
-        self.stats.addSkippedDraw();
-        return;
-    };
-
-    // Present to Swapchain
-    {
-        self.stats.startClock(.present);
-
-        current_frame.swapchain_state = self.swapchain.present(self) catch |err| blk: {
-            self.stats.addSkippedDraw();
-            std.debug.print("Present failed: {}\n", .{err});
-            break :blk switch (err) {
-                error.OutOfDateKHR => Swapchain.PresentState.suboptimal,
-                else => |narrow| return narrow,
-            };
-        };
-
-        self.stats.tickClock(.present);
-    }
-
-    self.frame_number += 1;
 }
 
 pub fn registerTexture(self: *Engine, image: Image, sampler: Sampler) !u32 {

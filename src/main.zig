@@ -33,11 +33,12 @@ pub fn main(init: std.process.Init) !void {
     // });
     // defer tcp_server.deinit();
 
-    var app = try App.init(
-        allocator,
-        io,
-        config,
-    );
+    var app: App = .{
+        .allocator = allocator,
+        .io = io,
+        .layer_stack = .init(),
+    };
+    try app.init(config);
 
     app.run();
 }

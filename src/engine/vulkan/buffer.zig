@@ -4,7 +4,7 @@ const log = std.log.scoped(.buffer);
 const assert = std.debug.assert;
 const vk = @import("vulkan");
 
-const Logger = @import("../../core/log.zig").MaxLogs(50);
+const Config = @import("../../config.zig");
 const CommandPool = @import("command_pool.zig").CommandPool;
 const GraphicsContext = @import("../../core/graphics_context.zig");
 const Shader = @import("shader.zig");
@@ -93,7 +93,9 @@ properties: vk.MemoryPropertyFlags,
 address: ?vk.DeviceAddress,
 
 pub fn create(ctx: *const GraphicsContext, size: u32, usage: vk.BufferUsageFlags, properties: vk.MemoryPropertyFlags) !Buffer {
-    log.info("[Buffer.create] {} bytes", .{size});
+    if (Config.log.buffer) {
+        log.info("[Buffer.create] {} bytes", .{size});
+    }
 
     const sharing_mode: vk.SharingMode = .exclusive;
 
@@ -116,7 +118,9 @@ pub fn create(ctx: *const GraphicsContext, size: u32, usage: vk.BufferUsageFlags
         // Disable that for now as I'm getting Vulkan errors
         const bdai: vk.BufferDeviceAddressInfo = .{ .buffer = vk_buffer };
         address = ctx.device.getBufferDeviceAddress(&bdai);
-        log.info("Create buffer size {} with address bit {?}", .{ size, address });
+        if (Config.log.buffer) {
+            log.info("Create buffer size {} with address bit {?}", .{ size, address });
+        }
     }
 
     return .{
