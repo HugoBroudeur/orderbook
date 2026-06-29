@@ -9,6 +9,7 @@ const Config = @import("../config.zig");
 const Layer = @import("../core/layer.zig");
 const Engine = @import("../engine/vulkan/engine.zig");
 const GraphicsContext = @import("../core/graphics_context.zig");
+const SceneEditor = @import("../editor/scene_editor.zig");
 
 const EditorLayer = @This();
 
@@ -17,6 +18,8 @@ io: std.Io,
 label: []const u8 = "Editor Layer",
 config: Config,
 engine: *Engine,
+
+scene_editor: SceneEditor = undefined,
 
 pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config, engine: *Engine) EditorLayer {
     return .{
@@ -32,6 +35,7 @@ pub fn deinit(self: *EditorLayer) void {
     self.engine.gui_render_fn = null;
     zgui.backend.deinit();
     zgui.deinit();
+    self.scene_editor.deinit();
 }
 
 pub fn interface(self: *EditorLayer) Layer {
@@ -47,6 +51,8 @@ fn guiRender(cmd: vk.CommandBuffer) void {
 }
 
 pub fn onAttach(self: *EditorLayer) !void {
+    self.scene_editor = SceneEditor.init(self.allocator, self.engine);
+
     const settings_file_path = "config/cimgui.ini";
 
     const fonts: []const [:0]const u8 = &.{
@@ -112,19 +118,27 @@ pub fn onUpdate(self: *EditorLayer) void {
     var show_demo: bool = true;
     zgui.showDemoWindow(&show_demo);
 
-    zgui.setNextWindowPos(.{ .x = 20.0, .y = 20.0, .cond = .first_use_ever });
-    zgui.setNextWindowSize(.{ .w = -1.0, .h = -1.0, .cond = .first_use_ever });
-
-    if (zgui.begin("My window", .{})) {
-        if (zgui.button("Press me!", .{ .w = 200.0 })) {
-            std.debug.print("Button pressed\n", .{});
-        }
-    }
-    zgui.end();
+    self.scene_editor.display();
 }
 
 pub fn onEvent(self: *EditorLayer, ev: Event) bool {
     _ = self;
 
-    return zgui.backend.processEvent(@ptrCast(&ev.ptr.toSdl()));
+    _ = zgui.backend.processEvent(@ptrCast(&ev.ptr.toSdl()));
+
+    // Only block propagation when ImGui actually owns the input.
+    return switch (ev.ptr) {
+        .mouse_button_down,
+        .mouse_button_up,
+        .mouse_motion,
+        .mouse_wheel,
+        => zgui.io.getWantCaptureMouse(),
+
+        .key_down,
+        .key_up,
+        .text_input,
+        => zgui.io.getWantCaptureKeyboard(),
+
+        else => false,
+    };
 }

@@ -98,6 +98,10 @@ pub fn build(b: *std.Build) !void {
         .with_implot = true,
         .with_node_editor = true,
     });
+    const dep_serde = b.dependency("serde", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
     // Generate Zig code from .proto
     // const gen_proto = b.step("gen-proto", "generate zig files from protocol buffer definitions");
@@ -107,6 +111,10 @@ pub fn build(b: *std.Build) !void {
     //     .include_directories = &.{""},
     // });
     // gen_proto.dependOn(&protoc_step.step);
+
+    const uuid_mod = b.createModule(.{
+        .root_source_file = b.path("src/modules/uuid.zig"),
+    });
 
     const exe = b.addExecutable(.{
         .name = exe_name,
@@ -121,6 +129,8 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addImport("zmath", dep_zmath.module("root"));
     exe.root_module.addImport("vulkan", dep_vulkan.module("vulkan-zig"));
     exe.root_module.addImport("zgltf", dep_zgltf.module("zgltf"));
+    exe.root_module.addImport("serde", dep_serde.module("serde"));
+    exe.root_module.addImport("uuid", uuid_mod);
 
     exe.root_module.addImport("zgui", dep_zgui.module("root"));
     exe.root_module.linkLibrary(dep_zgui.artifact("imgui"));

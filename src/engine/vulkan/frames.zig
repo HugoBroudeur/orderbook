@@ -8,7 +8,7 @@ const Swapchain = @import("swapchain.zig").Swapchain;
 const CommandPool = @import("command_pool.zig").CommandPool;
 const AllocatedCommandBuffer = @import("command_pool.zig").AllocatedCommandBuffer;
 const DescriptorAllocator = @import("descriptor.zig").DescriptorAllocator;
-const SceneData = @import("../command.zig").SceneData;
+const SceneData = @import("../graphics/buffers.zig").SceneData;
 const Buffer = @import("buffer.zig");
 
 const Frame = @This();

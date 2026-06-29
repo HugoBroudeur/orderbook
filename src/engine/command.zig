@@ -12,6 +12,8 @@ const Batcher = Api.Batcher;
 const Texture = Api.Texture;
 const Engine = Api.Engine;
 
+const SceneData = @import("graphics/buffers.zig").SceneData;
+
 // const Batcher = @import("batcher.zig");
 // const Texture = @import("texture.zig");
 // const Renderer2D = @import("engine.zig");
@@ -23,16 +25,6 @@ const Point = Primitive.Point;
 // const ig = @import("cimgui");
 
 const COMMAND_QUEUE_SIZE = 1000000;
-
-pub const SceneData = struct {
-    view: zm.Mat = zm.identity(),
-    proj: zm.Mat = zm.identity(),
-    view_proj: zm.Mat = zm.identity(),
-    ambient_color: Color = Color.White,
-    sunlight_direction: @Vector(4, f32) = .{ 1, 1, 1, 1 }, // w for sun power
-    sunlight_color: Color = Color.White,
-    time: f32 align(4) = 0,
-};
 
 pub const QuadImgCmd = struct {
     p1: Point,

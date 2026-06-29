@@ -46,11 +46,9 @@ pub fn process(self: *InputSystem, event: Event) bool {
             }
             sdl.mouse.show() catch {};
         },
-        else => {
-            return false;
-        },
+        else => {},
     }
-    return true;
+    return false;
 }
 
 pub fn deinit(self: *InputSystem) void {

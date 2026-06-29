@@ -77,4 +77,8 @@ pub const Color = struct {
             color.a,
         };
     }
+
+    pub fn toPtrF32(color: *Color) *[4]f32 {
+        return @ptrCast(color);
+    }
 };

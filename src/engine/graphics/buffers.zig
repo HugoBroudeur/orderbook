@@ -1,6 +1,8 @@
 const vk = @import("vulkan");
 const zm = @import("zmath");
 const Data = @import("../data.zig");
+const Primitive = @import("../../primitive.zig");
+const Color = Primitive.Color;
 
 // Global push constant
 pub const GPUDrawPushConstants = extern struct {
@@ -12,9 +14,6 @@ pub const GPUDrawPushConstants2D = extern struct {
     translate: Data.Translate2D,
     vb_address: vk.DeviceAddress = undefined,
 };
-pub const DvuiPushConstants = extern struct {
-    vb_address: vk.DeviceAddress = undefined,
-};
 
 // Vertex Data sent in Vertex buffers
 pub const Vertex = extern struct {
@@ -23,6 +22,16 @@ pub const Vertex = extern struct {
     normal: [3]f32,
     uv_y: f32,
     col: [4]f32,
+};
+
+pub const SceneData = extern struct {
+    view: zm.Mat = zm.identity(),
+    proj: zm.Mat = zm.identity(),
+    view_proj: zm.Mat = zm.identity(),
+    ambient_color: [4]f32 = .{ 1, 1, 1, 0.2 },
+    sunlight_direction: [4]f32 = .{ 0, 1, 0.5, 1 }, // w for sun power
+    sunlight_color: [4]f32 = .{ 1, 1, 1, 1 },
+    time: f32 = 0,
 };
 
 // All are temporary for testing:

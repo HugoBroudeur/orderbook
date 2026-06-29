@@ -121,7 +121,7 @@ pub fn process(self: *CameraSystem, event: Event) bool {
             },
         }
     }
-    return true;
+    return false;
 }
 
 pub fn deinit(self: *CameraSystem) void {

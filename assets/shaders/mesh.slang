@@ -61,7 +61,7 @@ float4 fragment(Fragment input) : SV_Target {
 
   float shininess = max(1.0f, (1.0f - roughness) * 256.0f);
 
-  AmbientLight ambientLight;
+  AmbientLight ambientLight = makeAmbiantLight(scene.sceneData.ambientColor);
   Lighting ambientLit = calculateLighting(ambientLight, input.world_position, N,
                                           viewDir, shininess);
 
@@ -73,7 +73,9 @@ float4 fragment(Fragment input) : SV_Target {
       calculateLighting(sun, input.world_position, N, viewDir, shininess);
 
   float3 diffuse = color * (1.0f - metallic);
-  float3 ambient = color * ambientLit.Diffuse * 0.2f * ao;
+  float3 ambient = color * ambientLit.Diffuse * ao;
+  // float3 ambient = color * scene.sceneData.ambientColor.rgb *
+  //                  scene.sceneData.ambientColor.a * ao;
 
   return float4(diffuse * sunLit.Diffuse + sunLit.Specular + ambient, 1.0f);
 }

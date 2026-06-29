@@ -1,7 +1,7 @@
 const std = @import("std");
 const Camera = @import("camera.zig");
 const Commands = @import("command.zig");
-const SceneData = @import("command.zig").SceneData;
+const SceneData = @import("graphics/buffers.zig").SceneData;
 const UniformData = @import("../engine/command.zig").UniformData;
 const SceneA = @import("graphics/scene.zig");
 const EcsManager = @import("../game/ecs_manager.zig");
@@ -24,6 +24,7 @@ current_scene: Scene,
 draw_queue: *Commands.DrawQueue,
 
 random: std.Random,
+scene_data: SceneData,
 
 pub fn init(draw_queue: *Commands.DrawQueue, io: std.Io) SceneManager {
     const clock: std.Io.Clock = .cpu_thread;
@@ -38,6 +39,7 @@ pub fn init(draw_queue: *Commands.DrawQueue, io: std.Io) SceneManager {
         .current_scene = .{ .name = "Main Loop" },
         .draw_queue = draw_queue,
         .random = prng.random(),
+        .scene_data = .{},
     };
 }
 
@@ -90,18 +92,16 @@ pub fn beginScene(self: *SceneManager, engine: *Engine, ecs_manager: *const EcsM
             .heigth = @intCast(heigth),
         });
 
-        var scene_data: SceneData = .{};
+        self.scene_data.view = camera.getViewMatrix();
+        self.scene_data.proj = camera.getProjectionMatrix();
+        self.scene_data.view_proj = camera.getViewProjMatrix();
 
-        scene_data.view = camera.getViewMatrix();
-        scene_data.proj = camera.getProjectionMatrix();
-        scene_data.view_proj = camera.getViewProjMatrix();
-
-        scene_data.ambient_color = .{ .r = 1, .g = 1, .b = 1, .a = 0.1 };
-        scene_data.sunlight_color = Color.White;
-        scene_data.sunlight_direction = .{ 0, 1, 0.5, 1 };
+        // self.scene_data.ambient_color = .{ .r = 1, .g = 1, .b = 1, .a = 0.1 };
+        // self.scene_data.sunlight_color = Color.White;
+        // self.scene_data.sunlight_direction = .{ 0, 1, 0.5, 1 };
 
         // Send Camera
-        self.draw_queue.setSceneData(scene_data);
+        self.draw_queue.setSceneData(self.scene_data);
         break;
     }
 }

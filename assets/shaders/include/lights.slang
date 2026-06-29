@@ -87,7 +87,18 @@ struct SHCoefficients {
   float3 l00, l1m1, l10, l11, l2m2, l2m1, l20, l21, l22;
 };
 
+public AmbientLight makeAmbiantLight(float4 color) {
+  AmbientLight ambiant;
+  ambiant.diffuseColor = color.rgb;
+  ambiant.diffusePower = color.a;
+
+  return ambiant;
+}
+
 public struct AmbientLight : ILight {
+  public float3 diffuseColor;
+  public float diffusePower;
+
   static const SHCoefficients c = {
     float3(0.3623915, 0.2624130, 0.2326261),
     float3(0.1759131, 0.1436266, 0.1260569),
@@ -119,6 +130,8 @@ public struct AmbientLight : ILight {
          2.0 * c1 * c.l21 * normal.x * normal.z +
          2.0 * c1 * c.l2m1 * normal.y * normal.z + 2.0 * c2 * c.l11 * normal.x +
          2.0 * c2 * c.l1m1 * normal.y + 2.0 * c2 * c.l10 * normal.z);
+
+    OUT.Diffuse = OUT.Diffuse * diffuseColor * diffusePower;
 
     return OUT;
   };

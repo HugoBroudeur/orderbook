@@ -23,7 +23,7 @@ public struct SceneData {
   public float4 ambientColor;
   public float4 sunlightDirection;
   public float4 sunlightColor;
-  public float4 time;
+  public float time;
 };
 
 public struct MetalData {

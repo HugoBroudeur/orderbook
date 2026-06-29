@@ -10,6 +10,8 @@ const sdl = @import("sdl3");
 // const impl_sdl3 = @import("impl_sdl3");
 // const impl_sdlgpu3 = @import("impl_sdlgpu3");
 
+const ProjectManager = @import("../project/manager.zig");
+
 const Layer = @import("layer.zig");
 const LayerStack = @import("layer_stack.zig").LayerStack;
 const Framerate = @import("framerate.zig");
@@ -26,6 +28,7 @@ const App = @This();
 // Config
 //
 const FPS_THREASHOLD: u32 = 165;
+const PROJECT_PATH = "$HOME/saved_projects/price_is_power";
 
 //
 // Global state
@@ -41,6 +44,7 @@ engine: Engine = undefined,
 sandbox_sdl_layer: SandboxSdlLayer = undefined,
 game_layer: GameLayer = undefined,
 editor_layer: EditorLayer = undefined,
+project_manager: ProjectManager = undefined,
 
 // init operates on *App so all internal pointers (&self.engine, &self.framerate, etc.)
 // are stable — they point into the caller's frame, not a stack-local copy.
@@ -56,11 +60,15 @@ pub fn init(self: *App, config: Config) !void {
     self.framerate = Framerate.init(@intFromFloat(self.graphics_context.display.refresh_rate));
     self.framerate.on();
 
-    self.game_layer = GameLayer.init(self.allocator, self.io, config, &self.engine, &self.framerate);
-    try self.pushLayer(self.game_layer.interface());
+    self.project_manager = .init(self.allocator, self.io, config);
+
+    try self.project_manager.open("price_is_power");
 
     self.editor_layer = EditorLayer.init(self.allocator, self.io, config, &self.engine);
     try self.pushLayer(self.editor_layer.interface());
+
+    self.game_layer = GameLayer.init(self.allocator, self.io, config, &self.engine, &self.framerate);
+    try self.pushLayer(self.game_layer.interface());
 }
 
 pub fn run(self: *App) void {
@@ -120,6 +128,7 @@ pub fn shutdown(self: *App) void {
 
     self.engine.deinit();
     self.graphics_context.deinit();
+    self.project_manager.deinit();
 
     log.info("Closing... Good Bye!", .{});
     tracy.cleanExit(self.io);

@@ -35,6 +35,7 @@ const Data = @import("../data.zig");
 const DescriptorAllocator = @import("descriptor.zig").DescriptorAllocator;
 const DescriptorWriter = @import("descriptor.zig").DescriptorWriter;
 const DescriptorLayoutBuilder = @import("descriptor.zig").LayoutBuilder;
+const DrawCommand = @import("../command.zig");
 const Frame = @import("frames.zig");
 const GraphicsContext = @import("../../core/graphics_context.zig");
 const Image = @import("image.zig");
@@ -44,6 +45,7 @@ const Pipeline = @import("pipeline.zig");
 const RenderPass = @import("render_pass.zig");
 const Sampler = @import("sampler.zig");
 const SceneData = @import("../command.zig").SceneData;
+const SceneManager = @import("../scene_manager.zig");
 const Shader = @import("shader.zig");
 const Stats = @import("../stats.zig");
 const Swapchain = @import("swapchain.zig").Swapchain;
@@ -145,6 +147,8 @@ render_scale: f32 = 1.0,
 frame_number: u64 = 0,
 
 // Graphics
+scene_manager: SceneManager = undefined,
+draw_queue: Command.DrawQueue = undefined,
 loaded_scenes: std.array_hash_map.String(LoadedGLTF),
 draw_context: DrawContext,
 loaded_nodes: std.StringHashMap(IRenderable),
@@ -230,6 +234,8 @@ pub fn deinit(self: *Engine) void {
     self.loaded_nodes.deinit();
     self.draw_context.deinit();
     self.texture_cache.deinit(self.allocator);
+    self.scene_manager.deinit();
+    self.draw_queue.deinit();
 }
 
 pub fn setup(self: *Engine) !void {
@@ -237,6 +243,9 @@ pub fn setup(self: *Engine) !void {
 
     self.samplers.set(.nearest, try .create(self.ctx, .{}));
     self.samplers.set(.linear, try .create(self.ctx, .{ .min_filter = .linear, .mag_filter = .linear, .mipmap_mode = .linear }));
+
+    self.draw_queue = try Command.DrawQueue.init(self.allocator, self);
+    self.scene_manager = SceneManager.init(&self.draw_queue, self.io);
 
     try self.createTextures();
 
