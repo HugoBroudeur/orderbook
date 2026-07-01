@@ -11,6 +11,8 @@ const sdl = @import("sdl3");
 // const impl_sdlgpu3 = @import("impl_sdlgpu3");
 
 const ProjectManager = @import("../project/manager.zig");
+const SceneManager = @import("../project/scene/manager.zig");
+const AssetManager = @import("../project/asset/manager.zig");
 
 const Layer = @import("layer.zig");
 const LayerStack = @import("layer_stack.zig").LayerStack;
@@ -21,6 +23,7 @@ const EditorLayer = @import("../layers/editor_layer.zig");
 const GraphicsContext = @import("graphics_context.zig");
 const Engine = @import("../engine/vulkan/engine.zig");
 const Event = @import("../events/event.zig");
+const World = @import("../ecs/world.zig");
 
 const App = @This();
 
@@ -45,6 +48,9 @@ sandbox_sdl_layer: SandboxSdlLayer = undefined,
 game_layer: GameLayer = undefined,
 editor_layer: EditorLayer = undefined,
 project_manager: ProjectManager = undefined,
+scene_manager: SceneManager = .{},
+asset_manager: AssetManager = undefined,
+world: World = undefined,
 
 // init operates on *App so all internal pointers (&self.engine, &self.framerate, etc.)
 // are stable — they point into the caller's frame, not a stack-local copy.
@@ -60,11 +66,23 @@ pub fn init(self: *App, config: Config) !void {
     self.framerate = Framerate.init(@intFromFloat(self.graphics_context.display.refresh_rate));
     self.framerate.on();
 
-    self.project_manager = .init(self.allocator, self.io, config);
+    self.world = try .init(self.allocator, self.io);
+    { // DEBUG
+        const cmd = try World.Ecs.Commands.fromWorld(self.world.app);
+        _ = try cmd.spawn(.{ World.Components.Translation{}, World.Components.ID{ .guid = 1 }, World.Components.Scale{} });
+        _ = try cmd.spawn(.{ World.Components.Translation{}, World.Components.ID{ .guid = 2 }, World.Components.Scale{} });
+        _ = try cmd.spawn(.{ World.Components.Translation{}, World.Components.ID{ .guid = 3 }, World.Components.Scale{} });
+    }
+
+    self.scene_manager.init(self.allocator, self.io, &self.world);
+    self.asset_manager = .init(self.allocator, self.io);
+    self.project_manager = .init(self.allocator, self.io, config, &self.scene_manager, &self.asset_manager);
 
     try self.project_manager.open("price_is_power");
+    _ = try self.scene_manager.createScene("test");
+    try self.scene_manager.saveScenes(self.project_manager.project_folder);
 
-    self.editor_layer = EditorLayer.init(self.allocator, self.io, config, &self.engine);
+    self.editor_layer = EditorLayer.init(self.allocator, self.io, config, &self.engine, &self.project_manager);
     try self.pushLayer(self.editor_layer.interface());
 
     self.game_layer = GameLayer.init(self.allocator, self.io, config, &self.engine, &self.framerate);
@@ -129,6 +147,9 @@ pub fn shutdown(self: *App) void {
     self.engine.deinit();
     self.graphics_context.deinit();
     self.project_manager.deinit();
+    self.scene_manager.deinit();
+    self.asset_manager.deinit();
+    self.world.deinit();
 
     log.info("Closing... Good Bye!", .{});
     tracy.cleanExit(self.io);

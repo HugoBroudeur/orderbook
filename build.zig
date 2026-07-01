@@ -70,6 +70,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    const dep_knoedel = b.dependency("knoedel", .{});
     const dep_tracy = b.dependency("tracy", .{
         .target = target,
         .optimize = optimize,
@@ -112,8 +113,9 @@ pub fn build(b: *std.Build) !void {
     // });
     // gen_proto.dependOn(&protoc_step.step);
 
-    const uuid_mod = b.createModule(.{
-        .root_source_file = b.path("src/modules/uuid.zig"),
+    const dep_uuid = b.dependency("uuid", .{
+        .target = target,
+        .optimize = optimize,
     });
 
     const exe = b.addExecutable(.{
@@ -125,12 +127,13 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addImport("sdl3", dep_sdl3.module("sdl3"));
     exe.root_module.addImport("sqlite", dep_sqlite.module("sqlite"));
     exe.root_module.addImport("zcs", dep_zcs.module("mr_ecs"));
+    exe.root_module.addImport("knoedel", dep_knoedel.module("knoedel"));
     exe.root_module.addImport("zclay", dep_zclay.module("zclay"));
     exe.root_module.addImport("zmath", dep_zmath.module("root"));
     exe.root_module.addImport("vulkan", dep_vulkan.module("vulkan-zig"));
     exe.root_module.addImport("zgltf", dep_zgltf.module("zgltf"));
     exe.root_module.addImport("serde", dep_serde.module("serde"));
-    exe.root_module.addImport("uuid", uuid_mod);
+    exe.root_module.addImport("uuid", dep_uuid.module("uuid"));
 
     exe.root_module.addImport("zgui", dep_zgui.module("root"));
     exe.root_module.linkLibrary(dep_zgui.artifact("imgui"));
@@ -227,14 +230,14 @@ pub fn build(b: *std.Build) !void {
     exe.step.dependOn(&install_resources.step);
     exe.step.dependOn(&db_resources.step);
 
-    const resBin = [_][]const u8{
-        "imgui.ini",
-    };
-
-    inline for (resBin) |file| {
-        const res = b.addInstallFile(b.path(file), "bin/" ++ file);
-        b.getInstallStep().dependOn(&res.step);
-    }
+    // const resBin = [_][]const u8{
+    //     "imgui.ini",
+    // };
+    //
+    // inline for (resBin) |file| {
+    //     const res = b.addInstallFile(b.path(file), "bin/" ++ file);
+    //     b.getInstallStep().dependOn(&res.step);
+    // }
 
     // SHADERS
     // Compile shaders.

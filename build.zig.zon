@@ -55,6 +55,14 @@
             .url = "git+https://github.com/OrlovEvgeny/serde.zig#2d81464621b8c6e3f635d0133b83d98fbbe2f62a",
             .hash = "serde-1.0.1-1DszT7B_DQByGB4OA1ofuxMNznusFipIeMMqCeXbu2cY",
         },
+        .uuid = .{
+            .url = "git+https://codeberg.org/r4gus/uuid-zig#90e12444dda2a127932901aaae90ae63cce4af11",
+            .hash = "uuid-0.5.0-oOieIUiBAAAkUVAX2e4ngTJbHgTVe3io2F43H3upIQey",
+        },
+        .knoedel = .{
+            .url = "git+https://github.com/Lommix/knoedel#53651ab809be79a32cdcb7253d35fc7a59890a66",
+            .hash = "knoedel-0.0.1-sDb4GpbKAgCWLKvt2xJnWqok4pT5PmVqoXsFq8mBJU1k",
+        },
     },
     .paths = .{
         "build.zig",

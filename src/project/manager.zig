@@ -1,14 +1,16 @@
 const std = @import("std");
 const log = std.log.scoped(.project_manager);
 
+const zgui = @import("zgui");
 const Config = @import("../config.zig");
-const SceneManager = @import("../engine/scene_manager.zig");
-const AssetManager = @import("../engine/asset_manager.zig");
+const SceneManager = @import("scene/manager.zig");
+const AssetManager = @import("asset/manager.zig");
 const RenderSettings = @import("../engine/settings.zig");
 const Uuid = @import("uuid");
 const serde = @import("serde");
 
-pub const project_file_extension = ".lrproj";
+pub const PROJECT_FILE_EXTENSION = ".dlproj";
+pub const PROJECT_FILENAME = "main";
 
 const Manager = @This();
 
@@ -21,11 +23,10 @@ project_folder: []const u8 = "",
 project_file: ProjectFile = .{},
 loaded: bool = false,
 
-scene_manager: ?*SceneManager = null,
-asset_manager: ?*AssetManager = null,
+scene_manager: *SceneManager,
+asset_manager: *AssetManager,
 
 pub const ProjectFile = struct {
-    const ENTRY_FILENAME = "/entry.delil";
     boot_scene_guid: Uuid.Uuid = 0,
     render_settings: RenderSettings = .{},
 
@@ -40,17 +41,14 @@ pub const ProjectFile = struct {
         const cwd = std.Io.Dir.cwd();
         try cwd.createDirPath(io, project_filepath);
 
-        const file_name = try std.mem.concat(allocator, u8, &.{
-            project_filepath,
-            ENTRY_FILENAME,
-        });
+        const file_name = try computeProjectFilePath(allocator, project_filepath);
         defer allocator.free(file_name);
 
         try std.Io.Dir.writeFile(.cwd(), io, .{ .data = file_content, .sub_path = file_name, .flags = .{ .resolve_beneath = true } });
     }
 
     pub fn load(allocator: std.mem.Allocator, io: std.Io, project_filepath: []const u8) !ProjectFile {
-        const file_name = try std.mem.concat(allocator, u8, &.{ project_filepath, ENTRY_FILENAME });
+        const file_name = try computeProjectFilePath(allocator, project_filepath);
         defer allocator.free(file_name);
 
         const cwd = std.Io.Dir.cwd();
@@ -59,17 +57,28 @@ pub const ProjectFile = struct {
 
         return try serde.zon.fromSlice(ProjectFile, allocator, content);
     }
+
+    fn computeProjectFilePath(allocator: std.mem.Allocator, project_filepath: []const u8) ![]const u8 {
+        return try std.mem.concat(allocator, u8, &.{
+            project_filepath,
+            "/",
+            PROJECT_FILENAME,
+            PROJECT_FILE_EXTENSION,
+        });
+    }
 };
 
 // ============================================================================
 // PROJECT MANAGER
 // ============================================================================
 
-pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config) Manager {
+pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config, scene_manager: *SceneManager, asset_manager: *AssetManager) Manager {
     return .{
         .allocator = allocator,
         .io = io,
         .config = config,
+        .scene_manager = scene_manager,
+        .asset_manager = asset_manager,
     };
 }
 
@@ -83,7 +92,7 @@ pub fn new(self: *Manager, name: []const u8) !void {
     const cwd = std.Io.Dir.cwd();
     try cwd.createDirPath(self.io, project_path);
 
-    const project_file = ProjectFile.init(Uuid.new());
+    const project_file = ProjectFile.init(Uuid.v4.new(self.io));
     try project_file.save(self.allocator, self.io, project_path);
 
     try self.open(project_path);
@@ -123,7 +132,17 @@ pub fn save(self: *Manager) !void {
     const project_path = try self.computeProjectPath(self.project_name);
     try self.project_file.save(self.allocator, self.io, project_path);
 
-    // TODO
+    try self.scene_manager.saveScenes(self.project_folder);
+    try self.asset_manager.saveAssetPool(self.project_folder);
+
+    log.info(
+        \\
+        \\ Save project 
+        \\ Name         {s}
+        \\ Path:        {s}
+        \\ ID:          {}
+        \\
+    , .{ self.project_name, self.project_folder, self.project_file.boot_scene_guid });
 }
 
 pub fn close(self: *Manager) void {

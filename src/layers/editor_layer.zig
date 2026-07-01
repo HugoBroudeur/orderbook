@@ -5,6 +5,7 @@ const vk = @import("vulkan");
 
 const Event = @import("../events/event.zig");
 
+const ProjectManager = @import("../project/manager.zig");
 const Config = @import("../config.zig");
 const Layer = @import("../core/layer.zig");
 const Engine = @import("../engine/vulkan/engine.zig");
@@ -18,15 +19,17 @@ io: std.Io,
 label: []const u8 = "Editor Layer",
 config: Config,
 engine: *Engine,
+project_manager: *ProjectManager,
 
 scene_editor: SceneEditor = undefined,
 
-pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config, engine: *Engine) EditorLayer {
+pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config, engine: *Engine, project_manager: *ProjectManager) EditorLayer {
     return .{
         .allocator = allocator,
         .config = config,
         .engine = engine,
         .io = io,
+        .project_manager = project_manager,
     };
 }
 
@@ -51,9 +54,13 @@ fn guiRender(cmd: vk.CommandBuffer) void {
 }
 
 pub fn onAttach(self: *EditorLayer) !void {
-    self.scene_editor = SceneEditor.init(self.allocator, self.engine);
+    self.scene_editor = SceneEditor.init(self.allocator, self.engine, self.project_manager);
 
-    const settings_file_path = "config/cimgui.ini";
+    const setting_path = try std.mem.concatWithSentinel(self.allocator, u8, &.{
+        self.project_manager.project_folder,
+        "/",
+        "zgui.ini",
+    }, 0);
 
     const fonts: []const [:0]const u8 = &.{
         "assets/fonts/SNPro/SNPro-Regular.ttf",
@@ -62,7 +69,8 @@ pub fn onAttach(self: *EditorLayer) !void {
     const font_size: f32 = 18;
 
     zgui.init(self.allocator);
-    zgui.io.setIniFilename(settings_file_path);
+    zgui.io.setConfigFlags(.{ .dock_enable = true });
+    zgui.io.setIniFilename(setting_path);
 
     for (fonts) |font| {
         _ = zgui.io.addFontFromFile(font, font_size);
@@ -114,6 +122,9 @@ pub fn onAttach(self: *EditorLayer) !void {
 
 pub fn onUpdate(self: *EditorLayer) void {
     zgui.backend.newFrame(@intCast(self.engine.ctx.window.getWidth()), @intCast(self.engine.ctx.window.getHeight()));
+
+    const viewport = zgui.getMainViewport();
+    _ = zgui.dockSpaceOverViewport(0, viewport, .{ .passthru_central_node = true }); // Enable docking on window edge
 
     var show_demo: bool = true;
     zgui.showDemoWindow(&show_demo);
