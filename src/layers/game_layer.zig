@@ -6,6 +6,7 @@ const vk = @import("vulkan");
 const zclay = @import("zclay");
 
 const Event = @import("../events/event.zig");
+const EcsEvent = @import("../framework/event_queue.zig").Event;
 
 const GraphicsContext = @import("../core/graphics_context.zig");
 const ClayManager = @import("../game/clay_manager.zig");
@@ -17,6 +18,7 @@ const Layer = @import("../core/layer.zig");
 const MarketManager = @import("../game/market_manager.zig");
 const Engine = @import("../engine/vulkan/engine.zig");
 const Framerate = @import("../core/framerate.zig");
+const World = @import("../ecs/world.zig");
 // const UiManager = @import("../game/ui_manager.zig");
 // const UiSystem = @import("../game/ecs/systems/ui_system.zig");
 
@@ -27,6 +29,7 @@ io: std.Io,
 label: []const u8 = "Sandbox Layer",
 config: Config,
 engine: *Engine,
+world: *World,
 framerate: *Framerate,
 
 clay_manager: ClayManager = undefined,
@@ -37,13 +40,14 @@ market_manager: MarketManager = undefined,
 // ui_manager: UiManager = undefined,
 // ui_system: UiSystem = undefined,
 
-pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config, engine: *Engine, framerate: *Framerate) RuntimeLayer {
+pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config, engine: *Engine, framerate: *Framerate, world: *World) RuntimeLayer {
     return .{
         .allocator = allocator,
         .config = config,
         .engine = engine,
         .io = io,
         .framerate = framerate,
+        .world = world,
     };
 }
 
@@ -64,6 +68,9 @@ pub fn getLabel(self: *RuntimeLayer) []const u8 {
 }
 
 pub fn onAttach(self: *RuntimeLayer) !void {
+    self.world.app.runPar(World.Schedule.init);
+    self.world.app.flushCommands();
+
     self.db_manager = DbManager.init(self.allocator, self.config) catch |err| {
         log.err("Can't initiate DbManager: {}", .{err});
         return err;
@@ -84,10 +91,6 @@ pub fn onAttach(self: *RuntimeLayer) !void {
         return err;
     };
 
-    // self.ui_manager.setup(&self.ecs_manager) catch |err| {
-    //     std.log.err("[App] Can't setup the UiManager : {}", .{err});
-    //     return err;
-    // };
     self.clay_manager.setup() catch |err| {
         log.err("Can't setup the ClayManager : {}", .{err});
         return err;
@@ -99,31 +102,24 @@ pub fn onAttach(self: *RuntimeLayer) !void {
 }
 
 pub fn onUpdate(self: *RuntimeLayer) void {
-    if (self.framerate.isOn()) {
-        self.framerate.update_count = 0;
-        while (self.framerate.shouldWait()) {}
+    self.framerate.update_count = 0;
+    while (self.framerate.shouldWait()) {}
 
-        while (self.framerate.shouldUpdate()) {
-            self.ecs_manager.progress();
-        }
-        assert(self.framerate.update_count > 0); // Make sure at least 1 update happened
-        if (self.framerate.shouldDraw()) {
-            // Don't render if window is minised
-            if (self.engine.ctx.window.getWidth() == 0 or self.engine.ctx.window.getHeight() == 0) {
-                return;
-            }
-            self.engine.scene_manager.render(&self.ecs_manager, self.engine);
-        }
-    } else {
-        self.ecs_manager.progress();
+    while (self.framerate.shouldUpdate()) {
+        self.world.app.runPar(World.Schedule.pre_update);
+        self.world.app.flushCommands();
 
-        // Don't render if window is minised
-        if (self.engine.ctx.window.getWidth() == 0 or self.engine.ctx.window.getHeight() == 0) {
-            return;
-        }
-        self.engine.scene_manager.render(&self.ecs_manager, self.engine);
+        self.world.app.runPar(World.Schedule.update);
+        self.world.app.flushCommands();
+
+        self.world.app.runPar(World.Schedule.post_update);
+        self.world.app.flushCommands();
     }
+    assert(self.framerate.update_count > 0); // Make sure at least 1 update happened
+
+    self.world.app.update(); // reset frame arena, progress world ticks.
 }
+
 pub fn onEvent(self: *RuntimeLayer, ev: Event) bool {
     switch (ev.ptr) {
         .quit => {
@@ -142,6 +138,12 @@ pub fn onEvent(self: *RuntimeLayer, ev: Event) bool {
             }
         },
         else => {},
+    }
+
+    const queue = self.world.app.getResource(World.Components.RawInputQueue) catch null;
+    if (null != queue) {
+        var event: EcsEvent = .{ .ptr = ev.ptr, .type = .keyboard_pressed };
+        queue.?.pushEvent(&event);
     }
 
     return self.ecs_manager.handleEvent(ev);

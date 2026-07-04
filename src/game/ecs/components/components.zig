@@ -331,15 +331,7 @@ pub const InputEvent = packed struct {
 
 pub const InputsState = struct {
     // keys: std.EnumArray(sapp.Keycode, sapp.EventType),
-    mouse: MouseState,
-};
-
-pub const MouseState = struct {
-    locked: bool = false,
-    // cursor: vec.Vec2,
-    // speed: vec.Vec2,
-    // scroll: vec.Vec2,
-    // buttons: std.EnumArray(sapp.Mousebutton, sapp.EventType),
+    // mouse: MouseState,
 };
 
 // pub const InputKey = struct {

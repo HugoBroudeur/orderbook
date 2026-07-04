@@ -9,14 +9,31 @@ pub const Ecs = @import("knoedel").Knoedel(
 
 const World = @This();
 
-const Schedule = enum {
+pub const Schedule = enum {
+    /// Use in App
     init,
+
+    /// Use in Game Layer
     pre_update,
+    /// Use in Game Layer
     update,
+    /// Use in Game Layer
     post_update,
+
+    /// Use in Render Layer
     pre_render,
+    /// Use in Render Layer
     render,
+
+    /// Use in App
     cleanup,
+};
+
+pub const Gamestate = enum {
+    boot,
+    loading,
+    menu,
+    main,
 };
 
 allocator: std.mem.Allocator,

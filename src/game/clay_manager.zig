@@ -19,7 +19,7 @@ pub fn init(allocator: std.mem.Allocator, font_manager: *FontManager) !ClayManag
     const buffer_size: u32 = clay.minMemorySize();
     return .{
         .allocator = allocator,
-        .buffer = try allocator.alloc(u8, buffer_size),
+        .buffer = try allocator.alignedAlloc(u8, std.mem.Alignment.@"8", buffer_size),
         .font_manager = font_manager,
         // .draw_api = draw_api,
     };

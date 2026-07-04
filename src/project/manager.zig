@@ -121,6 +121,8 @@ pub fn open(self: *Manager, name: []const u8) !void {
     self.allocator.free(self.project_folder);
     self.project_folder = project_path;
 
+    try self.scene_manager.loadScenes(self.project_folder);
+
     self.loaded = true;
 }
 
@@ -176,11 +178,11 @@ pub fn getProjectFolder(self: *const Manager) []const u8 {
     return self.project_folder;
 }
 
-pub fn getSceneManager(self: *const Manager) ?*SceneManager {
+pub fn getSceneManager(self: *const Manager) *SceneManager {
     return self.scene_manager;
 }
 
-pub fn getAssetManager(self: *const Manager) ?*AssetManager {
+pub fn getAssetManager(self: *const Manager) *AssetManager {
     return self.asset_manager;
 }
 

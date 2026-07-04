@@ -103,7 +103,7 @@ pub fn shouldUpdate(self: *Framerate) bool {
 
 pub fn shouldDraw(self: *Framerate) bool {
     if (!self.isOn()) return true;
-    self.frame_lag += @max(0, self.update_count - 1);
+    if (self.update_count > 1) self.frame_lag += self.update_count - 1;
     const dt = self.getDtSinceLastFrame();
     if (self.running_slow) {
         if (self.frame_lag == 0) {

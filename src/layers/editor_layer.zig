@@ -1,7 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const zgui = @import("zgui");
-const vk = @import("vulkan");
 
 const Event = @import("../events/event.zig");
 
@@ -11,6 +10,8 @@ const Layer = @import("../core/layer.zig");
 const Engine = @import("../engine/vulkan/engine.zig");
 const GraphicsContext = @import("../core/graphics_context.zig");
 const SceneEditor = @import("../editor/scene_editor.zig");
+const EcsExplorer = @import("../editor/ecs_explorer.zig");
+const World = @import("../ecs/world.zig");
 
 const EditorLayer = @This();
 
@@ -18,27 +19,25 @@ allocator: std.mem.Allocator,
 io: std.Io,
 label: []const u8 = "Editor Layer",
 config: Config,
-engine: *Engine,
+world: *World,
 project_manager: *ProjectManager,
 
 scene_editor: SceneEditor = undefined,
+ecs_explorer: EcsExplorer = undefined,
 
-pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config, engine: *Engine, project_manager: *ProjectManager) EditorLayer {
+pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config, project_manager: *ProjectManager, world: *World) EditorLayer {
     return .{
         .allocator = allocator,
         .config = config,
-        .engine = engine,
         .io = io,
         .project_manager = project_manager,
+        .world = world,
     };
 }
 
 pub fn deinit(self: *EditorLayer) void {
-    self.engine.ctx.device.deviceWaitIdle() catch {};
-    self.engine.gui_render_fn = null;
-    zgui.backend.deinit();
-    zgui.deinit();
     self.scene_editor.deinit();
+    self.ecs_explorer.deinit();
 }
 
 pub fn interface(self: *EditorLayer) Layer {
@@ -49,12 +48,14 @@ pub fn getLabel(self: *EditorLayer) []const u8 {
     return self.label;
 }
 
-fn guiRender(cmd: vk.CommandBuffer) void {
-    zgui.backend.render(@ptrFromInt(@intFromEnum(cmd)));
-}
-
 pub fn onAttach(self: *EditorLayer) !void {
-    self.scene_editor = SceneEditor.init(self.allocator, self.engine, self.project_manager);
+    // Creates the ImGui context. The Vulkan/SDL backends are initialized later
+    // by RenderLayer.onAttach (it needs the engine), and RenderLayer.deinit
+    // tears both down — do not call zgui.deinit here.
+    zgui.init(self.allocator);
+
+    self.scene_editor = SceneEditor.init(self.allocator, self.project_manager, self.world.app);
+    self.ecs_explorer = EcsExplorer.init(self.world.app);
 
     const setting_path = try std.mem.concatWithSentinel(self.allocator, u8, &.{
         self.project_manager.project_folder,
@@ -68,68 +69,29 @@ pub fn onAttach(self: *EditorLayer) !void {
     };
     const font_size: f32 = 18;
 
-    zgui.init(self.allocator);
     zgui.io.setConfigFlags(.{ .dock_enable = true });
     zgui.io.setIniFilename(setting_path);
 
     for (fonts) |font| {
         _ = zgui.io.addFontFromFile(font, font_size);
     }
-
-    const swapchain = &self.engine.swapchain;
-    const image_count: u32 = @intCast(swapchain.frames.len);
-
-    const color_fmt: c_int = @intFromEnum(swapchain.surface_format.format);
-
-    const init_info = zgui.backend.ImGui_ImplVulkan_InitInfo{
-        .api_version = self.engine.ctx.api_version.toU32(),
-        .instance = @ptrFromInt(@intFromEnum(self.engine.ctx.instance.handle)),
-        .physical_device = @ptrFromInt(@intFromEnum(self.engine.ctx.physical_device)),
-        .device = @ptrFromInt(@intFromEnum(self.engine.ctx.device.handle)),
-        .queue_family = self.engine.ctx.graphics_queue.family,
-        .queue = @ptrFromInt(@intFromEnum(self.engine.ctx.graphics_queue.handle)),
-
-        // Let imgui allocate its own descriptor pool for the font texture.
-        .descriptor_pool = null,
-        .descriptor_pool_size = 8,
-
-        // No render pass — we use VK_KHR_dynamic_rendering.
-        .render_pass = null,
-        .min_image_count = image_count,
-        .image_count = image_count,
-
-        .use_dynamic_rendering = true,
-        .pipeline_rendering_create_info = .{
-            .s_type = @intFromEnum(vk.StructureType.pipeline_rendering_create_info_khr),
-            .color_attachment_count = 1,
-            .p_color_attachment_formats = @ptrCast(&color_fmt),
-        },
-    };
-
-    if (!zgui.backend.loadFunctions(
-        self.engine.ctx.api_version.toU32(),
-        GraphicsContext.vkImguiLoader,
-        @constCast(self.engine.ctx),
-    )) return error.ImguiVulkanLoadFailed;
-
-    zgui.backend.init(
-        init_info,
-        self.engine.ctx.window.ptr.value,
-    );
-
-    self.engine.gui_render_fn = guiRender;
 }
 
 pub fn onUpdate(self: *EditorLayer) void {
-    zgui.backend.newFrame(@intCast(self.engine.ctx.window.getWidth()), @intCast(self.engine.ctx.window.getHeight()));
+    if (self.world.app.getResource(World.Components.WindowState) catch null) |window_state| {
+        zgui.backend.newFrame(@intCast(window_state.width), @intCast(window_state.height));
 
-    const viewport = zgui.getMainViewport();
-    _ = zgui.dockSpaceOverViewport(0, viewport, .{ .passthru_central_node = true }); // Enable docking on window edge
+        const viewport = zgui.getMainViewport();
+        _ = zgui.dockSpaceOverViewport(0, viewport, .{ .passthru_central_node = true }); // Enable docking on window edge
 
-    var show_demo: bool = true;
-    zgui.showDemoWindow(&show_demo);
+        var show_demo: bool = true;
+        zgui.showDemoWindow(&show_demo);
 
-    self.scene_editor.display();
+        self.scene_editor.display();
+        self.ecs_explorer.display();
+
+        zgui.endFrame();
+    }
 }
 
 pub fn onEvent(self: *EditorLayer, ev: Event) bool {

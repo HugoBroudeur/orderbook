@@ -2,7 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const Shared = struct {
-    const Camera = @import("camera.zig");
     const Command = @import("command.zig");
     const Data = @import("data.zig");
     const Stats = @import("stats.zig");
@@ -83,7 +82,6 @@ pub fn Api(comptime be: Backend, comptime T: type) type {
         /// implementations also "quack" like an implementation.
         pub const backend = be;
 
-        pub const Camera = Shared.Camera;
         pub const Command = Shared.Command;
         pub const Data = Shared.Data;
         pub const Stats = Shared.Stats;

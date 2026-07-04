@@ -19,11 +19,13 @@ const LayerStack = @import("layer_stack.zig").LayerStack;
 const Framerate = @import("framerate.zig");
 const SandboxSdlLayer = @import("../layers/sandbox_sdl.zig");
 const GameLayer = @import("../layers/game_layer.zig");
+const RenderLayer = @import("../layers/render_layer.zig");
 const EditorLayer = @import("../layers/editor_layer.zig");
 const GraphicsContext = @import("graphics_context.zig");
 const Engine = @import("../engine/vulkan/engine.zig");
 const Event = @import("../events/event.zig");
 const World = @import("../ecs/world.zig");
+const Systems = @import("../ecs/systems.zig");
 
 const App = @This();
 
@@ -45,6 +47,7 @@ running: bool = true,
 layer_stack: LayerStack,
 engine: Engine = undefined,
 sandbox_sdl_layer: SandboxSdlLayer = undefined,
+render_layer: RenderLayer = undefined,
 game_layer: GameLayer = undefined,
 editor_layer: EditorLayer = undefined,
 project_manager: ProjectManager = undefined,
@@ -52,41 +55,40 @@ scene_manager: SceneManager = .{},
 asset_manager: AssetManager = undefined,
 world: World = undefined,
 
-// init operates on *App so all internal pointers (&self.engine, &self.framerate, etc.)
-// are stable — they point into the caller's frame, not a stack-local copy.
 pub fn init(self: *App, config: Config) !void {
     // tracy.frameMarkStart("Main");
 
     self.graphics_context = try GraphicsContext.init(self.allocator);
-    self.engine = try Engine.init(self.allocator, &self.graphics_context, self.io);
-    self.engine.setup() catch |err| {
-        log.err("Can't setup the Vulkan Engine : {}", .{err});
-        return err;
-    };
     self.framerate = Framerate.init(@intFromFloat(self.graphics_context.display.refresh_rate));
     self.framerate.on();
 
     self.world = try .init(self.allocator, self.io);
-    { // DEBUG
-        const cmd = try World.Ecs.Commands.fromWorld(self.world.app);
-        _ = try cmd.spawn(.{ World.Components.Translation{}, World.Components.ID{ .guid = 1 }, World.Components.Scale{} });
-        _ = try cmd.spawn(.{ World.Components.Translation{}, World.Components.ID{ .guid = 2 }, World.Components.Scale{} });
-        _ = try cmd.spawn(.{ World.Components.Translation{}, World.Components.ID{ .guid = 3 }, World.Components.Scale{} });
-    }
+    try self.world.app.addResource(World.Components.RawInputQueue{ .allocator = self.allocator, .io = self.io });
+    try self.world.app.addPlugin(Systems.Plugins.Startup);
 
     self.scene_manager.init(self.allocator, self.io, &self.world);
     self.asset_manager = .init(self.allocator, self.io);
     self.project_manager = .init(self.allocator, self.io, config, &self.scene_manager, &self.asset_manager);
 
+    // Open before layers attach: EditorLayer.onAttach derives its zgui.ini
+    // path from project_folder, which is only set by open().
     try self.project_manager.open("price_is_power");
-    _ = try self.scene_manager.createScene("test");
-    try self.scene_manager.saveScenes(self.project_manager.project_folder);
 
-    self.editor_layer = EditorLayer.init(self.allocator, self.io, config, &self.engine, &self.project_manager);
+    // Update order must be game -> editor -> render: the editor opens the
+    // ImGui frame (newFrame) that the RenderLayer's engine closes
+    // (ImGui::Render/EndFrame). The RenderLayer struct is initialized first so
+    // &render_layer.engine is stable, but it is PUSHED last; game and editor
+    // must not touch the engine during onAttach (it only exists after
+    // render_layer.onAttach runs).
+    self.render_layer = RenderLayer.init(self.allocator, self.io, &self.graphics_context, &self.framerate, &self.world, &self.project_manager);
+
+    self.game_layer = GameLayer.init(self.allocator, self.io, config, &self.render_layer.engine, &self.framerate, &self.world);
+    try self.pushLayer(self.game_layer.interface());
+
+    self.editor_layer = EditorLayer.init(self.allocator, self.io, config, &self.project_manager, &self.world);
     try self.pushLayer(self.editor_layer.interface());
 
-    self.game_layer = GameLayer.init(self.allocator, self.io, config, &self.engine, &self.framerate);
-    try self.pushLayer(self.game_layer.interface());
+    try self.pushLayer(self.render_layer.interface());
 }
 
 pub fn run(self: *App) void {
@@ -100,10 +102,8 @@ pub fn run(self: *App) void {
             layer.onUpdate();
         }
 
-        self.engine.draw() catch |err| {
-            log.err("CRASH WHILE DRAWING FRAME {}, EXITING NOW", .{err});
-            return;
-        };
+        self.world.app.runPar(World.Schedule.cleanup);
+        self.world.app.flushCommands();
 
         if (self.framerate.skipDrawThreasholdReached()) {
             log.err("PREVENTING FRAME LAG, EXITING NOW", .{});
@@ -117,10 +117,16 @@ pub fn pollEvent(self: *App) void {
         // _ = impl_sdl3.ImGui_ImplSDL3_ProcessEvent(@ptrCast(&event.toSdl()));
         const ev = Event.create(event);
 
+        // Events propagate in reverse update order (render -> editor -> game)
+        // so the editor can swallow input that ImGui captures before the game
+        // reacts to it.
         var event_swallowed = false;
-        for (self.layer_stack.stack().items) |layer| {
+        const layers = self.layer_stack.stack().items;
+        var i = layers.len;
+        while (i > 0) {
+            i -= 1;
             if (!event_swallowed) {
-                event_swallowed = layer.onEvent(ev);
+                event_swallowed = layers[i].onEvent(ev);
             }
         }
 
@@ -144,11 +150,10 @@ pub fn shutdown(self: *App) void {
         layer.deinit();
     }
 
-    self.engine.deinit();
+    // Engine is owned and deinited by the RenderLayer (layer loop above).
     self.graphics_context.deinit();
     self.project_manager.deinit();
     self.scene_manager.deinit();
-    self.asset_manager.deinit();
     self.world.deinit();
 
     log.info("Closing... Good Bye!", .{});

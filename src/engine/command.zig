@@ -12,7 +12,7 @@ const Batcher = Api.Batcher;
 const Texture = Api.Texture;
 const Engine = Api.Engine;
 
-const SceneData = @import("graphics/buffers.zig").SceneData;
+pub const SceneData = @import("graphics/buffers.zig").SceneData;
 
 // const Batcher = @import("batcher.zig");
 // const Texture = @import("texture.zig");
@@ -107,10 +107,6 @@ pub const DrawQueue = struct {
 
     pub fn rewind(self: *DrawQueue, to: usize) void {
         self.cmds.rewind(to);
-    }
-
-    pub fn submit(self: *DrawQueue) void {
-        self.engine.updateScene(self);
     }
 };
 

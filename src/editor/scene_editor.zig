@@ -3,20 +3,20 @@ const log = std.log.scoped(.scene_editor);
 const zgui = @import("zgui");
 
 const ProjectManager = @import("../project/manager.zig");
-const Engine = @import("../engine/vulkan/engine.zig");
 const SceneManager = @import("../engine/scene_manager.zig");
+const World = @import("../ecs/world.zig");
 
 const SceneEditor = @This();
 
 allocator: std.mem.Allocator,
-engine: *Engine,
 project_manager: *ProjectManager,
+world: *World.Ecs.App,
 
-pub fn init(allocator: std.mem.Allocator, engine: *Engine, project_manager: *ProjectManager) SceneEditor {
+pub fn init(allocator: std.mem.Allocator, project_manager: *ProjectManager, world: *World.Ecs.App) SceneEditor {
     return .{
         .allocator = allocator,
-        .engine = engine,
         .project_manager = project_manager,
+        .world = world,
     };
 }
 
@@ -25,10 +25,11 @@ pub fn deinit(self: *SceneEditor) void {
 }
 
 pub fn display(self: *SceneEditor) void {
+    const stats = self.world.getResource(World.Components.Stats) catch null;
     if (zgui.begin("Debug info", .{})) {
         zgui.bulletText(
             "Average :  {d:.2}  ms/frame ({d:.1}  fps)",
-            .{ self.engine.stats.clocks.get(.frame).?.average_ms, self.engine.stats.frame_per_sec },
+            .{ stats.?.clocks.get(.frame).?.average_ms, stats.?.frame_per_sec },
         );
         zgui.bulletText("Hold left click : use camera", .{});
         zgui.bulletText("D, S, T, R :  move camera", .{});
@@ -40,26 +41,26 @@ pub fn display(self: *SceneEditor) void {
     zgui.setNextWindowSize(.{ .w = -1.0, .h = -1.0, .cond = .first_use_ever });
 
     if (zgui.begin("Scene Editor", .{})) {
+        const lights = self.world.getResource(World.Components.Lights) catch null;
         if (zgui.collapsingHeader("Scene data", .{ .default_open = true, .draw_lines_full = true })) {
             _ = zgui.colorPicker4("Ambiant Color", .{
-                .col = &self.engine.scene_manager.scene_data.ambient_color,
+                .col = &lights.?.ambient_color,
                 .flags = .{ .alpha_bar = true, .picker_hue_wheel = true },
             });
             _ = zgui.colorPicker4("Sunlight Color", .{
-                .col = &self.engine.scene_manager.scene_data.sunlight_color,
+                .col = &lights.?.sunlight_color,
                 .flags = .{ .alpha_bar = true, .picker_hue_wheel = true },
             });
-            const sun_direction = self.engine.scene_manager.scene_data.sunlight_direction[0..3];
+            const sun_direction = lights.?.sunlight_direction[0..3];
             if (zgui.dragFloat3("Sunlight Direction", .{ .v = sun_direction, .speed = 0.01 })) {
-                self.engine.scene_manager.scene_data.sunlight_direction[0] = sun_direction[0];
-                self.engine.scene_manager.scene_data.sunlight_direction[1] = sun_direction[1];
-                self.engine.scene_manager.scene_data.sunlight_direction[2] = sun_direction[2];
+                if (null != lights) {
+                    lights.?.sunlight_direction[0] = sun_direction[0];
+                    lights.?.sunlight_direction[1] = sun_direction[1];
+                    lights.?.sunlight_direction[2] = sun_direction[2];
+                }
             }
 
-            var sun_power = self.engine.scene_manager.scene_data.sunlight_direction[3];
-            if (zgui.dragFloat("Sunlight Power", .{ .v = &sun_power, .speed = 0.01 })) {
-                self.engine.scene_manager.scene_data.sunlight_direction[3] = sun_power;
-            }
+            if (zgui.dragFloat("Sunlight Power", .{ .v = &lights.?.sunlight_direction[3], .speed = 0.01 })) {}
 
             // zgui.colorPicker4(label: [:0]const u8, args: ColorPicker3)
             // zgui.bulletText("Hold left click : use camera", .{self.scene_manager.scene_data.ambient_color});

@@ -41,9 +41,11 @@ pub fn createScene(self: *SceneManager, name: []const u8) !Uuid.Uuid {
     const scene: Scene = .{
         .name = name,
         .guid = Uuid.v4.new(self.io),
+        .reg = self.world,
     };
 
     _ = try self.active_scenes.fetchPut(scene.guid, scene);
+    if (self.loaded_scene_guid == 0) self.loaded_scene_guid = scene.guid;
     log.info("Created new scene [{s} | GUID:{}]", .{ scene.name, scene.guid });
 
     return scene.guid;
@@ -108,6 +110,10 @@ fn getSceneName(self: *SceneManager, guid: Uuid.Uuid) []const u8 {
     return std.fmt.allocPrint(self.allocator, "{}{s}", .{ guid, SCENE_FILE_EXTENSION }) catch "out_of_memory" ++ SCENE_FILE_EXTENSION;
 }
 
+pub fn getCurrentScene(self: *SceneManager) ?*Scene {
+    return self.active_scenes.getPtr(self.loaded_scene_guid);
+}
+
 fn extractGuidFromSceneName(scene_name: []const u8) ?Uuid.Uuid {
     if (!std.mem.endsWith(u8, scene_name, SCENE_FILE_EXTENSION)) return null;
     const stem = std.fs.path.stem(scene_name);
@@ -115,13 +121,10 @@ fn extractGuidFromSceneName(scene_name: []const u8) ?Uuid.Uuid {
 }
 
 const EntityData = struct {
-    entity_guid: ?World.Components.ID = null,
+    entity_guid: ?Uuid.Uuid = null,
     entity_tag: ?World.Components.Tag = null,
-    transforms: struct {
-        translation: ?World.Components.Translation = null,
-        rotation: ?World.Components.Rotation = null,
-        scale: ?World.Components.Scale = null,
-    } = .{},
+    transform: ?World.Components.Transform = null,
+    camera: ?World.Components.Camera = null,
 };
 
 const SceneData = struct {
@@ -145,12 +148,14 @@ const SceneSerializer = struct {
         while (it.next()) |entry| {
             var entity_data: EntityData = .{};
             if (world.app.components.getSingle(entry.entity, World.Components.ID)) |guid| {
-                entity_data.entity_guid = guid.*;
+                entity_data.entity_guid = guid.guid;
             }
-            if (world.app.components.getSingle(entry.entity, World.Components.Translation)) |translation| {
-                entity_data.transforms.translation = translation.*;
+            if (world.app.components.getSingle(entry.entity, World.Components.Tag)) |tag| {
+                entity_data.entity_tag = tag.*;
             }
-            log.info("{}", .{entity_data});
+            if (world.app.components.getSingle(entry.entity, World.Components.Transform)) |transform| {
+                entity_data.transform = transform.*;
+            }
 
             try entities.append(allocator, entity_data);
         }

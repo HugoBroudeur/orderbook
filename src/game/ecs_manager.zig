@@ -46,7 +46,7 @@ pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, market_manager
 pub fn deinit(self: *EcsManager) void {
     self.cmd_buf.deinit(self.allocator, &self.entities);
     self.entities.deinit(self.allocator);
-    self.camera_system.deinit();
+    // self.camera_system.deinit();
     self.input_system.deinit();
 }
 
@@ -61,15 +61,15 @@ pub fn setup(self: *EcsManager) !void {
     // Register Systems
     self.input_system = InputSystem.init(self);
     self.input_system.setup();
-    self.camera_system = CameraSystem.init(self);
-    self.camera_system.setup();
+    // self.camera_system = CameraSystem.init(self);
+    // self.camera_system.setup();
 }
 
 pub fn progress(self: *EcsManager) void {
     self.entities.forEach("system_update_env_info", MetricSystem.system_update_env_info, .{});
 
     self.input_system.update();
-    self.camera_system.update();
+    // self.camera_system.update();
 
     self.entities.forEach("system_place_order", OrderbookSystem.system_place_order, .{
         .cb = &self.cmd_buf,
@@ -93,9 +93,10 @@ pub fn get_singleton(self: *EcsManager, comptime T: type) *T {
 
 pub fn handleEvent(self: *EcsManager, ev: Event) bool {
     const input_processed = self.input_system.process(ev);
-    const camera_processed = self.camera_system.process(ev);
+    // const camera_processed = self.camera_system.process(ev);
 
-    return input_processed or camera_processed;
+    return input_processed;
+    // return input_processed or camera_processed;
 }
 
 pub fn create_single_component_entity(self: *EcsManager, comptime C: type, value: C) void {

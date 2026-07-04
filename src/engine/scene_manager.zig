@@ -1,5 +1,4 @@
 const std = @import("std");
-const Camera = @import("camera.zig");
 const Commands = @import("command.zig");
 const SceneData = @import("graphics/buffers.zig").SceneData;
 const UniformData = @import("../engine/command.zig").UniformData;
@@ -9,7 +8,7 @@ const Ecs = @import("../game/ecs/ecs.zig");
 const zm = @import("zmath");
 const Color = @import("../primitive.zig").Color;
 const LoadedGLTF = @import("graphics/scene.zig").LoadedGLTF;
-const AssetManager = @import("asset_manager.zig").AssetManager;
+// const AssetManager = @import("asset_manager.zig").AssetManager;
 const Engine = @import("vulkan/engine.zig");
 
 const SceneManager = @This();
@@ -19,7 +18,6 @@ pub const Scene = struct {
 };
 
 io: std.Io,
-camera: Camera.PerspectiveCamera,
 current_scene: Scene,
 draw_queue: *Commands.DrawQueue,
 
@@ -35,7 +33,6 @@ pub fn init(draw_queue: *Commands.DrawQueue, io: std.Io) SceneManager {
     // const roll = rand.intRangeAtMost(u32, 1, 6); // Dice roll: 1-6
     return .{
         .io = io,
-        .camera = .{ .name = "2D Orthographic Camera" },
         .current_scene = .{ .name = "Main Loop" },
         .draw_queue = draw_queue,
         .random = prng.random(),
@@ -68,6 +65,9 @@ pub fn render(self: *SceneManager, ecs_manager: *const EcsManager, engine: *Engi
 }
 
 pub fn beginScene(self: *SceneManager, engine: *Engine, ecs_manager: *const EcsManager) void {
+    _ = self; // autofix
+    _ = engine; // autofix
+    _ = ecs_manager; // autofix
     // _ = self;
     // std.log.debug("[Renderer2D.beginScene] Camera: {s}", .{self.camera.name});
 
@@ -75,35 +75,35 @@ pub fn beginScene(self: *SceneManager, engine: *Engine, ecs_manager: *const EcsM
     // self.data.texture_shader.setMat4('u_viewProjection', camera.GetViewProjectionMatrix());
     // self.data.batcher.begin();
 
-    var iter = ecs_manager.entities.iterator(struct {
-        camera: *Camera.PerspectiveCamera,
-    });
+    // var iter = ecs_manager.entities.iterator(struct {
+    //     camera: *Camera,
+    // });
 
-    while (iter.next(&ecs_manager.entities)) |vw| {
-        const camera = vw.camera;
+    // while (iter.next(&ecs_manager.entities)) |vw| {
+    //     const camera = vw.camera;
 
-        const width: usize = engine.ctx.window.getWidth();
-        const heigth: usize = engine.ctx.window.getHeight();
+    // const width: usize = engine.ctx.window.getWidth();
+    // const heigth: usize = engine.ctx.window.getHeight();
+    //
+    // camera.setViewport(.{
+    //     .x = 0,
+    //     .y = 0,
+    //     .width = @intCast(width),
+    //     .heigth = @intCast(heigth),
+    // });
 
-        camera.setViewport(.{
-            .x = 0,
-            .y = 0,
-            .width = @intCast(width),
-            .heigth = @intCast(heigth),
-        });
+    // self.scene_data.view = camera.getViewMatrix();
+    // self.scene_data.proj = camera.getProjectionMatrix();
+    // self.scene_data.view_proj = camera.getViewProjMatrix();
 
-        self.scene_data.view = camera.getViewMatrix();
-        self.scene_data.proj = camera.getProjectionMatrix();
-        self.scene_data.view_proj = camera.getViewProjMatrix();
+    // self.scene_data.ambient_color = .{ .r = 1, .g = 1, .b = 1, .a = 0.1 };
+    // self.scene_data.sunlight_color = Color.White;
+    // self.scene_data.sunlight_direction = .{ 0, 1, 0.5, 1 };
 
-        // self.scene_data.ambient_color = .{ .r = 1, .g = 1, .b = 1, .a = 0.1 };
-        // self.scene_data.sunlight_color = Color.White;
-        // self.scene_data.sunlight_direction = .{ 0, 1, 0.5, 1 };
-
-        // Send Camera
-        self.draw_queue.setSceneData(self.scene_data);
-        break;
-    }
+    // Send Camera
+    //     self.draw_queue.setSceneData(self.scene_data);
+    //     break;
+    // }
 }
 
 pub fn endScene(self: *SceneManager) void {
@@ -136,3 +136,5 @@ pub fn initUniform() UniformData {
         },
     };
 }
+
+// pub fn saveScene(self: *SceneManager, project_path: []const u8) !void {}

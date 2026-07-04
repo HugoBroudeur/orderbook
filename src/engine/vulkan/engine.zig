@@ -10,24 +10,25 @@ const UiManager = @import("../../game/ui_manager.zig");
 const EcsManager = @import("../../game/ecs_manager.zig");
 const materials = @import("../graphics/materials.zig");
 const ComputeEffect = @import("../graphics/effects.zig").ComputeEffect;
-const Scene = @import("../graphics/scene.zig");
-const DrawContext = Scene.DrawContext;
-const IRenderable = Scene.IRenderable;
-const MeshNode = Scene.MeshNode;
-const LoadedGLTF = Scene.LoadedGLTF;
+const Scene = @import("../../project/scene/scene.zig");
+const GPUScene = @import("../graphics/scene.zig");
+const DrawContext = GPUScene.DrawContext;
+const IRenderable = GPUScene.IRenderable;
+const MeshNode = GPUScene.MeshNode;
+const LoadedGLTF = GPUScene.LoadedGLTF;
 const Buffers = @import("../graphics/buffers.zig");
 const RenderObject = @import("../graphics/objects.zig").RenderObject;
 const Vertex = Buffers.Vertex;
 const GPUDrawPushConstants = Buffers.GPUDrawPushConstants;
 const GPUDrawPushConstants2D = Buffers.GPUDrawPushConstants2D;
 const Color = @import("../../primitive.zig").Color;
+const Components = @import("../../ecs/components.zig");
 
 // const Api = @import("../backend.zig").Vulkan;
 // const Api = @import("../gfx.zig").Backend(.vulkan);
-const AssetManager = @import("../asset_manager.zig");
+const AssetPool = @import("../../project/asset/manager.zig").AssetPool;
 const Batcher = @import("batcher.zig");
 const Buffer = @import("buffer.zig");
-const Camera = @import("../camera.zig");
 const Command = @import("../command.zig");
 const Config = @import("../../config.zig");
 const VulkanCommand = @import("command_pool.zig");
@@ -47,7 +48,6 @@ const Sampler = @import("sampler.zig");
 const SceneData = @import("../command.zig").SceneData;
 const SceneManager = @import("../scene_manager.zig");
 const Shader = @import("shader.zig");
-const Stats = @import("../stats.zig");
 const Swapchain = @import("swapchain.zig").Swapchain;
 
 const Engine = @This();
@@ -111,7 +111,7 @@ const GlobalDescriptor = struct {
 
 io: std.Io,
 allocator: std.mem.Allocator,
-stats: Stats,
+stats: *Components.Stats = undefined,
 
 ctx: *const GraphicsContext,
 
@@ -126,7 +126,6 @@ meshes: std.ArrayList(Mesh),
 // Global descriptors
 descriptor: GlobalDescriptor = undefined,
 
-asset_loader: AssetManager,
 draw_image: Image = undefined,
 depth_image: Image = undefined,
 pipelines: std.EnumArray(PipelineType, Pipeline) = .initUndefined(),
@@ -149,7 +148,6 @@ frame_number: u64 = 0,
 // Graphics
 scene_manager: SceneManager = undefined,
 draw_queue: Command.DrawQueue = undefined,
-loaded_scenes: std.array_hash_map.String(LoadedGLTF),
 draw_context: DrawContext,
 loaded_nodes: std.StringHashMap(IRenderable),
 // material_default_data: materials.MaterialInstance = undefined,
@@ -167,18 +165,19 @@ last_index_buffer: ?*Buffer = null,
 bindless_texture_count: u32 = 0,
 texture_cache: std.ArrayList(vk.DescriptorImageInfo),
 
-pub fn init(allocator: std.mem.Allocator, ctx: *const GraphicsContext, io: std.Io) !Engine {
+pub fn init(
+    allocator: std.mem.Allocator,
+    ctx: *const GraphicsContext,
+    io: std.Io,
+) !Engine {
     return .{
         .io = io,
         .allocator = allocator,
-        .stats = .init(),
         .batcher = try .init(allocator),
         .ctx = ctx,
-        .asset_loader = try .init(allocator, io),
         .draw_context = try .init(allocator),
         .meshes = try .initCapacity(allocator, 0),
         .loaded_nodes = .init(allocator),
-        .loaded_scenes = .empty,
         .draw_extent = ctx.window.toExtend2D(),
         .texture_cache = .empty,
     };
@@ -216,13 +215,6 @@ pub fn deinit(self: *Engine) void {
         mesh.destroy(self.ctx);
     }
     self.meshes.deinit(self.allocator);
-
-    self.asset_loader.deinit(self);
-    var scene_it = self.loaded_scenes.iterator();
-    while (scene_it.next()) |scene_ptr| {
-        scene_ptr.value_ptr.*.deinit();
-    }
-    self.loaded_scenes.deinit(self.allocator);
 
     self.batcher_buffer.destroy(self.ctx);
     self.text_buffer.destroy(self.ctx);
@@ -263,18 +255,16 @@ pub fn setup(self: *Engine) !void {
 
     self.material_constants_buffer = try materials.MetallicRoughness.createMaterialPushConstantsBuffer(self, 1);
 
-    {
-        self.stats.startClock(.transfer);
-        // self.meshes = try self.asset_loader.loadMeshes(self, "assets/meshes/basic.glb");
-        // self.meshes = try self.asset_loader.loadMeshes(self.ctx, &self.getCurrentFrame().cmd_pool, "assets/meshes/city.glb");
-        const structure_file = try self.asset_loader.loadGLTFAsset(self, "assets/meshes/structure.glb");
-        try self.loaded_scenes.put(self.allocator, "structure", structure_file);
-
-        self.stats.tickClock(.transfer);
-    }
+    // {
+    //     self.stats.startClock(.transfer);
+    //     // self.meshes = try self.asset_loader.loadMeshes(self, "assets/meshes/basic.glb");
+    //     // self.meshes = try self.asset_loader.loadMeshes(self.ctx, &self.getCurrentFrame().cmd_pool, "assets/meshes/city.glb");
+    //
+    //     self.stats.tickClock(.transfer);
+    // }
 }
 
-pub fn createTextures(self: *Engine) !void {
+fn createTextures(self: *Engine) !void {
     { // Main Draw image
         self.draw_image = try Image.create(
             self,
@@ -359,7 +349,7 @@ pub fn createTextures(self: *Engine) !void {
     }
 }
 
-pub fn setupDescriptors(self: *Engine) !void {
+fn setupDescriptors(self: *Engine) !void {
     { // Compute image
         var builder: DescriptorLayoutBuilder = try .init(self.allocator);
         defer builder.deinit();
@@ -432,7 +422,37 @@ pub fn getCurrentFrame(self: *Engine) *Frame {
     return self.swapchain.getCurrentFrame();
 }
 
-pub fn draw(self: *Engine) !void {
+pub fn render(self: *Engine, scene: *Scene, asset_pool: *AssetPool) !void {
+    const camera = try scene.reg.app.getResource(Components.RenderCamera);
+    const lights = try scene.reg.app.getResource(Components.Lights);
+    const scene_data: SceneData = .{
+        .view = camera.getViewMatrix(),
+        .proj = camera.getProjectionMatrix(),
+        .view_proj = camera.getViewProjMatrix(),
+        .sunlight_color = lights.sunlight_color,
+        .sunlight_direction = lights.sunlight_direction,
+        .ambient_color = lights.ambient_color,
+    };
+
+    self.stats = try scene.reg.app.getResource(Components.Stats);
+
+    self.getCurrentFrame().scene_data = scene_data;
+
+    // TODO: (Dummy, needs to be in the ECS) Populate draw context from the scene graph each frame
+    {
+        self.stats.startClock(.scene_build);
+
+        var identity = zm.identity();
+
+        try asset_pool.loaded_gltf.getPtr("structure").?.draw(&identity, &self.draw_context);
+
+        self.stats.tickClock(.scene_build);
+    }
+
+    try self.draw();
+}
+
+fn draw(self: *Engine) !void {
     // // Skip if no work was prepared (minimised window etc.)
     // defer self.pending_batches = &.{};
     // Swapchain may be null after a failed recreate; skip the frame rather than
@@ -594,7 +614,7 @@ fn fillCommandBuffers(self: *Engine) !void {
     }
 }
 
-pub fn createCommandBuffers(self: *Engine, frame: *Frame) !void {
+fn createCommandBuffers(self: *Engine, frame: *Frame) !void {
     try self.ctx.device.allocateCommandBuffers(&.{
         .command_pool = frame.cmd_pool.vk_cmd_pool,
         .level = .primary,
@@ -602,7 +622,7 @@ pub fn createCommandBuffers(self: *Engine, frame: *Frame) !void {
     }, @ptrCast(&frame.cmd_buf.vk_command_buffer));
 }
 
-pub fn resetCommandBuffers(self: *Engine) !void {
+fn resetCommandBuffers(self: *Engine) !void {
     var frame = self.getCurrentFrame();
     frame.swapchain_state = .optimal;
 
@@ -643,19 +663,8 @@ pub fn immediateSubmit(self: *Engine, queue_family: GraphicsContext.QueueFamily,
     try self.ctx.device.queueWaitIdle(queue);
 }
 
-pub fn drawGeometry(self: *Engine) !void {
+fn drawGeometry(self: *Engine) !void {
     const current_frame = self.getCurrentFrame();
-
-    // Populate draw context from the scene graph each frame
-    {
-        self.stats.startClock(.scene_build);
-
-        var identity = zm.identity();
-
-        try self.loaded_scenes.getPtr("structure").?.draw(&identity, &self.draw_context);
-
-        self.stats.tickClock(.scene_build);
-    }
 
     self.stats.frame_transparent_objects = @intCast(self.draw_context.transparent_surfaces.items.len);
 
@@ -788,7 +797,7 @@ fn drawRenderObject(
     self.stats.addDrawCall(ro.index_count / 3, ro.index_count);
 }
 
-pub fn drawEffects(self: *Engine) void {
+fn drawEffects(self: *Engine) void {
     self.ctx.device.cmdBindPipeline(self.getCurrentFrame().cmd_buf.vk_command_buffer, .compute, self.compute_effect.effect_pipeline.pipeline.vk_pipeline);
     self.ctx.device.cmdBindDescriptorSets(
         self.getCurrentFrame().cmd_buf.vk_command_buffer,
@@ -805,7 +814,7 @@ pub fn drawEffects(self: *Engine) void {
     self.ctx.device.cmdDispatch(self.getCurrentFrame().cmd_buf.vk_command_buffer, group_count_x, group_count_y, 1);
 }
 
-pub fn drawGuiEditor(self: *Engine) void {
+fn drawGuiEditor(self: *Engine) void {
     if (self.gui_render_fn) |render_fn| {
         const color_attachment = vk.RenderingAttachmentInfo{
             .clear_value = .{
@@ -836,31 +845,31 @@ pub fn drawGuiEditor(self: *Engine) void {
     }
 }
 
-pub fn updateScene(self: *Engine, draw_queue: *Command.DrawQueue) void {
-    // Logger.debug("[Engine.update_scene] {} Draw Commands", .{draw_queue.cmds.cur_pos});
-    // draw_queue.sort() // optimise draw calls ?
-
-    self.getCurrentFrame().scene_data = draw_queue.scene_data;
-
-    self.batcher.begin();
-
-    for (draw_queue.cmds.buffer.items) |draw_cmd| {
-        if (self.batcher.shouldFlush(draw_cmd)) {
-            self.batcher.flush();
-        }
-
-        switch (draw_cmd) {
-            .imgui => |cmd| self.imgui_draw_data = cmd.data,
-            else => self.batcher.push(draw_cmd),
-        }
-    }
-
-    self.pending_batches = self.batcher.end();
-
-    // TODO, if can't draw all in 1 batch, process max cmd as possible using a pointer to count how many commands are left
-    // For now, rewind to 0
-    draw_queue.cmds.rewind(0);
-}
+// fn updateScene(self: *Engine, draw_queue: *Command.DrawQueue) void {
+//     // Logger.debug("[Engine.update_scene] {} Draw Commands", .{draw_queue.cmds.cur_pos});
+//     // draw_queue.sort() // optimise draw calls ?
+//
+//     self.getCurrentFrame().scene_data = draw_queue.scene_data;
+//
+//     self.batcher.begin();
+//
+//     for (draw_queue.cmds.buffer.items) |draw_cmd| {
+//         if (self.batcher.shouldFlush(draw_cmd)) {
+//             self.batcher.flush();
+//         }
+//
+//         switch (draw_cmd) {
+//             .imgui => |cmd| self.imgui_draw_data = cmd.data,
+//             else => self.batcher.push(draw_cmd),
+//         }
+//     }
+//
+//     self.pending_batches = self.batcher.end();
+//
+//     // TODO, if can't draw all in 1 batch, process max cmd as possible using a pointer to count how many commands are left
+//     // For now, rewind to 0
+//     draw_queue.cmds.rewind(0);
+// }
 
 pub fn registerTexture(self: *Engine, image: Image, sampler: Sampler) !u32 {
     const slot = self.bindless_texture_count;

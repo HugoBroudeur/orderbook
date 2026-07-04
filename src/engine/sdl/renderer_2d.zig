@@ -22,7 +22,6 @@ const Backend = @import("../backend.zig").Sdl;
 const Pipeline = Backend.Pipeline;
 const Batcher = Backend.Batcher;
 const Buffer = @import("buffer.zig");
-const Camera = @import("../camera.zig");
 const Command = @import("../command.zig");
 const CopyPass = @import("pass.zig").CopyPass;
 const Logger = @import("../../core/log.zig").MaxLogs(50);
