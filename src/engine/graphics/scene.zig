@@ -11,6 +11,7 @@ const Buffer = @import("../vulkan/buffer.zig");
 const Image = @import("../vulkan/image.zig");
 const Descriptor = @import("../vulkan/descriptor.zig");
 const Engine = @import("../vulkan/engine.zig");
+const Uuid = @import("uuid");
 
 pub const BasicNode = struct {
     allocator: std.mem.Allocator,
@@ -105,7 +106,7 @@ pub const MeshNode = struct {
     }
 
     pub fn draw(self: *MeshNode, top_matrix: *zm.Mat, ctx: *DrawContext) !void {
-        var node_matrix = zm.mul(top_matrix.*, self.world_transform);
+        const node_matrix = zm.mul(top_matrix.*, self.world_transform);
 
         if (self.mesh) |m| {
             for (m.surfaces.items) |surface| {
@@ -129,7 +130,7 @@ pub const MeshNode = struct {
         }
 
         for (self.child_nodes.items) |child| {
-            try child.draw(&node_matrix, ctx);
+            try child.draw(top_matrix, ctx);
         }
     }
 
@@ -195,13 +196,18 @@ pub const LoadedGLTF = struct {
 };
 
 pub const DrawContext = struct {
+    pub const QueueType = enum {
+        opaque_surface,
+        transparent_surface,
+    };
+
     allocator: std.mem.Allocator,
     opaque_surfaces: std.ArrayList(objects.RenderObject),
     transparent_surfaces: std.ArrayList(objects.RenderObject),
 
     _opaque_sufaces_sorted: std.ArrayList(u64),
 
-    pub fn init(allocator: std.mem.Allocator) !DrawContext {
+    pub fn init(allocator: std.mem.Allocator) DrawContext {
         return .{
             .allocator = allocator,
             .opaque_surfaces = .empty,
@@ -210,10 +216,21 @@ pub const DrawContext = struct {
         };
     }
 
-    pub fn deinit(self: *DrawContext) void {
+    /// knoedel resource contract: a resource's deinit must accept the world
+    /// allocator. DrawContext frees with its own stored allocator, so the
+    /// parameter is unused — but the signature must match or resource
+    /// registration fails to compile.
+    pub fn deinit(self: *DrawContext, allocator: std.mem.Allocator) void {
+        _ = allocator;
         self.opaque_surfaces.deinit(self.allocator);
         self.transparent_surfaces.deinit(self.allocator);
         self._opaque_sufaces_sorted.deinit(self.allocator);
+    }
+
+    pub fn reset(self: *DrawContext) void {
+        self.opaque_surfaces.clearRetainingCapacity();
+        self.transparent_surfaces.clearRetainingCapacity();
+        self._opaque_sufaces_sorted.clearRetainingCapacity();
     }
 
     // Sort the opaque_surfaces by materials and index buffers for reusing the same buffers when rendering

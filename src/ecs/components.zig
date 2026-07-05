@@ -5,6 +5,8 @@ const Serde = @import("serde");
 const zm = @import("zmath");
 const IRect = @import("../primitive.zig").IRect;
 const Uuid = @import("uuid");
+const SceneManager = @import("../project/scene/manager.zig");
+const LoadedGLTF = @import("../engine/graphics/scene.zig").LoadedGLTF;
 
 // ACSII Generator: https://patorjk.com/software/taag/#p=display&f=ANSI%20Shadow&t=Graphics
 
@@ -41,11 +43,20 @@ pub const Stats = @import("../engine/stats.zig");
 // ╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║██║╚██████╗███████║
 //  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝
 
+pub const DrawContextQueue = @import("../engine/graphics/scene.zig").DrawContext;
+
 pub const Transform = struct {
     translation: Translation = .{},
     /// Identity quaternion
     rotation: [4]f32 = .{ 0, 0, 0, 1 },
     scale: Scale = .{},
+
+    pub fn toMatrix(self: *const Transform) zm.Mat {
+        const s = zm.scaling(self.scale.x, self.scale.y, self.scale.z);
+        const r = zm.matFromQuat(@as(zm.F32x4, self.rotation));
+        const t = zm.translation(self.translation.x, self.translation.y, self.translation.z);
+        return zm.mul(zm.mul(s, r), t);
+    }
 };
 
 const Translation = struct {
@@ -60,11 +71,29 @@ const Scale = struct {
     z: f32 = 1,
 };
 
+pub const Lights = struct {
+    ambient_color: [4]f32 = .{ 1, 1, 1, 0.2 },
+    sunlight_direction: [4]f32 = .{ 0, 1, 0.5, 1 }, // w for sun power
+    sunlight_color: [4]f32 = .{ 1, 1, 1, 1 },
+    sunlight_specular_color: [4]f32 = .{ 1, 1, 1, 1 },
+};
+
+pub const GltfMesh = struct {
+    ptr: *LoadedGLTF,
+};
+
+//  ██████╗ █████╗ ███╗   ███╗███████╗██████╗  █████╗
+// ██╔════╝██╔══██╗████╗ ████║██╔════╝██╔══██╗██╔══██╗
+// ██║     ███████║██╔████╔██║█████╗  ██████╔╝███████║
+// ██║     ██╔══██║██║╚██╔╝██║██╔══╝  ██╔══██╗██╔══██║
+// ╚██████╗██║  ██║██║ ╚═╝ ██║███████╗██║  ██║██║  ██║
+//  ╚═════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
+
 pub const CameraActive = struct {
     is_active: bool = true,
 };
 pub const CameraSpeed = struct {
-    speed: f32 = 0.05,
+    speed: f32 = 0.03,
 };
 pub const CameraSensitivity = struct {
     sensitivity: f32 = 200,
@@ -94,7 +123,7 @@ pub const Camera = struct {
     viewport: IRect = IRect.zero(),
     scissor: IRect = IRect.zero(),
 
-    near: f32 = -1,
+    near: f32 = 0.001,
     far: f32 = 1,
     fov: f32 = 70,
 
@@ -194,12 +223,6 @@ pub const Camera = struct {
     fn resetScissor(self: *Camera) void {
         self.scissor = .{ .x = 0, .y = 0, .w = -1, .h = -1 };
     }
-};
-
-pub const Lights = struct {
-    ambient_color: [4]f32 = .{ 1, 1, 1, 0.2 },
-    sunlight_direction: [4]f32 = .{ 0, 1, 0.5, 1 }, // w for sun power
-    sunlight_color: [4]f32 = .{ 1, 1, 1, 1 },
 };
 
 // ██╗███╗   ██╗██████╗ ██╗   ██╗████████╗███████╗
@@ -349,3 +372,17 @@ pub const Rotated = struct {
 // ╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝
 
 pub const RawInputQueue = @import("../framework/event_queue.zig");
+
+pub const PendingSceneEvent = struct {
+    manager: *SceneManager,
+    scene_guid: Uuid.Uuid,
+};
+
+pub const LoadedSceneEvent = struct {
+    scene_guid: Uuid.Uuid,
+};
+
+pub const AssetLoaded = struct {
+    name: []const u8,
+    ptr: *LoadedGLTF,
+};

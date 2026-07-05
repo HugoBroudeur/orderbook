@@ -70,12 +70,7 @@ pub fn onAttach(self: *RenderLayer) !void {
 
     try self.setupZgui();
 
-    // Project is opened in App.init, before any layer attaches — the editor
-    // needs project_folder for its ini path during its own onAttach.
-    _ = try self.project_manager.scene_manager.createScene("test");
-    try self.project_manager.scene_manager.saveScenes(self.project_manager.project_folder);
-
-    try self.project_manager.asset_manager.loadGLTFAsset(&self.engine, "assets/meshes/structure.glb");
+    // try self.project_manager.asset_manager.loadGLTFAsset(&self.engine, "assets/meshes/structure.glb");
 }
 
 pub fn onUpdate(self: *RenderLayer) void {
@@ -97,67 +92,6 @@ pub fn onUpdate(self: *RenderLayer) void {
     self.engine.render(scene, &self.project_manager.asset_manager.pool) catch |err| {
         log.err("Render failed: {}", .{err});
     };
-
-    // if (self.framerate.isOn()) {
-    //     self.framerate.update_count = 0;
-    //     while (self.framerate.shouldWait()) {}
-    //
-    //     while (self.framerate.shouldUpdate()) {
-    //         // self.ecs_manager.progress();
-    //         self.world.app.runPar(World.Schedule.pre_update);
-    //         self.world.app.flushCommands();
-    //
-    //         self.world.app.runPar(World.Schedule.update);
-    //         self.world.app.flushCommands();
-    //
-    //         self.world.app.runPar(World.Schedule.post_update);
-    //         self.world.app.flushCommands();
-    //     }
-    //     assert(self.framerate.update_count > 0); // Make sure at least 1 update happened
-    //     if (self.framerate.shouldDraw()) {
-    //         // Don't render if window is minised
-    //         if (self.engine.ctx.window.getWidth() == 0 or self.engine.ctx.window.getHeight() == 0) {
-    //             return;
-    //         }
-    //         // self.engine.scene_manager.render(&self.ecs_manager, self.engine);
-    //
-    //         self.world.app.runPar(World.Schedule.pre_render);
-    //         self.world.app.flushCommands();
-    //
-    //         self.world.app.run(World.Schedule.render);
-    //         self.world.app.flushCommands();
-    //
-    //         self.world.app.runPar(World.Schedule.cleanup);
-    //         self.world.app.flushCommands();
-    //     }
-    // } else {
-    //     // self.ecs_manager.progress();
-    //     self.world.app.runPar(World.Schedule.pre_update);
-    //     self.world.app.flushCommands();
-    //
-    //     self.world.app.runPar(World.Schedule.update);
-    //     self.world.app.flushCommands();
-    //
-    //     self.world.app.runPar(World.Schedule.post_update);
-    //     self.world.app.flushCommands();
-    //
-    //     // Don't render if window is minised
-    //     if (self.engine.ctx.window.getWidth() == 0 or self.engine.ctx.window.getHeight() == 0) {
-    //         return;
-    //     }
-    //
-    //     self.world.app.runPar(World.Schedule.pre_render);
-    //     self.world.app.flushCommands();
-    //
-    //     self.world.app.run(World.Schedule.render);
-    //     self.world.app.flushCommands();
-    //
-    //     self.world.app.runPar(World.Schedule.cleanup);
-    //     self.world.app.flushCommands();
-    //     // self.engine.scene_manager.render(&self.ecs_manager, self.engine);
-    // }
-    //
-    // self.world.app.update(); // reset frame arena, progress world ticks.
 }
 
 pub fn onEvent(self: *RenderLayer, ev: Event) bool {

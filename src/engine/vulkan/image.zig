@@ -16,7 +16,10 @@ const Image = @This();
 
 pub const ImageFormat = enum {
     jpg,
+    jpeg,
     png,
+    // webp,
+
     pub fn fromExtension(extension: []const u8) ?ImageFormat {
         // var ext = std.fs.path.extension(extension);
         var ext = extension;
@@ -25,6 +28,10 @@ pub const ImageFormat = enum {
         }
 
         return std.meta.stringToEnum(ImageFormat, ext);
+    }
+
+    pub fn fromStem(stem: []const u8) ?ImageFormat {
+        return std.meta.stringToEnum(ImageFormat, stem);
     }
 };
 
@@ -104,6 +111,7 @@ pub fn createFromSurface(
     engine: *Engine,
     surface: sdl.surface.Surface,
     usage: vk.ImageUsageFlags,
+    override_format: ?vk.Format,
 ) !Image {
     var _usage = usage;
     _usage.transfer_src_bit = true;
@@ -113,7 +121,7 @@ pub fn createFromSurface(
         engine,
         surface.getPixels().?,
         .{ .width = @intCast(surface.getWidth()), .height = @intCast(surface.getHeight()), .depth = 1 },
-        toVulkanFormat(surface.getFormat().?),
+        if (override_format) |fmt| fmt else toVulkanFormat(surface.getFormat().?),
         _usage,
         true,
     );
@@ -126,7 +134,7 @@ pub fn createFromPath(
     usage: vk.ImageUsageFlags,
 ) !Image {
     const surface = try loadImageAsset(path, pixel_format);
-    return try Image.createFromSurface(engine, surface, usage);
+    return try Image.createFromSurface(engine, surface, usage, null);
 }
 
 pub fn createFromColor(
@@ -182,17 +190,36 @@ pub fn createFromBytes(
 pub fn createFromBytesWithSDL(
     engine: *Engine,
     data: []const u8,
+    mime: ?[]const u8,
     usage: vk.ImageUsageFlags,
+    is_alpha_matter: bool,
 ) !Image {
     const stream = try sdl.io_stream.Stream.initFromConstMem(data);
-    const surface = sdl.image.loadIo(stream, true) catch |err| {
-        log.err("{}, {?s}", .{ err, sdl.errors.get() });
-        @panic("Image.createFromBytes");
+
+    const stem = std.fs.path.stem(mime orelse "");
+    const format = ImageFormat.fromStem(stem);
+    if (format == null) {
+        log.err("Can't load image. Extension {s} not supported", .{stem});
+        return error.ImageExtNotSupported;
+    }
+
+    const surface = switch (format.?) {
+        .jpg, .jpeg => try sdl.image.loadJpgIo(stream),
+        .png => try sdl.image.loadPngIo(stream),
+        // .webp => try sdl.image.loadWebpIo(stream),
     };
+    defer surface.deinit();
+
+    // const surface = sdl.image.loadIo(stream, true) catch |err| {
+    //     log.err("{}, {?s}", .{ err, sdl.errors.get() });
+    //     @panic("Image.createFromBytes");
+    // };
     defer surface.deinit();
     const surface_rgba = try surface.convertFormat(.array_rgba_32);
     defer surface_rgba.deinit();
-    return Image.createFromSurface(engine, surface_rgba, usage);
+
+    const vk_format: ?vk.Format = if (is_alpha_matter) .r8g8b8a8_srgb else null;
+    return Image.createFromSurface(engine, surface_rgba, usage, vk_format);
 }
 
 pub fn destroy(self: *Image, ctx: *const GraphicsContext) void {
@@ -219,8 +246,9 @@ pub fn loadImageAsset(image_path: []const u8, pixel_format: sdl.pixels.Format) !
     const stream = try sdl.io_stream.Stream.initFromFile(slice, .read_text);
 
     const surface = switch (format.?) {
-        .jpg => try sdl.image.loadJpgIo(stream),
+        .jpg, .jpeg => try sdl.image.loadJpgIo(stream),
         .png => try sdl.image.loadPngIo(stream),
+        // .webp => try sdl.image.loadWebpIo(stream),
     };
     defer surface.deinit();
 

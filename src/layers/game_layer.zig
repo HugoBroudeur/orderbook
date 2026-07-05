@@ -68,9 +68,6 @@ pub fn getLabel(self: *RuntimeLayer) []const u8 {
 }
 
 pub fn onAttach(self: *RuntimeLayer) !void {
-    self.world.app.runPar(World.Schedule.init);
-    self.world.app.flushCommands();
-
     self.db_manager = DbManager.init(self.allocator, self.config) catch |err| {
         log.err("Can't initiate DbManager: {}", .{err});
         return err;

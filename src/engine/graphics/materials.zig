@@ -36,15 +36,20 @@ pub const MetallicRoughness = struct {
     pub const MaterialConstants = struct {
         color_factors: [4]f32,
         metal_rough_factors: [4]f32,
+        emissive_factor: [4]f32,
+        transmission_factor: f32,
         color_tex_id: u32,
         metal_rough_tex_id: u32,
-        pad_1: u32 = 0,
-        pad_2: u32 = 0,
+        normal_tex_id: u32,
+        occlusion_tex_id: u32,
+        emissive_tex_id: u32,
+        transmission_tex_id: u32,
+        _padding1: u32 = 0,
         // Padding to 256 bytes (minUniformBufferOffsetAlignment on all target GPUs).
-        extra: [13][4]f32 = [_][4]f32{.{ 0, 0, 0, 0 }} ** 13,
+        extra: [11][4]f32 = [_][4]f32{.{ 0, 0, 0, 0 }} ** 11,
 
         comptime {
-            if (@offsetOf(MaterialConstants, "color_tex_id") != 32) @compileError("color_tex_id must be at offset 32 (std140 layout)");
+            if (@offsetOf(MaterialConstants, "color_tex_id") != 52) @compileError("color_tex_id must be at offset 52 (std140 layout)");
             if (@sizeOf(MaterialConstants) != 256) @compileError("MaterialConstants must be 256 bytes");
         }
     };
@@ -58,6 +63,14 @@ pub const MetallicRoughness = struct {
         color_sampler: Sampler,
         metal_rough_image: Image,
         metal_rough_sampler: Sampler,
+        normal_image: Image,
+        normal_sampler: Sampler,
+        emissive_image: Image,
+        emissive_sampler: Sampler,
+        occlusion_image: Image,
+        occlusion_sampler: Sampler,
+        transmission_image: Image,
+        transmission_sampler: Sampler,
         data_buffer: Buffer,
         data_buffer_offset: vk.DeviceSize = 0,
     };
@@ -131,6 +144,8 @@ pub const MetallicRoughness = struct {
 
         // Create the transparent variant
         pipeline_builder.enableBlendingAdditive();
+        // pipeline_builder.enableBlendingAlphablend();
+        // pipeline_builder.enableBlendingPremultipliedAlpha();
         pipeline_builder.enableDepthTest(.false, .less_or_equal);
 
         self.transparent_pipeline.pipeline = try pipeline_builder.buildPipeline(engine.ctx);

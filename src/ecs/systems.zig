@@ -1,9 +1,8 @@
 const std = @import("std");
+const log = std.log.scoped(.ecs_systems);
 const zm = @import("zmath");
 const sdl = @import("sdl3");
 const zgui = @import("zgui");
-
-const Commands = @import("../engine/command.zig");
 
 const World = @import("world.zig");
 const Components = World.Components;
@@ -13,66 +12,88 @@ const Gamestate = World.Gamestate;
 const Query = World.Ecs.Query;
 const QueryF = World.Ecs.QueryF;
 const With = World.Ecs.Filter.With;
+const ResMut = World.Ecs.ResMut;
+const Res = World.Ecs.Res;
+const Commands = World.Ecs.Commands;
+const EventReader = World.Ecs.EventReader;
+const EventWriter = World.Ecs.EventWriter;
 
 const Uuid = @import("uuid");
 
 pub const Plugins = struct {
     pub const Startup = struct {
         pub fn plugin(world: *World.Ecs.App) !void {
+            // Create resources
             try world.addResource(Components.Timers{});
             try world.addResource(Components.Stats.init());
-            { // Input states
-                try world.addResource(Components.WindowState{});
-                try world.addResource(Components.InputState{});
-                // try world.addResource(Components.CameraInput{});
-            }
+            try world.addResource(Components.WindowState{});
+            try world.addResource(Components.InputState{});
             try world.addResource(Components.CameraSpeed{});
             try world.addResource(Components.CameraSensitivity{});
             try world.addResource(Components.Lights{});
             try world.addResource(Components.RenderCamera{ .kind = .perspective });
+            try world.addResource(Components.DrawContextQueue.init(world.memtator.parent));
             world.flushCommands();
 
-            try world.addSystemEx(Schedule.init, &dummy, World.Ecs.OnEnter(Gamestate.boot));
-            try world.addSystemEx(Schedule.init, &spawnCamera, World.Ecs.OnEnter(Gamestate.boot));
+            // Load plugins
+            try world.addPlugin(World.Ecs.StatePlugin(World.Gamestate.boot, World.Schedule.cleanup));
+            try world.addPlugin(World.Ecs.EventPlugin(Components.PendingSceneEvent, Schedule.post_update));
+            try world.addPlugin(World.Ecs.EventPlugin(Components.LoadedSceneEvent, Schedule.cleanup));
+            try world.addPlugin(World.Ecs.EventPlugin(Components.AssetLoaded, Schedule.cleanup));
 
+            // Pre update systems
             try world.addSystem(Schedule.pre_update, World.Ecs.Chain(.{
-                // The order matter !!
                 &updateTimers,
                 &updateInputState,
                 &cameraInput,
+            }));
+            try world.addSystemEx(Schedule.pre_update, &debugGamestate, World.Ecs.OnTransition(Gamestate));
 
+            try world.addSystemEx(Schedule.pre_update, World.Ecs.Chain(.{
+                &instantiateScene,
+                &finalizeSceneLoad,
+            }), World.Ecs.InState(Gamestate.loading));
+
+            try world.addSystemEx(Schedule.pre_update, &spawnCamera, World.Ecs.OnEnter(Gamestate.main));
+
+            // Update systems
+            try world.addSystem(Schedule.update, World.Ecs.Chain(.{
                 &transformVelocity,
                 &transformRotated,
             }));
 
-            try world.addSystem(Schedule.pre_render, &updateRenderCamera);
-            // try world.addSystem(Schedule.render, &render);
+            // Pre Render Systems
+            try world.addSystem(Schedule.pre_render, World.Ecs.Chain(.{
+                &onAssetLoaded,
+            }));
 
-            try world.addPlugin(World.Ecs.StatePlugin(World.Gamestate.boot, World.Schedule.init));
-            try world.addPlugin(World.Ecs.StatePlugin(World.Gamestate.main, World.Schedule.pre_update));
-            // try world.addPlugin(World.Ecs.StatePlugin(World.Gamestate.menu, World.Schedule.pre_update));
-            try world.addPlugin(World.Ecs.StatePlugin(World.Gamestate.loading, World.Schedule.cleanup));
-            // try world.addPlugin(World.Ecs.EventPlugin(Components.CameraMovedEvent, Schedule.cleanup));
+            try world.addSystem(Schedule.pre_render, &updateRenderCamera);
+
+            // Render Systems
+            try world.addSystem(Schedule.render, &drawScene);
+
+            // Shutdown Systems
+            try world.addSystemEx(Schedule.cleanup, &shutdown, World.Ecs.OnEnter(Gamestate.shutdown));
         }
     };
 };
 
-/// DEBUG SYSTEM
-fn dummy(
-    cmd: World.Ecs.Commands,
+/// DEBUG: logs every Gamestate change exactly once.
+/// Self-deduplicating because knoedel's OnTransition filter never updates its
+/// observer (unlike OnEnter/OnExit) and therefore fires every frame after the
+/// first transition — see state.zig OnTransition, missing
+/// `local.last_transition = s.last_transition`.
+var debug_last_transition: ?struct { from: Gamestate, to: Gamestate } = null;
+
+fn debugGamestate(
+    state: Res(World.Ecs.State(Gamestate)),
 ) !void {
-    _ = try cmd.spawn(.{
-        Components.ID{ .guid = 1 },
-        Components.Transform{ .translation = .{ .x = 1 } },
-    });
-    _ = try cmd.spawn(.{
-        Components.ID{ .guid = 2 },
-        Components.Transform{ .rotation = .{ 1, 2, 3, 4 } },
-    });
-    _ = try cmd.spawn(.{
-        Components.ID{ .guid = 3 },
-        Components.Transform{ .scale = .{ .x = 1 } },
-    });
+    const t = state.inner.last_transition;
+    if (debug_last_transition) |last| {
+        if (last.from == t.from and last.to == t.to) return;
+    }
+    debug_last_transition = .{ .from = t.from, .to = t.to };
+    log.debug("[Gamestate] {s} -> {s}", .{ @tagName(t.from), @tagName(t.to) });
 }
 
 fn updateTimers(
@@ -111,9 +132,13 @@ fn updateInputState(
 }
 
 fn spawnCamera(
+    existing: QueryF(struct { c: *const Components.Camera }, With(Components.CameraActive)),
     alloc: World.Ecs.Alloc,
-    cmd: World.Ecs.Commands,
+    cmd: Commands,
 ) !void {
+    var it = existing.iter();
+    if (it.next() != null) return; // scene brought its own camera
+
     _ = try cmd.spawn(.{
         Components.ID{ .guid = Uuid.v4.new(alloc.io) },
         Components.Camera{
@@ -122,11 +147,11 @@ fn spawnCamera(
             .far = 10000,
             .fov = 70,
         },
-        Components.CameraActive{},
-        // Transform is authoritative: camera world pos derives from it at render prep.
+        Components.CameraActive{ .is_active = true },
         Components.Transform{ .translation = .{ .z = 5 } },
         Components.Rotated{},
         Components.Velocity{},
+        World.Ecs.StateScoped(World.Gamestate){ .state = .main },
     });
 }
 
@@ -258,4 +283,99 @@ fn updateRenderCamera(
 
         render_camera.inner.* = camera.*;
     }
+}
+
+fn drawScene(
+    query: Query(struct {
+        m: *Components.GltfMesh,
+        t: *const Components.Transform,
+    }),
+    draw_context: ResMut(Components.DrawContextQueue),
+    stats: ResMut(Components.Stats),
+) !void {
+    var it = query.iter();
+    stats.inner.startClock(.scene_build);
+
+    // Clear queues
+    draw_context.inner.reset();
+
+    while (it.next()) |entry| {
+        var top_matrix = entry.t.toMatrix();
+        try entry.m.ptr.draw(&top_matrix, draw_context.inner);
+    }
+
+    stats.inner.tickClock(.scene_build);
+}
+
+fn instantiateScene(
+    cmd: Commands,
+    reader: EventReader(Components.PendingSceneEvent),
+    writer: EventWriter(Components.LoadedSceneEvent),
+    lights: ResMut(Components.Lights),
+    game_state: ResMut(World.Ecs.State(Gamestate)),
+) !void {
+    for (reader.events) |ev| {
+        const data = ev.manager.getCurrentSceneData() orelse {
+            log.err("PendingSceneEvent for unprepared scene {}", .{ev.scene_guid});
+            continue;
+        };
+
+        if (data.lights) |l| lights.inner.* = l;
+
+        for (data.entities) |e| {
+            const entity = try cmd.spawn(.{Components.ID{ .guid = e.entity_guid }});
+
+            if (e.entity_tag) |tag| {
+                try cmd.insert(entity, .{tag});
+            }
+            if (e.transform) |transform| {
+                try cmd.insert(entity, .{transform});
+            }
+            if (e.camera) |camera| {
+                try cmd.insert(entity, .{camera});
+            }
+            if (e.camera_active) |camera_active| {
+                try cmd.insert(entity, .{ camera_active, Components.Rotated{}, Components.Velocity{} });
+            }
+        }
+
+        try writer.send(.{ .scene_guid = ev.scene_guid });
+
+        game_state.inner.set(.main);
+    }
+}
+
+fn finalizeSceneLoad(
+    reader: World.Ecs.EventReader(Components.LoadedSceneEvent),
+) !void {
+    for (reader.events) |event| {
+        log.info("Event scene loaded in ECS: {}", .{event.scene_guid});
+    }
+}
+
+fn onAssetLoaded(
+    alloc: World.Ecs.Alloc,
+    cmd: World.Ecs.Commands,
+    reader: World.Ecs.EventReader(Components.AssetLoaded),
+) !void {
+    for (reader.events) |event| {
+        _ = try cmd.spawn(.{
+            Components.ID{ .guid = Uuid.v4.new(alloc.io) },
+            Components.GltfMesh{ .ptr = event.ptr },
+            Components.Transform{},
+        });
+
+        log.info("Add GLTF Mesh in ECS: {s}", .{event.name});
+    }
+}
+
+/// This system free GPU/CPU memory when the app shutdown, the library does not seem to do that
+/// So it needs to be manually done here
+fn shutdown(
+    alloc: World.Ecs.Alloc,
+    draw_context: ResMut(Components.DrawContextQueue),
+) !void {
+    draw_context.inner.deinit(alloc.gpa);
+
+    log.info("Shutdown ECS", .{});
 }

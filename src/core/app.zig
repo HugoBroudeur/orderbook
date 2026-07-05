@@ -51,7 +51,7 @@ render_layer: RenderLayer = undefined,
 game_layer: GameLayer = undefined,
 editor_layer: EditorLayer = undefined,
 project_manager: ProjectManager = undefined,
-scene_manager: SceneManager = .{},
+scene_manager: SceneManager = undefined,
 asset_manager: AssetManager = undefined,
 world: World = undefined,
 
@@ -70,24 +70,15 @@ pub fn init(self: *App, config: Config) !void {
     self.asset_manager = .init(self.allocator, self.io);
     self.project_manager = .init(self.allocator, self.io, config, &self.scene_manager, &self.asset_manager);
 
-    // Open before layers attach: EditorLayer.onAttach derives its zgui.ini
-    // path from project_folder, which is only set by open().
-    try self.project_manager.open("price_is_power");
+    try self.project_manager.open(config.default_project_name);
 
-    // Update order must be game -> editor -> render: the editor opens the
-    // ImGui frame (newFrame) that the RenderLayer's engine closes
-    // (ImGui::Render/EndFrame). The RenderLayer struct is initialized first so
-    // &render_layer.engine is stable, but it is PUSHED last; game and editor
-    // must not touch the engine during onAttach (it only exists after
-    // render_layer.onAttach runs).
     self.render_layer = RenderLayer.init(self.allocator, self.io, &self.graphics_context, &self.framerate, &self.world, &self.project_manager);
-
     self.game_layer = GameLayer.init(self.allocator, self.io, config, &self.render_layer.engine, &self.framerate, &self.world);
+    self.editor_layer = EditorLayer.init(self.allocator, self.io, config, &self.project_manager, &self.world, &self.render_layer.engine);
+
+    // Update order must be game -> editor -> render
     try self.pushLayer(self.game_layer.interface());
-
-    self.editor_layer = EditorLayer.init(self.allocator, self.io, config, &self.project_manager, &self.world);
     try self.pushLayer(self.editor_layer.interface());
-
     try self.pushLayer(self.render_layer.interface());
 }
 
@@ -179,8 +170,4 @@ pub fn pushOverlay(self: *App, layer: Layer) !void {
         log.err("Error while attaching layer {s}. {}", .{ layer.getLabel(), err });
         return err;
     };
-}
-
-test "app" {
-    try std.testing.expectEqual(true, true);
 }

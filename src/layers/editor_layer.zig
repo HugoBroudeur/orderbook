@@ -11,6 +11,7 @@ const Engine = @import("../engine/vulkan/engine.zig");
 const GraphicsContext = @import("../core/graphics_context.zig");
 const SceneEditor = @import("../editor/scene_editor.zig");
 const EcsExplorer = @import("../editor/ecs_explorer.zig");
+const AssetExplorer = @import("../editor/asset_explorer.zig");
 const World = @import("../ecs/world.zig");
 
 const EditorLayer = @This();
@@ -20,24 +21,28 @@ io: std.Io,
 label: []const u8 = "Editor Layer",
 config: Config,
 world: *World,
+engine: *Engine,
 project_manager: *ProjectManager,
 
 scene_editor: SceneEditor = undefined,
 ecs_explorer: EcsExplorer = undefined,
+asset_explorer: AssetExplorer = undefined,
 
-pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config, project_manager: *ProjectManager, world: *World) EditorLayer {
+pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config, project_manager: *ProjectManager, world: *World, engine: *Engine) EditorLayer {
     return .{
         .allocator = allocator,
         .config = config,
         .io = io,
         .project_manager = project_manager,
         .world = world,
+        .engine = engine,
     };
 }
 
 pub fn deinit(self: *EditorLayer) void {
     self.scene_editor.deinit();
     self.ecs_explorer.deinit();
+    self.asset_explorer.deinit();
 }
 
 pub fn interface(self: *EditorLayer) Layer {
@@ -56,6 +61,7 @@ pub fn onAttach(self: *EditorLayer) !void {
 
     self.scene_editor = SceneEditor.init(self.allocator, self.project_manager, self.world.app);
     self.ecs_explorer = EcsExplorer.init(self.world.app);
+    self.asset_explorer = AssetExplorer.init(self.allocator, self.io, self.project_manager, self.world.app, self.engine);
 
     const setting_path = try std.mem.concatWithSentinel(self.allocator, u8, &.{
         self.project_manager.project_folder,
@@ -89,6 +95,7 @@ pub fn onUpdate(self: *EditorLayer) void {
 
         self.scene_editor.display();
         self.ecs_explorer.display();
+        self.asset_explorer.display();
 
         zgui.endFrame();
     }

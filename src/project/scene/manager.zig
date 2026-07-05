@@ -1,6 +1,6 @@
 const std = @import("std");
 const log = std.log.scoped(.scene_manager);
-const serde = @import("serde");
+const Serde = @import("serde");
 const Uuid = @import("uuid");
 const Scene = @import("scene.zig");
 const World = @import("../../ecs/world.zig");
@@ -12,13 +12,15 @@ const SceneManager = @This();
 allocator: std.mem.Allocator = undefined,
 io: std.Io = undefined,
 
-scenes: std.hash_map.AutoHashMap(Uuid.Uuid, Scene) = undefined,
-runtime_scenes: std.hash_map.AutoHashMap(Uuid.Uuid, Scene) = undefined,
-active_scenes: *std.hash_map.AutoHashMap(Uuid.Uuid, Scene) = undefined,
+scenes: std.hash_map.AutoHashMap(Uuid.Uuid, Scene),
+runtime_scenes: std.hash_map.AutoHashMap(Uuid.Uuid, Scene),
+active_scenes: *std.hash_map.AutoHashMap(Uuid.Uuid, Scene),
 
-loaded_scene_guid: Uuid.Uuid = 0,
+current_scene_guid: Uuid.Uuid = 0,
 
-world: *World = undefined,
+world: *World,
+
+buffer_parsed_scenes: std.hash_map.AutoHashMap(Uuid.Uuid, SceneData),
 
 pub fn init(self: *SceneManager, allocator: std.mem.Allocator, io: std.Io, world: *World) void {
     self.* = .{
@@ -26,7 +28,9 @@ pub fn init(self: *SceneManager, allocator: std.mem.Allocator, io: std.Io, world
         .io = io,
         .scenes = .init(allocator),
         .runtime_scenes = .init(allocator),
+        .active_scenes = undefined,
         .world = world,
+        .buffer_parsed_scenes = .init(allocator),
     };
 
     self.active_scenes = &self.scenes;
@@ -35,6 +39,7 @@ pub fn init(self: *SceneManager, allocator: std.mem.Allocator, io: std.Io, world
 pub fn deinit(self: *SceneManager) void {
     self.scenes.deinit();
     self.runtime_scenes.deinit();
+    self.buffer_parsed_scenes.deinit();
 }
 
 pub fn createScene(self: *SceneManager, name: []const u8) !Uuid.Uuid {
@@ -45,21 +50,32 @@ pub fn createScene(self: *SceneManager, name: []const u8) !Uuid.Uuid {
     };
 
     _ = try self.active_scenes.fetchPut(scene.guid, scene);
-    if (self.loaded_scene_guid == 0) self.loaded_scene_guid = scene.guid;
+    if (self.current_scene_guid == 0) _ = self.setLoadedScene(scene.guid);
     log.info("Created new scene [{s} | GUID:{}]", .{ scene.name, scene.guid });
 
     return scene.guid;
 }
 
 pub fn setLoadedScene(self: *SceneManager, guid: Uuid.Uuid) bool {
-    const scene = self.active_scenes.get(guid);
-    if (scene == null) {
+    const scene = self.active_scenes.get(guid) orelse {
         log.err("Cannot find scene [GUID:{}]", .{guid});
         return false;
-    }
+    };
+    self.current_scene_guid = guid;
 
-    self.loaded_scene_guid = guid;
-    log.info("Set current scene [{s} | GUID:{}]", .{ scene.?.name, guid });
+    const state = self.world.app.getResource(World.Ecs.State(World.Gamestate)) catch |err| {
+        log.err("Set loaded scene [GUID:{}]. Get ECS Resource World.Gamestate error: {}", .{ guid, err });
+        return false;
+    };
+    state.set(.loading);
+
+    log.info("Set current scene [{s} | GUID:{}]", .{ scene.name, guid });
+
+    self.emitEcsEvent(World.Components.PendingSceneEvent, (.{ .scene_guid = guid, .manager = self })) catch |err| {
+        log.err("Set loaded scene [GUID:{}]. Send ECS Event World.Components.PendingSceneEvent error: {}", .{ guid, err });
+        return false;
+    };
+
     return true;
 }
 
@@ -102,8 +118,28 @@ pub fn saveScenes(self: *SceneManager, project_path: []const u8) !void {
     }
 }
 pub fn loadScenes(self: *SceneManager, project_path: []const u8) !void {
-    _ = self;
-    _ = project_path;
+    const dir = try std.Io.Dir.cwd().openDir(self.io, project_path, .{ .iterate = true });
+    var it = dir.iterate();
+    while (try it.next(self.io)) |entry| {
+        if (entry.kind != .file) continue;
+        if (extractGuidFromSceneName(entry.name) == null) continue;
+
+        const content = try dir.readFileAlloc(self.io, entry.name, self.allocator, .unlimited);
+        defer self.allocator.free(content);
+
+        // TODO: put it on the heap and copy it in the buffer, might stack overload otherwise if scene_data > 8Mb
+        const scene_data = try SceneSerializer.deserialize(self.allocator, content);
+        try self.buffer_parsed_scenes.put(scene_data.scene_guid, scene_data);
+
+        const scene: Scene = .{
+            .guid = scene_data.scene_guid,
+            .name = scene_data.scene_name,
+            .reg = self.world,
+        };
+        _ = try self.scenes.fetchPut(scene.guid, scene);
+        if (self.current_scene_guid == 0) _ = self.setLoadedScene(scene.guid);
+        log.info("Loaded scene [{s} | GUID:{}]", .{ scene.name, scene.guid });
+    }
 }
 
 fn getSceneName(self: *SceneManager, guid: Uuid.Uuid) []const u8 {
@@ -111,7 +147,11 @@ fn getSceneName(self: *SceneManager, guid: Uuid.Uuid) []const u8 {
 }
 
 pub fn getCurrentScene(self: *SceneManager) ?*Scene {
-    return self.active_scenes.getPtr(self.loaded_scene_guid);
+    return self.active_scenes.getPtr(self.current_scene_guid);
+}
+
+pub fn getCurrentSceneData(self: *SceneManager) ?*SceneData {
+    return self.buffer_parsed_scenes.getPtr(self.current_scene_guid);
 }
 
 fn extractGuidFromSceneName(scene_name: []const u8) ?Uuid.Uuid {
@@ -121,16 +161,33 @@ fn extractGuidFromSceneName(scene_name: []const u8) ?Uuid.Uuid {
 }
 
 const EntityData = struct {
-    entity_guid: ?Uuid.Uuid = null,
+    entity_guid: Uuid.Uuid,
     entity_tag: ?World.Components.Tag = null,
     transform: ?World.Components.Transform = null,
     camera: ?World.Components.Camera = null,
+    camera_active: ?World.Components.CameraActive = null,
+
+    pub const serde = .{
+        .skip = .{
+            .transform = Serde.SkipMode.null,
+            .entity_tag = Serde.SkipMode.null,
+            .entity_guid = Serde.SkipMode.null,
+            .camera = Serde.SkipMode.null,
+            .camera_active = Serde.SkipMode.null,
+        },
+    };
 };
 
-const SceneData = struct {
-    scene_guid: Uuid.Uuid,
-    scene_name: []const u8,
-    entities: []EntityData,
+fn emitEcsEvent(self: *SceneManager, comptime Event: type, value: Event) !void {
+    const writer = try World.Ecs.EventWriter(Event).fromWorld(self.world.app);
+    try writer.send(value);
+}
+
+pub const SceneData = struct {
+    scene_guid: Uuid.Uuid = 0,
+    scene_name: []const u8 = "Untitled Scene",
+    lights: ?World.Components.Lights = null,
+    entities: []EntityData = &.{},
 };
 const SceneSerializer = struct {
     pub fn serialize(allocator: std.mem.Allocator, world: *World, scene: Scene) ![]const u8 {
@@ -139,35 +196,50 @@ const SceneSerializer = struct {
         scene_data.scene_guid = scene.guid;
         scene_data.scene_name = scene.name;
 
+        { // Global lights
+            const lights = try world.app.getResource(World.Components.Lights);
+            scene_data.lights = lights.*;
+        }
+
         var entities: std.ArrayList(EntityData) = .empty;
         defer entities.deinit(allocator);
 
-        const query_all = try World.Ecs.Query(struct { entity: World.Ecs.Entity }).fromWorld(world.app);
+        { // Entities
 
-        var it = query_all.iter();
-        while (it.next()) |entry| {
-            var entity_data: EntityData = .{};
-            if (world.app.components.getSingle(entry.entity, World.Components.ID)) |guid| {
-                entity_data.entity_guid = guid.guid;
-            }
-            if (world.app.components.getSingle(entry.entity, World.Components.Tag)) |tag| {
-                entity_data.entity_tag = tag.*;
-            }
-            if (world.app.components.getSingle(entry.entity, World.Components.Transform)) |transform| {
-                entity_data.transform = transform.*;
+            const query_all = try World.Ecs.Query(struct { entity: World.Ecs.Entity, guid: *const World.Components.ID }).fromWorld(world.app);
+
+            var it = query_all.iter();
+            while (it.next()) |entry| {
+                var entity_data: EntityData = .{
+                    .entity_guid = entry.guid.guid,
+                };
+
+                if (world.app.components.getSingle(entry.entity, World.Components.Tag)) |tag| {
+                    entity_data.entity_tag = tag.*;
+                }
+                if (world.app.components.getSingle(entry.entity, World.Components.Transform)) |transform| {
+                    entity_data.transform = transform.*;
+                }
+                if (world.app.components.getSingle(entry.entity, World.Components.Camera)) |camera| {
+                    entity_data.camera = camera.*;
+                }
+                if (world.app.components.getSingle(entry.entity, World.Components.CameraActive)) |camera_active| {
+                    entity_data.camera_active = camera_active.*;
+                }
+
+                try entities.append(allocator, entity_data);
             }
 
-            try entities.append(allocator, entity_data);
+            scene_data.entities = entities.items;
         }
 
-        scene_data.entities = entities.items;
-
-        return try serde.zon.toSlice(allocator, scene_data);
+        return try Serde.zon.toSlice(allocator, scene_data);
     }
 
-    pub fn deserialize(allocator: std.mem.Allocator, data: []const u8) []const u8 {
-        _ = allocator; // autofix
-        _ = data; // autofix
-        // return try serde.zon.toSlice(allocator, scene);
+    pub fn deserialize(allocator: std.mem.Allocator, data: []const u8) !SceneData {
+        return Serde.zon.fromSlice(SceneData, allocator, data) catch |err| {
+            log.err("Scene parse failed: {}", .{err});
+            return err;
+        };
     }
 };

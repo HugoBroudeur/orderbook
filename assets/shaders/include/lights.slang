@@ -1,8 +1,8 @@
 import scene;
 
 public struct Lighting {
-  public float3 Diffuse;
-  public float3 Specular;
+  public float3 Diffuse = float3(0, 0, 0);
+  public float3 Specular = float3(0, 0, 0);
 };
 
 public interface ILight {
@@ -37,7 +37,8 @@ public struct PointLight : ILight {
       float3 H = normalize(lightDir + viewDir);
       float NdotH = dot(normal, H);
       float specularIntensity = pow(saturate(NdotH), specularHardness);
-      OUT.Specular = specularIntensity * specularColor * specularPower / dist2;
+      OUT.Specular = sign(saturate(NdotL)) * specularIntensity * specularColor *
+                     specularPower / dist2;
     }
     return OUT;
   }
@@ -45,13 +46,14 @@ public struct PointLight : ILight {
   bool isCullable(float3 worldPos) { return diffusePower <= 0; }
 };
 
-public DirectionalLight makeSun(float3 direction, float4 color) {
+public DirectionalLight makeSun(float3 direction, float4 color,
+                                float4 specularColor) {
   DirectionalLight sun;
   sun.dir = direction;
   sun.diffuseColor = color.xyz;
   sun.diffusePower = color.w;
-  sun.specularColor = float3(1.0f, 1.0f, 1.0f);
-  sun.specularPower = 1.0f;
+  sun.specularColor = specularColor.xyz;
+  sun.specularPower = specularColor.w;
 
   return sun;
 }
@@ -77,8 +79,10 @@ public struct DirectionalLight : ILight {
 
     float3 H = normalize(lightDir + viewDir);
     float NdotH = dot(normal, H);
-    OUT.Specular =
-        pow(saturate(NdotH), specularHardness) * specularColor * specularPower;
+    OUT.Specular = sign(saturate(NdotL)) *
+                   pow(saturate(NdotH), specularHardness) * specularColor *
+
+                   specularPower;
     return OUT;
   }
 };

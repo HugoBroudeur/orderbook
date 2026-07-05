@@ -6,6 +6,8 @@ public struct Vertex {
   public float3 normal;
   public float1 uv_y;
   public float4 color : COLOR1;
+  public float3 tangent;
+  public float1 _unused;
 };
 
 public struct Fragment {
@@ -14,6 +16,9 @@ public struct Fragment {
   public float3 normal;
   public float3 color : COLOR1;
   public float2 uv;
+  public float3 tangent;
+  public float3x3 TBNMatrix;
+  public float3 cameraPos;
 }
 
 public struct SceneData {
@@ -23,14 +28,21 @@ public struct SceneData {
   public float4 ambientColor;
   public float4 sunlightDirection;
   public float4 sunlightColor;
+  public float4 sunlightSpecularColor;
   public float time;
 };
 
-public struct MetalData {
+public struct MaterialData {
   public float4 colorFactors;
   public float4 metalRoughFactors;
+  public float4 emissiveFactors;
+  public float transmissionFactor;
   public uint colorTexID;
   public uint metalRoughTexID;
+  public uint normalTexID;
+  public uint occlusionTexID;
+  public uint emissiveTexID;
+  public uint transmissionTexId;
   // 16 public float4 metal_rough_factors; public int metalRoughTexID;
 };
 
@@ -63,7 +75,7 @@ public struct BoundSceneParams : ISceneParams {
 };
 
 public struct MaterialParams {
-  public ConstantBuffer<MetalData> data;
+  public ConstantBuffer<MaterialData> data;
 };
 
 public struct SimpleSceneParams {

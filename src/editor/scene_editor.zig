@@ -41,31 +41,26 @@ pub fn display(self: *SceneEditor) void {
     zgui.setNextWindowSize(.{ .w = -1.0, .h = -1.0, .cond = .first_use_ever });
 
     if (zgui.begin("Scene Editor", .{})) {
-        const lights = self.world.getResource(World.Components.Lights) catch null;
-        if (zgui.collapsingHeader("Scene data", .{ .default_open = true, .draw_lines_full = true })) {
-            _ = zgui.colorPicker4("Ambiant Color", .{
-                .col = &lights.?.ambient_color,
-                .flags = .{ .alpha_bar = true, .picker_hue_wheel = true },
-            });
-            _ = zgui.colorPicker4("Sunlight Color", .{
-                .col = &lights.?.sunlight_color,
-                .flags = .{ .alpha_bar = true, .picker_hue_wheel = true },
-            });
-            const sun_direction = lights.?.sunlight_direction[0..3];
-            if (zgui.dragFloat3("Sunlight Direction", .{ .v = sun_direction, .speed = 0.01 })) {
-                if (null != lights) {
-                    lights.?.sunlight_direction[0] = sun_direction[0];
-                    lights.?.sunlight_direction[1] = sun_direction[1];
-                    lights.?.sunlight_direction[2] = sun_direction[2];
+        if (self.world.getResource(World.Components.Lights) catch null) |lights| {
+            if (zgui.collapsingHeader("Scene data", .{ .default_open = true, .draw_lines_full = true })) {
+                _ = zgui.colorPicker4("Ambiant Color", .{
+                    .col = &lights.ambient_color,
+                    .flags = .{ .alpha_bar = true, .picker_hue_wheel = true },
+                });
+                _ = zgui.colorPicker4("Sunlight Color", .{
+                    .col = &lights.sunlight_color,
+                    .flags = .{ .alpha_bar = true, .picker_hue_wheel = true },
+                });
+                _ = zgui.colorPicker4("Sunlight Specular Color", .{
+                    .col = &lights.sunlight_specular_color,
+                    .flags = .{ .alpha_bar = true, .picker_hue_wheel = true },
+                });
+                const sun_direction = lights.sunlight_direction[0..3];
+                if (zgui.dragFloat3("Sunlight Direction", .{ .v = sun_direction, .speed = 0.01 })) {
+                    lights.sunlight_direction[0] = sun_direction[0];
+                    lights.sunlight_direction[1] = sun_direction[1];
+                    lights.sunlight_direction[2] = sun_direction[2];
                 }
-            }
-
-            if (zgui.dragFloat("Sunlight Power", .{ .v = &lights.?.sunlight_direction[3], .speed = 0.01 })) {}
-
-            // zgui.colorPicker4(label: [:0]const u8, args: ColorPicker3)
-            // zgui.bulletText("Hold left click : use camera", .{self.scene_manager.scene_data.ambient_color});
-            if (zgui.button("Press me!", .{ .w = 200.0 })) {
-                std.debug.print("Button pressed\n", .{});
             }
         }
     }

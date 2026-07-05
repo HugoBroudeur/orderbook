@@ -22,8 +22,14 @@ pub const Vertex = extern struct {
     normal: [3]f32,
     uv_y: f32,
     col: [4]f32,
+    tangent: [3]f32,
+    _unused_pad: f32 = 0,
 };
 
+/// Matrices are zmath row-vector layout, memcpy'd raw. Slang reads constant
+/// buffers column-major (a free transpose): shaders must use mul(M, v), and
+/// the view translation appears at view[0..2].w — see include/math.slang
+/// calculateCameraPosition.
 pub const SceneData = extern struct {
     view: zm.Mat = zm.identity(),
     proj: zm.Mat = zm.identity(),
@@ -31,6 +37,7 @@ pub const SceneData = extern struct {
     ambient_color: [4]f32 = .{ 1, 1, 1, 0.2 },
     sunlight_direction: [4]f32 = .{ 0, 1, 0.5, 1 }, // w for sun power
     sunlight_color: [4]f32 = .{ 1, 1, 1, 1 },
+    sunlight_specular_color: [4]f32 = .{ 1, 1, 1, 1 },
     time: f32 = 0,
 };
 

@@ -148,7 +148,7 @@ frame_number: u64 = 0,
 // Graphics
 scene_manager: SceneManager = undefined,
 draw_queue: Command.DrawQueue = undefined,
-draw_context: DrawContext,
+draw_context: *DrawContext = undefined,
 loaded_nodes: std.StringHashMap(IRenderable),
 // material_default_data: materials.MaterialInstance = undefined,
 material_constants_buffer: Buffer = undefined,
@@ -175,7 +175,7 @@ pub fn init(
         .allocator = allocator,
         .batcher = try .init(allocator),
         .ctx = ctx,
-        .draw_context = try .init(allocator),
+        // .draw_context = try .init(allocator),
         .meshes = try .initCapacity(allocator, 0),
         .loaded_nodes = .init(allocator),
         .draw_extent = ctx.window.toExtend2D(),
@@ -224,7 +224,7 @@ pub fn deinit(self: *Engine) void {
     self.metal_rough_material.destroy(self);
     self.compute_effect.destroy(self);
     self.loaded_nodes.deinit();
-    self.draw_context.deinit();
+    // self.draw_context.deinit();
     self.texture_cache.deinit(self.allocator);
     self.scene_manager.deinit();
     self.draw_queue.deinit();
@@ -234,7 +234,7 @@ pub fn setup(self: *Engine) !void {
     self.swapchain = try Swapchain.init(self, self.allocator);
 
     self.samplers.set(.nearest, try .create(self.ctx, .{}));
-    self.samplers.set(.linear, try .create(self.ctx, .{ .min_filter = .linear, .mag_filter = .linear, .mipmap_mode = .linear }));
+    self.samplers.set(.linear, try .create(self.ctx, .{ .min_filter = .linear, .mag_filter = .linear, .mipmap_mode = .linear, .max_lod = 1000 }));
 
     self.draw_queue = try Command.DrawQueue.init(self.allocator, self);
     self.scene_manager = SceneManager.init(&self.draw_queue, self.io);
@@ -423,6 +423,7 @@ pub fn getCurrentFrame(self: *Engine) *Frame {
 }
 
 pub fn render(self: *Engine, scene: *Scene, asset_pool: *AssetPool) !void {
+    _ = asset_pool;
     const camera = try scene.reg.app.getResource(Components.RenderCamera);
     const lights = try scene.reg.app.getResource(Components.Lights);
     const scene_data: SceneData = .{
@@ -431,23 +432,26 @@ pub fn render(self: *Engine, scene: *Scene, asset_pool: *AssetPool) !void {
         .view_proj = camera.getViewProjMatrix(),
         .sunlight_color = lights.sunlight_color,
         .sunlight_direction = lights.sunlight_direction,
+        .sunlight_specular_color = lights.sunlight_specular_color,
         .ambient_color = lights.ambient_color,
     };
+
+    self.draw_context = try scene.reg.app.getResource(Components.DrawContextQueue);
 
     self.stats = try scene.reg.app.getResource(Components.Stats);
 
     self.getCurrentFrame().scene_data = scene_data;
 
     // TODO: (Dummy, needs to be in the ECS) Populate draw context from the scene graph each frame
-    {
-        self.stats.startClock(.scene_build);
-
-        var identity = zm.identity();
-
-        try asset_pool.loaded_gltf.getPtr("structure").?.draw(&identity, &self.draw_context);
-
-        self.stats.tickClock(.scene_build);
-    }
+    // {
+    //     self.stats.startClock(.scene_build);
+    //
+    // var identity = zm.identity();
+    //
+    // try asset_pool.loaded_gltf.getPtr("structure").?.draw(&identity, &self.draw_context);
+    //
+    //     self.stats.tickClock(.scene_build);
+    // }
 
     try self.draw();
 }
@@ -605,12 +609,6 @@ fn fillCommandBuffers(self: *Engine) !void {
         try self.ctx.device.endCommandBuffer(cmdbuf.*);
 
         self.stats.tickClock(.blit);
-    }
-
-    // Clear queues
-    {
-        self.draw_context.opaque_surfaces.clearRetainingCapacity();
-        self.draw_context.transparent_surfaces.clearRetainingCapacity();
     }
 }
 

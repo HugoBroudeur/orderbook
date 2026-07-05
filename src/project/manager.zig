@@ -115,10 +115,8 @@ pub fn open(self: *Manager, name: []const u8) !void {
         \\
     , .{ name, project_path, project_file.boot_scene_guid });
 
-    self.allocator.free(self.project_name);
     self.project_name = name;
     self.project_file = project_file;
-    self.allocator.free(self.project_folder);
     self.project_folder = project_path;
 
     try self.scene_manager.loadScenes(self.project_folder);
