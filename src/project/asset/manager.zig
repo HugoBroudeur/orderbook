@@ -47,11 +47,15 @@ pub const AssetPool = struct {
     // loaded_gltf: std.array_hash_map.String(LoadedGLTF),
     asset_metadata: std.hash_map.AutoHashMap(Uuid.Uuid, AssetMetaFile),
     queued_gltf: std.hash_map.AutoHashMap(Uuid.Uuid, []const u8),
-    loaded_gltf: std.array_hash_map.String(LoadedGLTF),
-    _meshes: std.ArrayList(Mesh),
-    _nodes: std.ArrayList(IRenderable),
-    _materials: std.ArrayList(Mesh.GLTFMaterial),
-    _images: std.ArrayList(Image),
+    /// Owns memory, it needs to free it
+    loaded_gltf: std.array_hash_map.String(*LoadedGLTF),
+    /// Owns memory, it needs to free it
+    _meshes: std.ArrayList(*Mesh),
+    _nodes: std.ArrayList(*IRenderable),
+    /// Owns memory, it needs to free it
+    _materials: std.ArrayList(*Mesh.GLTFMaterial),
+    /// Owns memory, it needs to free it
+    _images: std.ArrayList(*Image),
 
     _current_img_idx: usize = 0,
 
@@ -77,7 +81,7 @@ pub const AssetPool = struct {
         self.queued_gltf.deinit();
         self.asset_metadata.deinit();
 
-        for (self._meshes.items) |*mesh| {
+        for (self._meshes.items) |mesh| {
             mesh.destroy(engine.ctx);
         }
         self._meshes.deinit(allocator);
@@ -85,7 +89,7 @@ pub const AssetPool = struct {
         self._nodes.deinit(allocator);
         self._materials.deinit(allocator);
 
-        for (self._images.items) |*img| {
+        for (self._images.items) |img| {
             // Don't destroy the error_checker image because it is owned by the engine
             if (engine.images.get(.error_checker).vk_image == img.vk_image) {
                 continue;
@@ -252,7 +256,7 @@ pub fn getAssetByName(self: *AssetManager, filepath: []const u8) ?*LoadedGLTF {
 pub fn getAsset(self: *AssetManager, guid: Uuid.Uuid) ?*LoadedGLTF {
     if (self.pool.asset_metadata.get(guid)) |meta| {
         // loaded_gltf is keyed by stem (see loadGLTFAsset's `filename`), not the full source_path.
-        return self.pool.loaded_gltf.getPtr(meta.name);
+        return self.pool.loaded_gltf.get(meta.name);
     }
     return null;
 }
@@ -276,7 +280,8 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
     if (null == gltf.glb_binary) return error.GlbBinaryEmpty;
     const glb_binary = gltf.glb_binary.?;
 
-    var loaded_gltf: LoadedGLTF = try LoadedGLTF.init(self.allocator);
+    var loaded_gltf: *LoadedGLTF = try self.pool.arena.allocator().create(LoadedGLTF);
+    loaded_gltf.* = try LoadedGLTF.init(self.allocator);
     loaded_gltf.creator = engine;
 
     const initial_mesh_index = self.pool._meshes.items.len;
@@ -349,7 +354,9 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
             break :blk alt_name;
         };
 
-        const image = if (img.uri) |uri| blk: {
+        const image = try self.pool.arena.allocator().create(Image);
+
+        image.* = if (img.uri) |uri| blk: {
             if (Config.log.mesh) {
                 log.info("[DBG] image[{d}] uri={s}", .{ i, uri });
             }
@@ -371,18 +378,18 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
         if (Config.log.mesh) {
             log.info("[DBG] image[{d}] '{s}' → bindless slot {d}", .{ i, name, bindless_slots[i] });
         }
-        try loaded_gltf.images.put(self.allocator, name, &self.pool._images.items[self.pool._current_img_idx + i]);
+        try loaded_gltf.images.put(self.allocator, name, self.pool._images.items[self.pool._current_img_idx + i]);
     }
 
     loaded_gltf.material_data_buffer = try MetallicRoughness.createMaterialPushConstantsBuffer(engine, @intCast(gltf.data.materials.len));
 
     for (gltf.data.textures, 0..) |tex, i| {
         if (tex.source != null and tex.sampler != null) {
-            bindless_slots[i] = try engine.registerTexture(self.pool._images.items[self.pool._current_img_idx + tex.source.?], loaded_gltf.samplers.items[tex.sampler.?]);
+            bindless_slots[i] = try engine.registerTexture(self.pool._images.items[self.pool._current_img_idx + tex.source.?], &loaded_gltf.samplers.items[tex.sampler.?]);
         }
         if (tex.source != null and tex.sampler == null) {
             log.warn("GLTF is missing a sampler, using default engine linear sampler. Texture ID: {}", .{i});
-            bindless_slots[i] = try engine.registerTexture(self.pool._images.items[self.pool._current_img_idx + tex.source.?], engine.samplers.get(.linear));
+            bindless_slots[i] = try engine.registerTexture(self.pool._images.items[self.pool._current_img_idx + tex.source.?], &engine.samplers.get(.linear));
         }
     }
 
@@ -397,7 +404,7 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
 
                 break :blk alt_name;
             };
-            var new_mat: Mesh.GLTFMaterial = undefined;
+            var new_mat = try self.pool.arena.allocator().create(Mesh.GLTFMaterial);
 
             const pass_type: MaterialPass = if (mat.alpha_mode == .blend) .Transparent else .MainColor;
 
@@ -418,12 +425,12 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
                 .data_buffer_offset = i * @sizeOf(MetallicRoughness.MaterialConstants),
             };
 
-            const color_tex_id = self.parseTexture(gltf.data, mat.metallic_roughness.base_color_texture, &loaded_gltf, &material_resources, bindless_slots, "color_image", "color_sampler");
-            const metal_rough_tex_id = self.parseTexture(gltf.data, mat.metallic_roughness.metallic_roughness_texture, &loaded_gltf, &material_resources, bindless_slots, "metal_rough_image", "metal_rough_sampler");
-            const normal_tex_id = self.parseTexture(gltf.data, mat.normal_texture, &loaded_gltf, &material_resources, bindless_slots, "normal_image", "normal_sampler");
-            const occlusion_tex_id = self.parseTexture(gltf.data, mat.occlusion_texture, &loaded_gltf, &material_resources, bindless_slots, "occlusion_image", "occlusion_sampler");
-            const emissive_tex_id = self.parseTexture(gltf.data, mat.emissive_texture, &loaded_gltf, &material_resources, bindless_slots, "emissive_image", "emissive_sampler");
-            const transmission_tex_id = self.parseTexture(gltf.data, mat.transmission_texture, &loaded_gltf, &material_resources, bindless_slots, "transmission_image", "transmission_sampler");
+            const color_tex_id = self.parseTexture(gltf.data, mat.metallic_roughness.base_color_texture, loaded_gltf, &material_resources, bindless_slots, "color_image", "color_sampler");
+            const metal_rough_tex_id = self.parseTexture(gltf.data, mat.metallic_roughness.metallic_roughness_texture, loaded_gltf, &material_resources, bindless_slots, "metal_rough_image", "metal_rough_sampler");
+            const normal_tex_id = self.parseTexture(gltf.data, mat.normal_texture, loaded_gltf, &material_resources, bindless_slots, "normal_image", "normal_sampler");
+            const occlusion_tex_id = self.parseTexture(gltf.data, mat.occlusion_texture, loaded_gltf, &material_resources, bindless_slots, "occlusion_image", "occlusion_sampler");
+            const emissive_tex_id = self.parseTexture(gltf.data, mat.emissive_texture, loaded_gltf, &material_resources, bindless_slots, "emissive_image", "emissive_sampler");
+            const transmission_tex_id = self.parseTexture(gltf.data, mat.transmission_texture, loaded_gltf, &material_resources, bindless_slots, "transmission_image", "transmission_sampler");
 
             if (Config.log.mesh) {
                 log.info("[DBG] mat[{d}] '{s}' color={d} metalRough={d} normal={d} occlusion={d} emissive={d} transmission={d} transmissionFactor={d:.2} colorFactors={d:.2},{d:.2},{d:.2},{d:.2}", .{
@@ -451,8 +458,7 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
             new_mat.data = try engine.metal_rough_material.writeMaterial(engine, pass_type, material_resources, &loaded_gltf.descriptor_pool);
 
             self.pool._materials.appendAssumeCapacity(new_mat);
-            const new_mat_ptr = &self.pool._materials.items[self.pool._materials.items.len - 1];
-            try loaded_gltf.materials.put(self.allocator, name, new_mat_ptr);
+            try loaded_gltf.materials.put(self.allocator, name, new_mat);
         }
 
         try loaded_gltf.material_data_buffer.copyInto(engine.ctx, std.mem.sliceAsBytes(scene_material_constants), 0);
@@ -470,7 +476,9 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
 
             break :blk alt_name;
         };
-        var mesh_asset = try Mesh.init(self.allocator);
+
+        const mesh_asset = try self.pool.arena.allocator().create(Mesh);
+        mesh_asset.* = try Mesh.init(self.allocator);
         mesh_asset.name = name;
 
         indices.clearRetainingCapacity();
@@ -485,9 +493,9 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
             var new_surface: Mesh.GeoSurface = .{ .start_index = @intCast(indices.items.len), .count = @intCast(gltf.data.accessors[primitive_index].count) };
 
             if (primitive.material) |mat_idx| {
-                new_surface.material = &self.pool._materials.items[initial_material_index + mat_idx];
+                new_surface.material = self.pool._materials.items[initial_material_index + mat_idx];
             } else {
-                new_surface.material = &self.pool._materials.items[initial_material_index];
+                new_surface.material = self.pool._materials.items[initial_material_index];
             }
 
             const initial_vertex = vertices.items.len;
@@ -608,8 +616,7 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
         try mesh_asset.uploadMesh(engine, owned_vertices, owned_indices);
         self.pool._meshes.appendAssumeCapacity(mesh_asset);
 
-        const mesh_ptr = &self.pool._meshes.items[self.pool._meshes.items.len - 1];
-        try loaded_gltf.meshes.put(self.allocator, name, mesh_ptr);
+        try loaded_gltf.meshes.put(self.allocator, name, mesh_asset);
     }
 
     // Load Nodes
@@ -643,36 +650,39 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
             local_transform = zm.mul(sr, tm);
         }
 
+        const renderable = try self.pool.arena.allocator().create(IRenderable);
+
         if (node.mesh) |mesh_idx| {
-            const mesh_node = try self.pool.arena.allocator().create(MeshNode);
+            var mesh_node = try self.pool.arena.allocator().create(MeshNode);
             mesh_node.* = try MeshNode.init(self.allocator);
-            mesh_node.mesh = &self.pool._meshes.items[initial_mesh_index + mesh_idx];
+            mesh_node.mesh = self.pool._meshes.items[initial_mesh_index + mesh_idx];
 
             mesh_node.local_transform = local_transform;
-            self.pool._nodes.appendAssumeCapacity(mesh_node.interface());
+            renderable.* = mesh_node.interface();
         } else {
-            const new_node = try self.pool.arena.allocator().create(BasicNode);
+            var new_node = try self.pool.arena.allocator().create(BasicNode);
             new_node.* = try BasicNode.init(self.allocator);
             new_node.local_transform = local_transform;
-            self.pool._nodes.appendAssumeCapacity(new_node.interface());
+            renderable.* = new_node.interface();
         }
+        self.pool._nodes.appendAssumeCapacity(renderable);
 
-        try loaded_gltf.nodes.put(self.allocator, name, &self.pool._nodes.items[initial_node_index + i]);
+        try loaded_gltf.nodes.put(self.allocator, name, self.pool._nodes.items[initial_node_index + i]);
     }
 
     // Create Node hierarchy
     for (gltf.data.nodes, 0..) |node, i| {
-        var scene_node = &self.pool._nodes.items[initial_node_index + i];
+        const scene_node = self.pool._nodes.items[initial_node_index + i];
 
         for (node.children) |j| {
-            var child_ptr = &self.pool._nodes.items[initial_node_index + j];
+            const child_ptr = self.pool._nodes.items[initial_node_index + j];
             try scene_node.children().append(self.allocator, child_ptr);
             child_ptr.setParent(scene_node);
         }
     }
 
     // Find the top Nodes with no parents
-    for (self.pool._nodes.items[initial_node_index..]) |*node| {
+    for (self.pool._nodes.items[initial_node_index..]) |node| {
         if (node.getParent() == null) {
             try loaded_gltf.top_nodes.append(self.allocator, node);
             node.refreshTransform(zm.identity());
@@ -731,7 +741,7 @@ fn parseTexture(
     }
 
     const img_idx = texture.source orelse return 0;
-    @field(material_resources.*, image_field) = self.pool._images.items[self.pool._current_img_idx + img_idx];
+    @field(material_resources.*, image_field) = self.pool._images.items[self.pool._current_img_idx + img_idx].*;
     return bindless_slots[info.index];
 }
 

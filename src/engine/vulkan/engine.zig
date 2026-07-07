@@ -407,7 +407,7 @@ fn setupDescriptors(self: *Engine) !void {
             @ptrCast(&variable_count_info),
         );
 
-        _ = try self.registerTexture(self.images.get(.white), self.samplers.get(.nearest));
+        _ = try self.registerTexture(&self.images.get(.white), &self.samplers.get(.nearest));
     }
     { // 2D images (atlas)
         var builder = try DescriptorLayoutBuilder.init(self.allocator);
@@ -584,13 +584,31 @@ fn fillCommandBuffers(self: *Engine) !void {
         self.stats.tickClock(.compute_pass);
     }
 
-    // Geometry
+    // Skybox
     {
         self.stats.startClock(.render_pass_3d);
 
         draw_image.transitionToLayout(self, current_frame.cmd_buf, .general, .color_attachment_optimal);
         depth_image.transitionToLayout(self, current_frame.cmd_buf, .undefined, .depth_attachment_optimal);
         self.images.getPtr(.atlas).transitionToLayout(self, current_frame.cmd_buf, .undefined, .shader_read_only_optimal);
+        try self.drawSkybox();
+
+        // draw_image.transitionToLayout(self, current_frame.cmd_buf, .color_attachment_optimal, .transfer_src_optimal);
+
+        // Image.vkTransitionToLayout(self, current_frame.cmd_buf, self.swapchain.currentImage(), .undefined, .transfer_dst_optimal, 0);
+        // Image.copyImageToImage(self, current_frame.cmd_buf, draw_image.vk_image, self.swapchain.currentImage(), self.draw_extent, self.swapchain.extent);
+        // Image.vkTransitionToLayout(self, current_frame.cmd_buf, self.swapchain.currentImage(), .transfer_dst_optimal, .color_attachment_optimal, 0);
+
+        self.stats.tickClock(.render_pass_3d);
+    }
+
+    // Geometry
+    {
+        self.stats.startClock(.render_pass_3d);
+
+        // draw_image.transitionToLayout(self, current_frame.cmd_buf, .general, .color_attachment_optimal);
+        // depth_image.transitionToLayout(self, current_frame.cmd_buf, .undefined, .depth_attachment_optimal);
+        // self.images.getPtr(.atlas).transitionToLayout(self, current_frame.cmd_buf, .undefined, .shader_read_only_optimal);
         try self.drawGeometry();
 
         draw_image.transitionToLayout(self, current_frame.cmd_buf, .color_attachment_optimal, .transfer_src_optimal);
@@ -669,6 +687,13 @@ pub fn immediateSubmit(self: *Engine, queue_family: GraphicsContext.QueueFamily,
     const queue = queue_family.getQueue(self.ctx);
     try self.ctx.device.queueSubmit(queue, &submit_infos, .null_handle);
     try self.ctx.device.queueWaitIdle(queue);
+}
+
+fn drawSkybox(self: *Engine) !void {
+    _ = self; // autofix
+    // const current_frame = self.getCurrentFrame();
+    //
+    // try current_frame.scene_data_buffer.copyInto(self.ctx, &std.mem.toBytes(current_frame.scene_data), 0);
 }
 
 fn drawGeometry(self: *Engine) !void {
@@ -879,7 +904,7 @@ fn drawGuiEditor(self: *Engine) void {
 //     draw_queue.cmds.rewind(0);
 // }
 
-pub fn registerTexture(self: *Engine, image: Image, sampler: Sampler) !u32 {
+pub fn registerTexture(self: *Engine, image: *const Image, sampler: *const Sampler) !u32 {
     const slot = self.bindless_texture_count;
     self.bindless_texture_count += 1;
     try self.texture_cache.append(self.allocator, .{
