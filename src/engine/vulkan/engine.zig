@@ -10,6 +10,7 @@ const UiManager = @import("../../game/ui_manager.zig");
 const EcsManager = @import("../../game/ecs_manager.zig");
 const materials = @import("../graphics/materials.zig");
 const ComputeEffect = @import("../graphics/effects.zig").ComputeEffect;
+const Skybox = @import("../graphics/skybox.zig");
 const Scene = @import("../../project/scene/scene.zig");
 const GPUScene = @import("../graphics/scene.zig");
 const DrawContext = GPUScene.DrawContext;
@@ -154,6 +155,9 @@ loaded_nodes: std.StringHashMap(IRenderable),
 material_constants_buffer: Buffer = undefined,
 metal_rough_material: materials.MetallicRoughness = .create(),
 
+skybox_constants_buffer: Buffer = undefined,
+skybox_texture: Skybox.CubemapTexture = .create(),
+
 compute_effect: ComputeEffect = .create(),
 
 // Draw optimisation
@@ -218,10 +222,14 @@ pub fn deinit(self: *Engine) void {
 
     self.batcher_buffer.destroy(self.ctx);
     self.text_buffer.destroy(self.ctx);
-    self.material_constants_buffer.destroy(self.ctx);
     self.batcher.deinit();
 
+    self.material_constants_buffer.destroy(self.ctx);
     self.metal_rough_material.destroy(self);
+
+    self.skybox_constants_buffer.destroy(self.ctx);
+    self.skybox_texture.destroy(self);
+
     self.compute_effect.destroy(self);
     self.loaded_nodes.deinit();
     // self.draw_context.deinit();
@@ -250,10 +258,12 @@ pub fn setup(self: *Engine) !void {
     // Create Pipelines
     try self.create2DPipeline();
     try self.metal_rough_material.buildPipeline(self);
+    try self.skybox_texture.buildPipeline(self);
 
     try self.compute_effect.buildPipeline(self);
 
     self.material_constants_buffer = try materials.MetallicRoughness.createMaterialPushConstantsBuffer(self, 1);
+    self.skybox_constants_buffer = try Skybox.CubemapTexture.createSkyboxPushConstantsBuffer(self, 1);
 
     // {
     //     self.stats.startClock(.transfer);

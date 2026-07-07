@@ -62,19 +62,20 @@ pub fn init(self: *App, config: Config) !void {
     self.framerate = Framerate.init(@intFromFloat(self.graphics_context.display.refresh_rate));
     self.framerate.on();
 
-    self.world = try .init(self.allocator, self.io);
-    try self.world.app.addResource(World.Components.RawInputQueue{ .allocator = self.allocator, .io = self.io });
-    try self.world.app.addPlugin(Systems.Plugins.Startup);
-
     self.scene_manager.init(self.allocator, self.io, &self.world);
     self.asset_manager = .init(self.allocator, self.io);
     self.project_manager = .init(self.allocator, self.io, config, &self.scene_manager, &self.asset_manager);
 
-    try self.project_manager.open(config.default_project_name);
+    self.world = try .init(self.allocator, self.io);
+    try self.world.app.addResource(World.Components.RawInputQueue{ .allocator = self.allocator, .io = self.io });
+    try self.world.app.addResource(World.Components.AssetManagerHandle{ .ptr = &self.asset_manager });
+    try self.world.app.addPlugin(Systems.Plugins.Startup);
 
     self.render_layer = RenderLayer.init(self.allocator, self.io, &self.graphics_context, &self.framerate, &self.world, &self.project_manager);
     self.game_layer = GameLayer.init(self.allocator, self.io, config, &self.render_layer.engine, &self.framerate, &self.world);
     self.editor_layer = EditorLayer.init(self.allocator, self.io, config, &self.project_manager, &self.world, &self.render_layer.engine);
+
+    try self.project_manager.open(config.default_project_name);
 
     // Update order must be game -> editor -> render
     try self.pushLayer(self.game_layer.interface());

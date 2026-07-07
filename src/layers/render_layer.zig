@@ -70,7 +70,7 @@ pub fn onAttach(self: *RenderLayer) !void {
 
     try self.setupZgui();
 
-    // try self.project_manager.asset_manager.loadGLTFAsset(&self.engine, "assets/meshes/structure.glb");
+    self.project_manager.asset_manager.processQueuedAssets(&self.engine);
 }
 
 pub fn onUpdate(self: *RenderLayer) void {

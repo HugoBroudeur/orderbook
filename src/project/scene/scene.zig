@@ -7,4 +7,7 @@ const Scene = @This();
 name: []const u8,
 guid: Uuid.Uuid,
 
-reg: *World
+reg: *World,
+
+skybox_guid: Uuid.Uuid,
+skybox_filepath: []const u8,

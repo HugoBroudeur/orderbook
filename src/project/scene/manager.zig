@@ -71,7 +71,7 @@ pub fn setLoadedScene(self: *SceneManager, guid: Uuid.Uuid) bool {
 
     log.info("Set current scene [{s} | GUID:{}]", .{ scene.name, guid });
 
-    self.emitEcsEvent(World.Components.PendingSceneEvent, (.{ .scene_guid = guid, .manager = self })) catch |err| {
+    self.emitEcsEvent(World.Components.PendingSceneEvent, (.{ .scene_guid = guid, .scene_manager = self })) catch |err| {
         log.err("Set loaded scene [GUID:{}]. Send ECS Event World.Components.PendingSceneEvent error: {}", .{ guid, err });
         return false;
     };
@@ -128,12 +128,17 @@ pub fn loadScenes(self: *SceneManager, project_path: []const u8) !void {
         defer self.allocator.free(content);
 
         // TODO: put it on the heap and copy it in the buffer, might stack overload otherwise if scene_data > 8Mb
-        const scene_data = try SceneSerializer.deserialize(self.allocator, content);
+        var scene_data = try SceneSerializer.deserialize(self.allocator, content);
+
+        scene_data.scene_name = try self.allocator.dupe(u8, scene_data.scene_name);
+        scene_data.skybox_filepath = try self.allocator.dupe(u8, scene_data.skybox_filepath);
         try self.buffer_parsed_scenes.put(scene_data.scene_guid, scene_data);
 
         const scene: Scene = .{
             .guid = scene_data.scene_guid,
             .name = scene_data.scene_name,
+            .skybox_guid = scene_data.skybox_guid,
+            .skybox_filepath = scene_data.skybox_filepath,
             .reg = self.world,
         };
         _ = try self.scenes.fetchPut(scene.guid, scene);
@@ -162,20 +167,8 @@ fn extractGuidFromSceneName(scene_name: []const u8) ?Uuid.Uuid {
 
 const EntityData = struct {
     entity_guid: Uuid.Uuid,
-    entity_tag: ?World.Components.Tag = null,
-    transform: ?World.Components.Transform = null,
-    camera: ?World.Components.Camera = null,
-    camera_active: ?World.Components.CameraActive = null,
-
-    pub const serde = .{
-        .skip = .{
-            .transform = Serde.SkipMode.null,
-            .entity_tag = Serde.SkipMode.null,
-            .entity_guid = Serde.SkipMode.null,
-            .camera = Serde.SkipMode.null,
-            .camera_active = Serde.SkipMode.null,
-        },
-    };
+    gltf_uuid: ?Uuid.Uuid = null,
+    components: SceneSerializer.OptionalFields(World.SavedConfig.SavedComponentList) = .{},
 };
 
 fn emitEcsEvent(self: *SceneManager, comptime Event: type, value: Event) !void {
@@ -186,19 +179,40 @@ fn emitEcsEvent(self: *SceneManager, comptime Event: type, value: Event) !void {
 pub const SceneData = struct {
     scene_guid: Uuid.Uuid = 0,
     scene_name: []const u8 = "Untitled Scene",
-    lights: ?World.Components.Lights = null,
+    skybox_guid: Uuid.Uuid = 0,
+    skybox_filepath: []const u8 = "",
+    resources: SceneSerializer.OptionalFields(World.SavedConfig.SavedResourceList) = .{},
     entities: []EntityData = &.{},
 };
+
 const SceneSerializer = struct {
+    fn OptionalFields(comptime types: anytype) type {
+        var field_names: [types.len][]const u8 = undefined;
+        var field_types: [types.len]type = undefined;
+        var field_attrs: [types.len]std.builtin.Type.StructField.Attributes = undefined;
+
+        inline for (types, 0..) |T, i| {
+            const OptT = ?T;
+            field_names[i] = World.simpleTypeName(T);
+            field_types[i] = OptT;
+            field_attrs[i] = .{ .default_value_ptr = @ptrCast(&@as(OptT, null)) };
+        }
+
+        return @Struct(.auto, null, &field_names, &field_types, &field_attrs);
+    }
+
     pub fn serialize(allocator: std.mem.Allocator, world: *World, scene: Scene) ![]const u8 {
-        var scene_data: SceneData = undefined;
+        var scene_data: SceneData = .{};
 
         scene_data.scene_guid = scene.guid;
         scene_data.scene_name = scene.name;
 
-        { // Global lights
-            const lights = try world.app.getResource(World.Components.Lights);
-            scene_data.lights = lights.*;
+        { // Resources
+            inline for (World.SavedConfig.SavedResourceList) |R| {
+                if (world.app.resources.get(R)) |r| {
+                    @field(scene_data.resources, World.simpleTypeName(R)) = r.*;
+                }
+            }
         }
 
         var entities: std.ArrayList(EntityData) = .empty;
@@ -214,17 +228,14 @@ const SceneSerializer = struct {
                     .entity_guid = entry.guid.guid,
                 };
 
-                if (world.app.components.getSingle(entry.entity, World.Components.Tag)) |tag| {
-                    entity_data.entity_tag = tag.*;
+                inline for (World.SavedConfig.SavedComponentList) |C| {
+                    if (world.app.components.getSingle(entry.entity, C)) |c| {
+                        @field(entity_data.components, World.simpleTypeName(C)) = c.*;
+                    }
                 }
-                if (world.app.components.getSingle(entry.entity, World.Components.Transform)) |transform| {
-                    entity_data.transform = transform.*;
-                }
-                if (world.app.components.getSingle(entry.entity, World.Components.Camera)) |camera| {
-                    entity_data.camera = camera.*;
-                }
-                if (world.app.components.getSingle(entry.entity, World.Components.CameraActive)) |camera_active| {
-                    entity_data.camera_active = camera_active.*;
+
+                if (world.app.components.getSingle(entry.entity, World.Components.GltfMesh)) |mesh| {
+                    entity_data.gltf_uuid = mesh.guid;
                 }
 
                 try entities.append(allocator, entity_data);

@@ -311,31 +311,44 @@ fn instantiateScene(
     cmd: Commands,
     reader: EventReader(Components.PendingSceneEvent),
     writer: EventWriter(Components.LoadedSceneEvent),
-    lights: ResMut(Components.Lights),
+    // lights: ResMut(Components.Lights),
     game_state: ResMut(World.Ecs.State(Gamestate)),
+    assets: Res(World.Components.AssetManagerHandle),
 ) !void {
     for (reader.events) |ev| {
-        const data = ev.manager.getCurrentSceneData() orelse {
+        const data = ev.scene_manager.getCurrentSceneData() orelse {
             log.err("PendingSceneEvent for unprepared scene {}", .{ev.scene_guid});
             continue;
         };
 
-        if (data.lights) |l| lights.inner.* = l;
+        inline for (World.SavedConfig.SavedResourceList) |R| {
+            if (@field(data.resources, World.simpleTypeName(R))) |val| {
+                (try ev.scene_manager.world.app.getResource(R)).* = val;
+            }
+        }
 
         for (data.entities) |e| {
             const entity = try cmd.spawn(.{Components.ID{ .guid = e.entity_guid }});
 
-            if (e.entity_tag) |tag| {
-                try cmd.insert(entity, .{tag});
+            inline for (World.SavedConfig.SavedComponentList) |C| {
+                if (@field(e.components, World.simpleTypeName(C))) |val| {
+                    try cmd.insert(entity, .{val});
+                }
             }
-            if (e.transform) |transform| {
-                try cmd.insert(entity, .{transform});
-            }
-            if (e.camera) |camera| {
-                try cmd.insert(entity, .{camera});
-            }
-            if (e.camera_active) |camera_active| {
-                try cmd.insert(entity, .{ camera_active, Components.Rotated{}, Components.Velocity{} });
+
+            if (e.gltf_uuid) |guid| {
+                if (assets.inner.ptr.getAsset(guid)) |ptr| {
+                    const meta = assets.inner.ptr.pool.asset_metadata.get(guid);
+                    try cmd.insert(entity, .{
+                        Components.GltfMesh{
+                            .guid = guid,
+                            .name = if (meta) |m| m.name else "",
+                            .ptr = ptr,
+                        },
+                    });
+                } else {
+                    log.warn("Scene entity {} references unknown/unloaded GLTF asset {} — was the project's asset pool loaded?", .{ e.entity_guid, guid });
+                }
             }
         }
 
@@ -359,9 +372,10 @@ fn onAssetLoaded(
     reader: World.Ecs.EventReader(Components.AssetLoaded),
 ) !void {
     for (reader.events) |event| {
+        const guid = Uuid.v4.new(alloc.io);
         _ = try cmd.spawn(.{
-            Components.ID{ .guid = Uuid.v4.new(alloc.io) },
-            Components.GltfMesh{ .ptr = event.ptr },
+            Components.ID{ .guid = guid },
+            Components.GltfMesh{ .ptr = event.ptr, .name = event.name, .guid = guid },
             Components.Transform{},
         });
 

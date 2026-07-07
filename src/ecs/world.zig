@@ -35,6 +35,24 @@ pub const Gamestate = enum {
     shutdown,
 };
 
+/// List all the components/resources that it needs to be saved/loaded
+pub const SavedConfig = struct {
+    pub const SavedComponentList = .{
+        Components.Tag,
+        Components.Transform,
+        Components.Camera,
+        Components.CameraActive,
+        Components.Velocity,
+        Components.Rotated,
+    };
+
+    pub const SavedResourceList = .{
+        Components.Lights,
+        Components.CameraSpeed,
+        Components.CameraSensitivity,
+    };
+};
+
 allocator: std.mem.Allocator,
 io: std.Io,
 app: *Ecs.App,
@@ -56,4 +74,11 @@ pub fn deinit(self: *World) void {
     }
 
     self.app.deinit();
+}
+
+/// Convert a component type to a property name
+pub fn simpleTypeName(comptime T: type) [:0]const u8 {
+    const full = @typeName(T);
+    const idx = std.mem.lastIndexOfScalar(u8, full, '.') orelse return full;
+    return full[idx + 1 ..];
 }

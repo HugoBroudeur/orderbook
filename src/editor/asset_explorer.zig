@@ -1,6 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.scene_editor);
 const zgui = @import("zgui");
+const Uuid = @import("uuid");
 
 const ProjectManager = @import("../project/manager.zig");
 const SceneManager = @import("../engine/scene_manager.zig");
@@ -33,6 +34,7 @@ pub const AssetKind = enum {
 };
 
 const AssetEntry = struct {
+    guid: ?Uuid.Uuid,
     name: [:0]const u8, // stem, dupe'd (matches AssetPool.loaded_gltf key)
     path: [:0]const u8, // full path, dupe'd
     kind: AssetKind,
@@ -101,6 +103,7 @@ fn rescan(self: *AssetExplorer) !void {
             if (entry.kind != .file) continue;
             const kind = AssetKind.fromFileExtention(entry.name) orelse continue;
             try self.entries.append(self.allocator, .{
+                .guid = null,
                 .name = try self.allocator.dupeZ(u8, std.fs.path.stem(entry.name)),
                 .path = try std.fs.path.joinZ(self.allocator, &.{ dir_path, entry.name }),
                 .kind = kind,
@@ -219,13 +222,17 @@ fn drawGrid(self: *AssetExplorer) void {
 }
 
 fn requestLoad(self: *AssetExplorer, entry: AssetEntry) void {
-    self.project_manager.asset_manager.loadGLTFAsset(self.engine, entry.path) catch |err| {
-        log.err("[AssetExplorer] load request failed for {s}: {}", .{ entry.path, err });
+    const guid = self.project_manager.asset_manager.importAsset(self.engine, entry.path) catch |err| {
+        log.err("[AssetExplorer] import failed for {s}: {}", .{ entry.path, err });
+        return;
     };
 
-    const ptr = self.project_manager.asset_manager.pool.loaded_gltf.getPtr(entry.name).?;
+    const ptr = self.project_manager.asset_manager.getAsset(guid) orelse {
+        log.err("[AssetExplorer] importAsset succeeded but no loaded asset found for {s} (GUID {})", .{ entry.path, guid });
+        return;
+    };
 
-    self.emitEcsEvent(World.Components.AssetLoaded, .{ .name = entry.name, .ptr = ptr }) catch |err| {
+    self.emitEcsEvent(World.Components.AssetLoaded, .{ .name = entry.name, .ptr = ptr, .guid = guid }) catch |err| {
         log.err("No AssetLoaded emitted. Reason {}", .{err});
     };
 }

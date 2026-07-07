@@ -3,6 +3,7 @@ const log = std.log.scoped(.asset_manager);
 const zm = @import("zmath");
 const Uuid = @import("uuid");
 const Gltf = @import("zgltf").Gltf;
+const Serde = @import("serde");
 
 const AssetManager = @This();
 const Config = @import("../../config.zig");
@@ -26,45 +27,65 @@ allocator: std.mem.Allocator,
 io: std.Io,
 pool: AssetPool,
 
+const asset_dirs = [_][]const u8{
+    "assets/meshes",
+};
+
+pub const ASSET_META_FILE_EXTENSION = ".dlmeta";
+
+pub const AssetMetaFile = struct {
+    guid: Uuid.Uuid,
+    source_path: []const u8,
+    name: []const u8,
+};
+
 pub const AssetPool = struct {
     pub const MAX_FILE_SIZE = 512_000_000_000;
 
-    loaded_gltf: std.array_hash_map.String(LoadedGLTF),
-    meshes: std.ArrayList(Mesh),
-    nodes: std.ArrayList(IRenderable),
-    materials: std.ArrayList(Mesh.GLTFMaterial),
-    images: std.ArrayList(Image),
     arena: std.heap.ArenaAllocator,
+
+    // loaded_gltf: std.array_hash_map.String(LoadedGLTF),
+    asset_metadata: std.hash_map.AutoHashMap(Uuid.Uuid, AssetMetaFile),
+    queued_gltf: std.hash_map.AutoHashMap(Uuid.Uuid, []const u8),
+    loaded_gltf: std.array_hash_map.String(LoadedGLTF),
+    _meshes: std.ArrayList(Mesh),
+    _nodes: std.ArrayList(IRenderable),
+    _materials: std.ArrayList(Mesh.GLTFMaterial),
+    _images: std.ArrayList(Image),
 
     _current_img_idx: usize = 0,
 
-    pub fn init(allocator: std.mem.Allocator) AssetPool {
+    fn init(allocator: std.mem.Allocator) AssetPool {
         return .{
             .loaded_gltf = .empty,
-            .materials = .empty,
-            .meshes = .empty,
-            .nodes = .empty,
-            .images = .empty,
+            .queued_gltf = .init(allocator),
+            .asset_metadata = .init(allocator),
+            ._materials = .empty,
+            ._meshes = .empty,
+            ._nodes = .empty,
+            ._images = .empty,
             .arena = std.heap.ArenaAllocator.init(allocator),
         };
     }
 
-    pub fn deinit(self: *AssetPool, allocator: std.mem.Allocator, engine: *Engine) void {
+    fn deinit(self: *AssetPool, allocator: std.mem.Allocator, engine: *Engine) void {
         var it = self.loaded_gltf.iterator();
         while (it.next()) |scene_ptr| {
             scene_ptr.value_ptr.*.deinit();
         }
         self.loaded_gltf.deinit(allocator);
+        self.queued_gltf.deinit();
+        self.asset_metadata.deinit();
 
-        for (self.meshes.items) |*mesh| {
+        for (self._meshes.items) |*mesh| {
             mesh.destroy(engine.ctx);
         }
-        self.meshes.deinit(allocator);
+        self._meshes.deinit(allocator);
 
-        self.nodes.deinit(allocator);
-        self.materials.deinit(allocator);
+        self._nodes.deinit(allocator);
+        self._materials.deinit(allocator);
 
-        for (self.images.items) |*img| {
+        for (self._images.items) |*img| {
             // Don't destroy the error_checker image because it is owned by the engine
             if (engine.images.get(.error_checker).vk_image == img.vk_image) {
                 continue;
@@ -73,7 +94,7 @@ pub const AssetPool = struct {
             img.destroy(engine.ctx);
         }
 
-        self.images.deinit(allocator);
+        self._images.deinit(allocator);
     }
 };
 
@@ -89,9 +110,133 @@ pub fn deinit(self: *AssetManager, engine: *Engine) void {
     self.pool.deinit(self.allocator, engine);
 }
 
-pub fn saveAssetPool(self: *AssetManager, project_path: []const u8) !void {
-    _ = self;
-    _ = project_path;
+// TODO, I need to improve that to make a copy of the file first, then save, then use the copy.
+// That would prevent file corruption if stopped while saving
+pub fn saveAssetPool(self: *AssetManager, project_folder: []const u8) !void {
+    // 1. Delete stale meta files: on-disk .dlmeta whose GUID isn't in asset_metadata anymore.
+    const dir = try std.Io.Dir.cwd().openDir(self.io, project_folder, .{ .iterate = true });
+    var it = dir.iterate();
+
+    while (try it.next(self.io)) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ASSET_META_FILE_EXTENSION)) continue;
+
+        const path = try std.fs.path.join(self.allocator, &.{ project_folder, entry.name });
+        defer self.allocator.free(path);
+
+        if (self.loadMetaFile(path)) |meta| {
+            if (!self.pool.asset_metadata.contains(meta.guid)) {
+                try dir.deleteFile(self.io, entry.name);
+                log.info("saveAssetPool: removed stale metafile {s}", .{entry.name});
+            }
+        }
+    }
+
+    var meta_it = self.pool.asset_metadata.iterator();
+    while (meta_it.next()) |entry| {
+        const meta = entry.value_ptr.*;
+        const filename = std.fs.path.basename(meta.source_path);
+        const metapath = try std.fmt.allocPrint(self.allocator, "{s}/{s}{s}", .{ project_folder, filename, ASSET_META_FILE_EXTENSION });
+        defer self.allocator.free(metapath);
+
+        self.saveMetaFile(metapath, meta) catch |err| {
+            log.warn("saveAssetPool: failed to save metafile {s}: {}", .{ metapath, err });
+        };
+    }
+}
+
+pub fn loadAssetPool(self: *AssetManager, project_folder: []const u8) !void {
+    const dir = std.Io.Dir.cwd().openDir(self.io, project_folder, .{ .iterate = true }) catch return;
+    var it = dir.iterate();
+    while (try it.next(self.io)) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ASSET_META_FILE_EXTENSION)) continue;
+        const metapath = try std.fs.path.join(self.allocator, &.{ project_folder, entry.name });
+        defer self.allocator.free(metapath);
+
+        const meta = if (self.loadMetaFile(metapath)) |m| m else continue;
+
+        std.Io.Dir.cwd().access(self.io, meta.source_path, .{ .read = true }) catch |err| {
+            log.warn("loadAssetPool: error {} missing asset file for metafile {s}: {s}", .{ err, entry.name, meta.source_path });
+            continue;
+        };
+
+        self.pool.queued_gltf.put(meta.guid, meta.source_path) catch |err| {
+            log.warn("loadAssetPool: failed to queued asset {s}: {}", .{ meta.source_path, err });
+            continue;
+        };
+
+        try self.pool.asset_metadata.put(meta.guid, meta);
+        log.info("loadAssetPool: loaded {s} with GUID {}", .{ meta.source_path, meta.guid });
+    }
+}
+
+fn saveMetaFile(self: *AssetManager, metafile_path: []const u8, metafile: AssetMetaFile) !void {
+    if (!std.mem.endsWith(u8, metafile_path, ASSET_META_FILE_EXTENSION)) {
+        log.warn("saveMetaFile: invalid file extension '{s}'", .{metafile_path});
+        return error.InvalidExtension;
+    }
+
+    const content = try Serde.zon.toSlice(self.allocator, metafile);
+    defer self.allocator.free(content);
+
+    try std.Io.Dir.writeFile(.cwd(), self.io, .{ .data = content, .sub_path = metafile_path, .flags = .{} });
+    log.info("saveMetaFile: wrote metadata for GUID {}", .{metafile.guid});
+}
+
+fn loadMetaFile(self: *AssetManager, metafile_path: []const u8) ?AssetMetaFile {
+    if (!std.mem.endsWith(u8, metafile_path, ASSET_META_FILE_EXTENSION)) return null;
+
+    const content = std.Io.Dir.cwd().readFileAlloc(self.io, metafile_path, self.allocator, .unlimited) catch |err| {
+        log.warn("loadMetaFile: could not read {s}: {}", .{ metafile_path, err });
+        return null;
+    };
+    defer self.allocator.free(content);
+
+    return Serde.zon.fromSlice(AssetMetaFile, self.allocator, content) catch |err| {
+        log.warn("loadMetaFile: failed to parse {s}: {}", .{ metafile_path, err });
+        return null;
+    };
+}
+
+pub fn importAsset(self: *AssetManager, engine: *Engine, asset_path: []const u8) !Uuid.Uuid {
+    if (self.findGuidForPath(asset_path)) |existing| {
+        if (self.getAsset(existing) == null) {
+            try self.loadGLTFAsset(engine, existing, asset_path);
+        }
+        return existing;
+    }
+
+    const guid = Uuid.v4.new(self.io);
+    try self.loadGLTFAsset(engine, guid, asset_path);
+    try self.pool.asset_metadata.put(guid, .{
+        .guid = guid,
+        .source_path = try self.allocator.dupe(u8, asset_path),
+        .name = try self.allocator.dupe(u8, std.fs.path.stem(asset_path)),
+    });
+    return guid;
+}
+
+pub fn processQueuedAssets(self: *AssetManager, engine: *Engine) void {
+    var pending: std.ArrayList(struct { guid: Uuid.Uuid, path: []const u8 }) = .empty;
+    defer pending.deinit(self.allocator);
+
+    var it = self.pool.queued_gltf.iterator();
+    while (it.next()) |entry| {
+        pending.append(self.allocator, .{ .guid = entry.key_ptr.*, .path = entry.value_ptr.* }) catch continue;
+    }
+
+    for (pending.items) |item| {
+        self.loadGLTFAsset(engine, item.guid, item.path) catch |err| {
+            log.warn("processQueuedAssets: failed to load queued asset {s} (GUID {}): {}", .{ item.path, item.guid, err });
+        };
+    }
+}
+
+fn findGuidForPath(self: *AssetManager, path: []const u8) ?Uuid.Uuid {
+    var it = self.pool.asset_metadata.iterator();
+    while (it.next()) |entry| {
+        if (std.mem.eql(u8, entry.value_ptr.source_path, path)) return entry.key_ptr.*;
+    }
+    return null;
 }
 
 pub fn load(self: *AssetManager, engine: *Engine, asset_path: []const u8) !void {
@@ -100,8 +245,20 @@ pub fn load(self: *AssetManager, engine: *Engine, asset_path: []const u8) !void 
     try self.pool.loaded_gltf.put(self.allocator, name, structure_file);
 }
 
+pub fn getAssetByName(self: *AssetManager, filepath: []const u8) ?*LoadedGLTF {
+    return self.pool.loaded_gltf.getPtr(filepath);
+}
+
+pub fn getAsset(self: *AssetManager, guid: Uuid.Uuid) ?*LoadedGLTF {
+    if (self.pool.asset_metadata.get(guid)) |meta| {
+        // loaded_gltf is keyed by stem (see loadGLTFAsset's `filename`), not the full source_path.
+        return self.pool.loaded_gltf.getPtr(meta.name);
+    }
+    return null;
+}
+
 // TODO, decouple engine such as the asset is loaded in the pool then have a function to load the pool in the GPU
-pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, file_path: []const u8) !void {
+pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file_path: []const u8) !void {
     var gltf = Gltf.init(self.allocator);
     defer gltf.deinit();
 
@@ -122,12 +279,12 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, file_path: []const u8
     var loaded_gltf: LoadedGLTF = try LoadedGLTF.init(self.allocator);
     loaded_gltf.creator = engine;
 
-    const initial_mesh_index = self.pool.meshes.items.len;
-    const initial_node_index = self.pool.nodes.items.len;
-    const initial_material_index = self.pool.materials.items.len;
-    try self.pool.meshes.ensureTotalCapacity(self.allocator, initial_mesh_index + gltf.data.meshes.len);
-    try self.pool.nodes.ensureTotalCapacity(self.allocator, initial_node_index + gltf.data.nodes.len);
-    try self.pool.materials.ensureTotalCapacity(self.allocator, initial_material_index + gltf.data.materials.len);
+    const initial_mesh_index = self.pool._meshes.items.len;
+    const initial_node_index = self.pool._nodes.items.len;
+    const initial_material_index = self.pool._materials.items.len;
+    try self.pool._meshes.ensureTotalCapacity(self.allocator, initial_mesh_index + gltf.data.meshes.len);
+    try self.pool._nodes.ensureTotalCapacity(self.allocator, initial_node_index + gltf.data.nodes.len);
+    try self.pool._materials.ensureTotalCapacity(self.allocator, initial_material_index + gltf.data.materials.len);
 
     loaded_gltf.descriptor_pool = try .init(self.allocator, engine.ctx, @intCast(gltf.data.materials.len), &.{
         .{ .vk_type = .combined_image_sampler, .ratio = 3 },
@@ -162,8 +319,8 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, file_path: []const u8
         try loaded_gltf.samplers.append(self.allocator, sampler);
     }
 
-    self.pool._current_img_idx = self.pool.images.items.len;
-    try self.pool.images.ensureTotalCapacity(self.allocator, self.pool._current_img_idx + gltf.data.images.len);
+    self.pool._current_img_idx = self.pool._images.items.len;
+    try self.pool._images.ensureTotalCapacity(self.allocator, self.pool._current_img_idx + gltf.data.images.len);
 
     const bindless_slots = try self.allocator.alloc(u32, gltf.data.textures.len);
     defer self.allocator.free(bindless_slots);
@@ -210,22 +367,22 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, file_path: []const u8
             break :blk engine.images.get(.error_checker);
         };
 
-        self.pool.images.appendAssumeCapacity(image);
+        self.pool._images.appendAssumeCapacity(image);
         if (Config.log.mesh) {
             log.info("[DBG] image[{d}] '{s}' → bindless slot {d}", .{ i, name, bindless_slots[i] });
         }
-        try loaded_gltf.images.put(self.allocator, name, &self.pool.images.items[self.pool._current_img_idx + i]);
+        try loaded_gltf.images.put(self.allocator, name, &self.pool._images.items[self.pool._current_img_idx + i]);
     }
 
     loaded_gltf.material_data_buffer = try MetallicRoughness.createMaterialPushConstantsBuffer(engine, @intCast(gltf.data.materials.len));
 
     for (gltf.data.textures, 0..) |tex, i| {
         if (tex.source != null and tex.sampler != null) {
-            bindless_slots[i] = try engine.registerTexture(self.pool.images.items[self.pool._current_img_idx + tex.source.?], loaded_gltf.samplers.items[tex.sampler.?]);
+            bindless_slots[i] = try engine.registerTexture(self.pool._images.items[self.pool._current_img_idx + tex.source.?], loaded_gltf.samplers.items[tex.sampler.?]);
         }
         if (tex.source != null and tex.sampler == null) {
             log.warn("GLTF is missing a sampler, using default engine linear sampler. Texture ID: {}", .{i});
-            bindless_slots[i] = try engine.registerTexture(self.pool.images.items[self.pool._current_img_idx + tex.source.?], engine.samplers.get(.linear));
+            bindless_slots[i] = try engine.registerTexture(self.pool._images.items[self.pool._current_img_idx + tex.source.?], engine.samplers.get(.linear));
         }
     }
 
@@ -293,8 +450,8 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, file_path: []const u8
 
             new_mat.data = try engine.metal_rough_material.writeMaterial(engine, pass_type, material_resources, &loaded_gltf.descriptor_pool);
 
-            self.pool.materials.appendAssumeCapacity(new_mat);
-            const new_mat_ptr = &self.pool.materials.items[self.pool.materials.items.len - 1];
+            self.pool._materials.appendAssumeCapacity(new_mat);
+            const new_mat_ptr = &self.pool._materials.items[self.pool._materials.items.len - 1];
             try loaded_gltf.materials.put(self.allocator, name, new_mat_ptr);
         }
 
@@ -328,9 +485,9 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, file_path: []const u8
             var new_surface: Mesh.GeoSurface = .{ .start_index = @intCast(indices.items.len), .count = @intCast(gltf.data.accessors[primitive_index].count) };
 
             if (primitive.material) |mat_idx| {
-                new_surface.material = &self.pool.materials.items[initial_material_index + mat_idx];
+                new_surface.material = &self.pool._materials.items[initial_material_index + mat_idx];
             } else {
-                new_surface.material = &self.pool.materials.items[initial_material_index];
+                new_surface.material = &self.pool._materials.items[initial_material_index];
             }
 
             const initial_vertex = vertices.items.len;
@@ -449,9 +606,9 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, file_path: []const u8
         defer self.allocator.free(owned_indices);
 
         try mesh_asset.uploadMesh(engine, owned_vertices, owned_indices);
-        self.pool.meshes.appendAssumeCapacity(mesh_asset);
+        self.pool._meshes.appendAssumeCapacity(mesh_asset);
 
-        const mesh_ptr = &self.pool.meshes.items[self.pool.meshes.items.len - 1];
+        const mesh_ptr = &self.pool._meshes.items[self.pool._meshes.items.len - 1];
         try loaded_gltf.meshes.put(self.allocator, name, mesh_ptr);
     }
 
@@ -489,33 +646,33 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, file_path: []const u8
         if (node.mesh) |mesh_idx| {
             const mesh_node = try self.pool.arena.allocator().create(MeshNode);
             mesh_node.* = try MeshNode.init(self.allocator);
-            mesh_node.mesh = &self.pool.meshes.items[initial_mesh_index + mesh_idx];
+            mesh_node.mesh = &self.pool._meshes.items[initial_mesh_index + mesh_idx];
 
             mesh_node.local_transform = local_transform;
-            self.pool.nodes.appendAssumeCapacity(mesh_node.interface());
+            self.pool._nodes.appendAssumeCapacity(mesh_node.interface());
         } else {
             const new_node = try self.pool.arena.allocator().create(BasicNode);
             new_node.* = try BasicNode.init(self.allocator);
             new_node.local_transform = local_transform;
-            self.pool.nodes.appendAssumeCapacity(new_node.interface());
+            self.pool._nodes.appendAssumeCapacity(new_node.interface());
         }
 
-        try loaded_gltf.nodes.put(self.allocator, name, &self.pool.nodes.items[initial_node_index + i]);
+        try loaded_gltf.nodes.put(self.allocator, name, &self.pool._nodes.items[initial_node_index + i]);
     }
 
     // Create Node hierarchy
     for (gltf.data.nodes, 0..) |node, i| {
-        var scene_node = &self.pool.nodes.items[initial_node_index + i];
+        var scene_node = &self.pool._nodes.items[initial_node_index + i];
 
         for (node.children) |j| {
-            var child_ptr = &self.pool.nodes.items[initial_node_index + j];
+            var child_ptr = &self.pool._nodes.items[initial_node_index + j];
             try scene_node.children().append(self.allocator, child_ptr);
             child_ptr.setParent(scene_node);
         }
     }
 
     // Find the top Nodes with no parents
-    for (self.pool.nodes.items[initial_node_index..]) |*node| {
+    for (self.pool._nodes.items[initial_node_index..]) |*node| {
         if (node.getParent() == null) {
             try loaded_gltf.top_nodes.append(self.allocator, node);
             node.refreshTransform(zm.identity());
@@ -526,6 +683,10 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, file_path: []const u8
         log.warn("Reloading GLTF asset '{s}': destroying previous instance to avoid leaking GPU resources", .{filename});
         var old_gltf = removed.value;
         old_gltf.deinit();
+    }
+
+    if (!self.pool.queued_gltf.remove(guid)) {
+        log.warn("GLTF loaded without being in the queue. The application code is wrong. GUID: {} | name: {s}", .{ guid, filename });
     }
 
     try self.pool.loaded_gltf.put(self.allocator, filename, loaded_gltf);
@@ -570,6 +731,19 @@ fn parseTexture(
     }
 
     const img_idx = texture.source orelse return 0;
-    @field(material_resources.*, image_field) = self.pool.images.items[self.pool._current_img_idx + img_idx];
+    @field(material_resources.*, image_field) = self.pool._images.items[self.pool._current_img_idx + img_idx];
     return bindless_slots[info.index];
+}
+
+pub fn resolveMeshPath(self: *AssetManager, name: []const u8) !?[]const u8 {
+    for (asset_dirs) |dir_path| {
+        const dir = std.Io.Dir.cwd().openDir(self.io, dir_path, .{ .iterate = true }) catch continue;
+        var it = dir.iterate();
+        while (try it.next(self.io)) |entry| {
+            if (entry.kind != .file) continue;
+            if (!std.mem.eql(u8, std.fs.path.stem(entry.name), name)) continue;
+            return try std.fs.path.join(self.allocator, &.{ dir_path, entry.name });
+        }
+    }
+    return null;
 }

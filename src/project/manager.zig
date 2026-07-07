@@ -6,6 +6,7 @@ const Config = @import("../config.zig");
 const SceneManager = @import("scene/manager.zig");
 const AssetManager = @import("asset/manager.zig");
 const RenderSettings = @import("../engine/settings.zig");
+const Engine = @import("../engine/vulkan/engine.zig");
 const Uuid = @import("uuid");
 const serde = @import("serde");
 
@@ -98,6 +99,7 @@ pub fn new(self: *Manager, name: []const u8) !void {
     try self.open(project_path);
 }
 
+// TODO, remove dependency with Engine
 pub fn open(self: *Manager, name: []const u8) !void {
     const project_path = try self.computeProjectPath(name);
 
@@ -119,6 +121,7 @@ pub fn open(self: *Manager, name: []const u8) !void {
     self.project_file = project_file;
     self.project_folder = project_path;
 
+    try self.asset_manager.loadAssetPool(self.project_folder);
     try self.scene_manager.loadScenes(self.project_folder);
 
     self.loaded = true;

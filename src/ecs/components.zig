@@ -6,6 +6,7 @@ const zm = @import("zmath");
 const IRect = @import("../primitive.zig").IRect;
 const Uuid = @import("uuid");
 const SceneManager = @import("../project/scene/manager.zig");
+const AssetManager = @import("../project/asset/manager.zig");
 const LoadedGLTF = @import("../engine/graphics/scene.zig").LoadedGLTF;
 
 // ACSII Generator: https://patorjk.com/software/taag/#p=display&f=ANSI%20Shadow&t=Graphics
@@ -35,6 +36,8 @@ pub const WindowState = struct {
 };
 
 pub const Stats = @import("../engine/stats.zig");
+
+pub const AssetManagerHandle = struct { ptr: *AssetManager };
 
 //  ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗██╗ ██████╗███████╗
 // ██╔════╝ ██╔══██╗██╔══██╗██╔══██╗██║  ██║██║██╔════╝██╔════╝
@@ -79,6 +82,8 @@ pub const Lights = struct {
 };
 
 pub const GltfMesh = struct {
+    guid: Uuid.Uuid,
+    name: []const u8,
     ptr: *LoadedGLTF,
 };
 
@@ -374,7 +379,8 @@ pub const Rotated = struct {
 pub const RawInputQueue = @import("../framework/event_queue.zig");
 
 pub const PendingSceneEvent = struct {
-    manager: *SceneManager,
+    // asset_manager: *AssetManager,
+    scene_manager: *SceneManager,
     scene_guid: Uuid.Uuid,
 };
 
@@ -383,6 +389,7 @@ pub const LoadedSceneEvent = struct {
 };
 
 pub const AssetLoaded = struct {
+    guid: Uuid.Uuid,
     name: []const u8,
     ptr: *LoadedGLTF,
 };

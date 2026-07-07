@@ -30,6 +30,7 @@ public struct SceneData {
   public float4 sunlightColor;
   public float4 sunlightSpecularColor;
   public float time;
+  public float lodBias;
 };
 
 public struct MaterialData {

@@ -39,6 +39,7 @@ pub const SceneData = extern struct {
     sunlight_color: [4]f32 = .{ 1, 1, 1, 1 },
     sunlight_specular_color: [4]f32 = .{ 1, 1, 1, 1 },
     time: f32 = 0,
+    lod_bias: f32 = 0,
 };
 
 // All are temporary for testing:
