@@ -44,7 +44,9 @@ public struct MaterialData {
   public uint occlusionTexID;
   public uint emissiveTexID;
   public uint transmissionTexId;
-  // 16 public float4 metal_rough_factors; public int metalRoughTexID;
+
+  // public uint _padding1;
+  // public float4 _padding[11];
 };
 
 // Interface defining what any SceneParams implementation must provide
@@ -57,11 +59,18 @@ public interface ISceneParams {
 // --- Bindless implementation ---
 public struct BindlessSceneParams : ISceneParams {
   public ConstantBuffer<SceneData> sceneData;
+  public SamplerCube allCubemapTextures[32];
+  public StructuredBuffer<MaterialData>
+      materialBuffers[1024]; // See vulkan/engine global descriptor config
   public Sampler2D allTextures[];
 
   public ConstantBuffer<SceneData> getSceneData() { return sceneData; }
   public Sampler2D getColorTex(int index) { return allTextures[index]; }
   public Sampler2D getMetalRoughTex(int index) { return allTextures[index]; }
+  public MaterialData getMaterial(uint slot, uint idx) {
+    StructuredBuffer<MaterialData> materialBuffer = materialBuffers[slot];
+    return materialBuffer[idx];
+  }
 };
 
 // --- Non-bindless implementation ---

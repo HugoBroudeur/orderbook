@@ -18,8 +18,10 @@ pub const MaterialPipeline = struct {
 
 pub const MaterialInstance = struct {
     pipeline: *MaterialPipeline,
-    material_set: vk.DescriptorSet,
+    // material_set: vk.DescriptorSet,
     pass_type: MaterialPass,
+    buffer_slot_idx: u32,
+    material_idx: u32,
 };
 
 pub const MaterialPass = enum(u8) {
@@ -28,12 +30,12 @@ pub const MaterialPass = enum(u8) {
     Other,
 };
 
-pub const MetallicRoughness = struct {
+pub const PBRMaterial = struct {
     opaque_pipeline: MaterialPipeline,
     transparent_pipeline: MaterialPipeline,
-    material_layout: vk.DescriptorSetLayout,
+    // material_layout: vk.DescriptorSetLayout,
 
-    pub const MaterialConstants = struct {
+    pub const MaterialConstants = extern struct {
         color_factors: [4]f32,
         metal_rough_factors: [4]f32,
         emissive_factor: [4]f32,
@@ -44,18 +46,21 @@ pub const MetallicRoughness = struct {
         occlusion_tex_id: u32,
         emissive_tex_id: u32,
         transmission_tex_id: u32,
+        // Pads the record to 80 bytes = the std430 array stride the shader
+        // uses for StructuredBuffer<MaterialData> in scene.slang (its float4
+        // members give the struct 16-byte alignment, so 76 bytes of fields
+        // round up to 80 per element). extern layout + this pad + the asserts
+        // below keep the Zig and Slang sides in lockstep at compile time.
         _padding1: u32 = 0,
-        // Padding to 256 bytes (minUniformBufferOffsetAlignment on all target GPUs).
-        extra: [11][4]f32 = [_][4]f32{.{ 0, 0, 0, 0 }} ** 11,
 
         comptime {
-            if (@offsetOf(MaterialConstants, "color_tex_id") != 52) @compileError("color_tex_id must be at offset 52 (std140 layout)");
-            if (@sizeOf(MaterialConstants) != 256) @compileError("MaterialConstants must be 256 bytes");
+            if (@offsetOf(MaterialConstants, "color_tex_id") != 52) @compileError("color_tex_id must be at offset 52 (must match MaterialData in scene.slang)");
+            if (@sizeOf(MaterialConstants) != 80) @compileError("MaterialConstants must be 80 bytes (std430 stride of MaterialData in scene.slang)");
         }
     };
 
     pub fn createMaterialPushConstantsBuffer(engine: *const Engine, size: u32) !Buffer {
-        return try Buffer.create(engine.ctx, @sizeOf(MetallicRoughness.MaterialConstants) * size, .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
+        return try Buffer.create(engine.ctx, @sizeOf(PBRMaterial.MaterialConstants) * size, .{ .storage_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
     }
 
     pub const MaterialResources = struct {
@@ -71,43 +76,44 @@ pub const MetallicRoughness = struct {
         occlusion_sampler: Sampler,
         transmission_image: Image,
         transmission_sampler: Sampler,
-        data_buffer: Buffer,
+        // data_buffer: Buffer,
+        data_buffer_idx: u32,
         data_buffer_offset: vk.DeviceSize = 0,
     };
 
-    pub fn create() MetallicRoughness {
+    pub fn create() PBRMaterial {
         return .{
             .opaque_pipeline = undefined,
             .transparent_pipeline = undefined,
-            .material_layout = undefined,
+            // .material_layout = undefined,
         };
     }
 
-    pub fn destroy(self: *MetallicRoughness, engine: *Engine) void {
+    pub fn destroy(self: *PBRMaterial, engine: *Engine) void {
         self.opaque_pipeline.pipeline.destroy(engine.ctx);
         self.transparent_pipeline.pipeline.destroy(engine.ctx);
         engine.ctx.device.destroyPipelineLayout(self.opaque_pipeline.pipeline_layout, null);
-        engine.ctx.device.destroyDescriptorSetLayout(self.material_layout, null);
+        // engine.ctx.device.destroyDescriptorSetLayout(self.material_layout, null);
     }
 
-    pub fn buildPipeline(self: *MetallicRoughness, engine: *Engine) !void {
+    pub fn buildPipeline(self: *PBRMaterial, engine: *Engine) !void {
         var vert = try Shader.create(engine, .{ .name = "mesh.spv", .stage = .vertex });
         defer vert.destroy(engine.ctx);
         var frag = try Shader.create(engine, .{ .name = "mesh.spv", .stage = .fragment });
         defer frag.destroy(engine.ctx);
 
-        const matrix_range: vk.PushConstantRange = .{ .offset = 0, .size = @sizeOf(Buffers.GPUDrawPushConstants), .stage_flags = .{ .vertex_bit = true } };
+        const matrix_range: vk.PushConstantRange = .{ .offset = 0, .size = @sizeOf(Buffers.GPUDrawPushConstants), .stage_flags = .{ .vertex_bit = true, .fragment_bit = true } };
 
         var layout_builder = try descriptor.LayoutBuilder.init(engine.allocator);
         defer layout_builder.deinit();
 
         try layout_builder.addBinding(0, .uniform_buffer);
 
-        self.material_layout = try layout_builder.build(engine.ctx, .{ .vertex_bit = true, .fragment_bit = true }, .{}, null);
+        // self.material_layout = try layout_builder.build(engine.ctx, .{ .vertex_bit = true, .fragment_bit = true }, .{}, null);
 
         const layouts = [_]vk.DescriptorSetLayout{
             engine.descriptor.vk_global_descriptor_set_layout,
-            self.material_layout,
+            // self.material_layout,
         };
 
         const pipeline_layout = try engine.ctx.device.createPipelineLayout(&.{
@@ -151,18 +157,17 @@ pub const MetallicRoughness = struct {
         self.transparent_pipeline.pipeline = try pipeline_builder.buildPipeline(engine.ctx);
     }
 
-    pub fn clearResources(self: *MetallicRoughness, engine: *Engine) void {
+    pub fn clearResources(self: *PBRMaterial, engine: *Engine) void {
         _ = self;
         _ = engine;
     }
 
-    pub fn writeMaterial(
-        self: *MetallicRoughness,
-        engine: *Engine,
+    pub fn createMaterialInstance(
+        self: *PBRMaterial,
         pass: MaterialPass,
-        resources: MaterialResources,
-        desc_allocator: *descriptor.DescriptorAllocator,
-    ) !MaterialInstance {
+        material_idx: u32,
+        buffer_slot_idx: u32,
+    ) MaterialInstance {
         var material_data: MaterialInstance = undefined;
 
         material_data.pass_type = pass;
@@ -171,14 +176,34 @@ pub const MetallicRoughness = struct {
             .MainColor, .Other => &self.opaque_pipeline,
         };
 
-        material_data.material_set = try desc_allocator.allocate(engine.ctx, self.material_layout, null);
-
-        log.info("Write material image size: {} bytes", .{resources.color_image.size});
-        engine.descriptor.writer.clear();
-        try engine.descriptor.writer.writeBuffer(0, resources.data_buffer, @sizeOf(MaterialConstants), resources.data_buffer_offset, .uniform_buffer);
-
-        engine.descriptor.writer.updateSet(engine.ctx, material_data.material_set);
-
+        material_data.buffer_slot_idx = buffer_slot_idx;
+        material_data.material_idx = material_idx;
         return material_data;
     }
+
+    // pub fn writeMaterial(
+    //     self: *MetallicRoughness,
+    //     engine: *Engine,
+    //     pass: MaterialPass,
+    //     resources: MaterialResources,
+    //     desc_allocator: *descriptor.DescriptorAllocator,
+    // ) !MaterialInstance {
+    //     var material_data: MaterialInstance = undefined;
+    //
+    //     material_data.pass_type = pass;
+    //     material_data.pipeline = switch (pass) {
+    //         .Transparent => &self.transparent_pipeline,
+    //         .MainColor, .Other => &self.opaque_pipeline,
+    //     };
+    //
+    //        material_data.material_set = try desc_allocator.allocate(engine.ctx, self.material_layout, null);
+    //
+    //         log.info("Write material image size: {} bytes", .{resources.color_image.size});
+    //         engine.descriptor.writer.clear();
+    //         try engine.descriptor.writer.writeBuffer(0, resources.data_buffer, @sizeOf(MaterialConstants), resources.data_buffer_offset, .uniform_buffer);
+    //
+    //         engine.descriptor.writer.updateSet(engine.ctx, material_data.material_set);
+    //
+    //         return material_data;
+    // }
 };

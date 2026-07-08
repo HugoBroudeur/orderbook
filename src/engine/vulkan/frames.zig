@@ -109,7 +109,7 @@ pub fn setup(self: *Frame, engine: *Engine, allocator: std.mem.Allocator, swap_i
         .{ .vk_type = .storage_image, .ratio = 3 },
         .{ .vk_type = .storage_buffer, .ratio = 3 },
         .{ .vk_type = .uniform_buffer, .ratio = 3 },
-        .{ .vk_type = .combined_image_sampler, .ratio = 4 },
+        .{ .vk_type = .combined_image_sampler, .ratio = 5 },
     };
     self.frame_descriptor = try DescriptorAllocator.init(allocator, engine.ctx, 1000, frame_sizes);
 

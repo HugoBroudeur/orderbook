@@ -18,9 +18,9 @@ const Sampler = @import("../../engine/vulkan/sampler.zig");
 const Mesh = @import("../../engine/vulkan/mesh.zig");
 const Image = @import("../../engine/vulkan/image.zig");
 const Buffer = @import("../../engine/vulkan/buffer.zig");
-const MetallicRoughness = @import("../../engine/graphics/materials.zig").MetallicRoughness;
+const PBRMaterial = @import("../../engine/graphics/materials.zig").PBRMaterial;
 const MaterialPass = @import("../../engine/graphics/materials.zig").MaterialPass;
-const MaterialResources = @import("../../engine/graphics/materials.zig").MetallicRoughness.MaterialResources;
+const MaterialResources = @import("../../engine/graphics/materials.zig").PBRMaterial.MaterialResources;
 const Vertex = @import("../../engine/graphics/buffers.zig").Vertex;
 
 allocator: std.mem.Allocator,
@@ -291,11 +291,15 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
     try self.pool._nodes.ensureTotalCapacity(self.allocator, initial_node_index + gltf.data.nodes.len);
     try self.pool._materials.ensureTotalCapacity(self.allocator, initial_material_index + gltf.data.materials.len);
 
-    loaded_gltf.descriptor_pool = try .init(self.allocator, engine.ctx, @intCast(gltf.data.materials.len), &.{
-        .{ .vk_type = .combined_image_sampler, .ratio = 3 },
-        .{ .vk_type = .uniform_buffer, .ratio = 3 },
-        .{ .vk_type = .storage_buffer, .ratio = 1 },
-    });
+    // Leftover from the pre-bindless per-material descriptor-set design.
+    // Nothing allocates from this pool anymore (writeMaterial below is
+    // commented out) — kept here, commented, until the bindless path is
+    // fully confirmed stable.
+    // loaded_gltf.descriptor_pool = try .init(self.allocator, engine.ctx, @intCast(gltf.data.materials.len), &.{
+    //     .{ .vk_type = .combined_image_sampler, .ratio = 3 },
+    //     .{ .vk_type = .uniform_buffer, .ratio = 3 },
+    //     .{ .vk_type = .storage_buffer, .ratio = 1 },
+    // });
 
     // Load Samplers
     for (gltf.data.samplers) |*samp| {
@@ -346,7 +350,7 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
         }
     }
 
-    // Load Textures
+    // Load Images
     for (gltf.data.images, 0..) |*img, i| {
         const name = img.name orelse blk: {
             const alt_name = std.fmt.allocPrint(self.allocator, "unamed_idx_{}", .{i}) catch "";
@@ -376,13 +380,19 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
 
         self.pool._images.appendAssumeCapacity(image);
         if (Config.log.mesh) {
-            log.info("[DBG] image[{d}] '{s}' → bindless slot {d}", .{ i, name, bindless_slots[i] });
+            log.info("[DBG] image[{d}] '{s}'", .{ i, name });
         }
         try loaded_gltf.images.put(self.allocator, name, self.pool._images.items[self.pool._current_img_idx + i]);
     }
 
-    loaded_gltf.material_data_buffer = try MetallicRoughness.createMaterialPushConstantsBuffer(engine, @intCast(gltf.data.materials.len));
+    var buffer = try PBRMaterial.createMaterialPushConstantsBuffer(engine, @intCast(gltf.data.materials.len));
 
+    // LoadedGLTF owns this buffer (destroyed in its deinit); registerBuffer
+    // only copies the raw vk handle into the bindless cache.
+    loaded_gltf.material_data_buffer = buffer;
+    loaded_gltf.material_data_buffer_slot_idx = try engine.registerBuffer(&buffer, 0);
+
+    // Load Textures
     for (gltf.data.textures, 0..) |tex, i| {
         if (tex.source != null and tex.sampler != null) {
             bindless_slots[i] = try engine.registerTexture(self.pool._images.items[self.pool._current_img_idx + tex.source.?], &loaded_gltf.samplers.items[tex.sampler.?]);
@@ -391,11 +401,18 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
             log.warn("GLTF is missing a sampler, using default engine linear sampler. Texture ID: {}", .{i});
             bindless_slots[i] = try engine.registerTexture(self.pool._images.items[self.pool._current_img_idx + tex.source.?], &engine.samplers.get(.linear));
         }
+
+        if (Config.log.mesh) {
+            log.info("[DBG] textures[{d}] → bindless slot {d}", .{ i, bindless_slots[i] });
+        }
     }
 
-    const scene_material_constants = try self.allocator.alloc(MetallicRoughness.MaterialConstants, gltf.data.materials.len);
+    const scene_material_constants = try self.allocator.alloc(PBRMaterial.MaterialConstants, gltf.data.materials.len);
     defer self.allocator.free(scene_material_constants);
 
+    // Global material index across all GLTFs — belonged to the old shared-pool
+    // design; the bindless material_index is local to this GLTF's buffer.
+    // const current_material_idx = self.pool._materials.items.len;
     // Load Materials
     {
         for (gltf.data.materials, 0..) |mat, i| {
@@ -408,7 +425,7 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
 
             const pass_type: MaterialPass = if (mat.alpha_mode == .blend) .Transparent else .MainColor;
 
-            var material_resources: MetallicRoughness.MaterialResources = .{
+            var material_resources: PBRMaterial.MaterialResources = .{
                 .color_image = engine.images.get(.white),
                 .color_sampler = engine.samplers.get(.linear),
                 .metal_rough_image = engine.images.get(.white),
@@ -421,8 +438,9 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
                 .occlusion_sampler = engine.samplers.get(.linear),
                 .transmission_image = engine.images.get(.white),
                 .transmission_sampler = engine.samplers.get(.linear),
-                .data_buffer = loaded_gltf.material_data_buffer,
-                .data_buffer_offset = i * @sizeOf(MetallicRoughness.MaterialConstants),
+                // .data_buffer = loaded_gltf.material_data_buffer,
+                .data_buffer_idx = loaded_gltf.material_data_buffer_slot_idx,
+                .data_buffer_offset = i * @sizeOf(PBRMaterial.MaterialConstants),
             };
 
             const color_tex_id = self.parseTexture(gltf.data, mat.metallic_roughness.base_color_texture, loaded_gltf, &material_resources, bindless_slots, "color_image", "color_sampler");
@@ -433,12 +451,26 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
             const transmission_tex_id = self.parseTexture(gltf.data, mat.transmission_texture, loaded_gltf, &material_resources, bindless_slots, "transmission_image", "transmission_sampler");
 
             if (Config.log.mesh) {
-                log.info("[DBG] mat[{d}] '{s}' color={d} metalRough={d} normal={d} occlusion={d} emissive={d} transmission={d} transmissionFactor={d:.2} colorFactors={d:.2},{d:.2},{d:.2},{d:.2}", .{
-                    i,                                           name,                                        color_tex_id,
-                    metal_rough_tex_id,                          normal_tex_id,                               occlusion_tex_id,
-                    emissive_tex_id,                             transmission_tex_id,                         mat.transmission_factor,
-                    mat.metallic_roughness.base_color_factor[0], mat.metallic_roughness.base_color_factor[1], mat.metallic_roughness.base_color_factor[2],
+                log.info("[DBG] mat[{}:{d}] '{s}' color={d} metalRough={d} normal={d} occlusion={d} emissive={d} transmission={d} transmissionFactor={d:.2} colorFactors={d:.2},{d:.2},{d:.2},{d:.2} alpha_mode={} emissive_strength={d:.2} emissive_factor={d:.2},{d:.2},{d:.2}", .{
+                    pass_type,
+                    i,
+                    name,
+                    color_tex_id,
+                    metal_rough_tex_id,
+                    normal_tex_id,
+                    occlusion_tex_id,
+                    emissive_tex_id,
+                    transmission_tex_id,
+                    mat.transmission_factor,
+                    mat.metallic_roughness.base_color_factor[0],
+                    mat.metallic_roughness.base_color_factor[1],
+                    mat.metallic_roughness.base_color_factor[2],
                     mat.metallic_roughness.base_color_factor[3],
+                    mat.alpha_mode,
+                    mat.emissive_strength,
+                    mat.emissive_factor[0],
+                    mat.emissive_factor[1],
+                    mat.emissive_factor[2],
                 });
             }
 
@@ -455,13 +487,18 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
                 .transmission_tex_id = transmission_tex_id,
             };
 
-            new_mat.data = try engine.metal_rough_material.writeMaterial(engine, pass_type, material_resources, &loaded_gltf.descriptor_pool);
+            // Index is LOCAL to this GLTF's material buffer (the buffer_slot
+            // push constant already selects which buffer) — scene_material_constants
+            // is written at local i, so a global index would read a neighbor's record.
+            new_mat.data = engine.pbr_material.createMaterialInstance(pass_type, @intCast(i), loaded_gltf.material_data_buffer_slot_idx);
+            // new_mat.data = try engine.pbr_material.writeMaterial(engine, pass_type, material_resources, &loaded_gltf.descriptor_pool);
 
             self.pool._materials.appendAssumeCapacity(new_mat);
             try loaded_gltf.materials.put(self.allocator, name, new_mat);
         }
 
-        try loaded_gltf.material_data_buffer.copyInto(engine.ctx, std.mem.sliceAsBytes(scene_material_constants), 0);
+        try buffer.copyInto(engine.ctx, std.mem.sliceAsBytes(scene_material_constants), 0);
+        // try loaded_gltf.material_data_buffer.copyInto(engine.ctx, std.mem.sliceAsBytes(scene_material_constants), 0);
     }
 
     var indices = std.ArrayList(u32).empty;
@@ -718,11 +755,17 @@ fn extractMipmapMode(filter: Gltf.MinFilter) Sampler.SamplerType {
 
 /// Resolves a glTF texture reference (base color / metallic-roughness / normal /
 /// occlusion / emissive — anything shaped like `?{ index, texcoord, ... }`) into
-/// bindless data: writes the resolved `Image`/`Sampler` into the named fields of
-/// `material_resources` (via comptime field-name reflection, since each texture
-/// kind targets a different pair of fields on the same struct) and returns the
-/// bindless slot id for the material's UBO. Returns `0` when the texture is absent
-/// or has no source image, matching the pre-refactor fallback behavior.
+/// a bindless slot id for the material's UBO. Returns `0` when the texture is
+/// absent or has no source image, matching the pre-refactor fallback behavior.
+///
+/// `material_resources`/`image_field`/`sampler_field` are leftover from the
+/// pre-bindless per-material descriptor-set design, where this function also
+/// wrote the resolved Image/Sampler into the named fields of
+/// `material_resources` (via comptime field-name reflection) for later use by
+/// `writeMaterial` (now commented out, see materials.zig). Nothing reads
+/// `material_resources` anymore, so those writes are commented out below —
+/// kept, rather than removing the params, until the bindless path is fully
+/// confirmed stable.
 fn parseTexture(
     self: *AssetManager,
     gltf_data: Gltf.Data,
@@ -733,15 +776,22 @@ fn parseTexture(
     comptime image_field: []const u8,
     comptime sampler_field: []const u8,
 ) u32 {
+    _ = self;
+    _ = material_resources;
+    _ = loaded_gltf;
+    _ = image_field;
+    _ = sampler_field;
+
     const info = tex_info orelse return 0;
     const texture = gltf_data.textures[info.index];
 
-    if (texture.sampler) |sampler_idx| {
-        @field(material_resources.*, sampler_field) = loaded_gltf.samplers.items[sampler_idx];
-    }
+    // if (texture.sampler) |sampler_idx| {
+    //     @field(material_resources.*, sampler_field) = loaded_gltf.samplers.items[sampler_idx];
+    // }
 
     const img_idx = texture.source orelse return 0;
-    @field(material_resources.*, image_field) = self.pool._images.items[self.pool._current_img_idx + img_idx].*;
+    _ = img_idx;
+    // @field(material_resources.*, image_field) = self.pool._images.items[self.pool._current_img_idx + img_idx].*;
     return bindless_slots[info.index];
 }
 

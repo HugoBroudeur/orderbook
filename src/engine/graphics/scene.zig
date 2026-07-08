@@ -153,7 +153,11 @@ pub const LoadedGLTF = struct {
     samplers: std.ArrayList(Sampler),
 
     descriptor_pool: Descriptor.DescriptorAllocator = undefined,
+    /// Owned by this LoadedGLTF: the bindless cache (engine.buffer_cache)
+    /// only holds the raw vk handle, so this must be destroyed here.
     material_data_buffer: Buffer = undefined,
+
+    material_data_buffer_slot_idx: u32 = undefined,
     creator: *Engine = undefined,
 
     pub fn interface(self: *LoadedGLTF) IRenderable {
@@ -186,7 +190,9 @@ pub const LoadedGLTF = struct {
         self.images.deinit(self.allocator);
 
         self.material_data_buffer.destroy(ctx);
-        self.descriptor_pool.destroy(ctx);
+        // descriptor_pool is never initialized anymore (creation commented
+        // out in asset/manager.zig) — destroying it would touch undefined memory.
+        // self.descriptor_pool.destroy(ctx);
 
         self.meshes.deinit(self.allocator);
         self.nodes.deinit(self.allocator);

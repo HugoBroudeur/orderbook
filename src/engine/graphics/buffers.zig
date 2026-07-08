@@ -8,6 +8,8 @@ const Color = Primitive.Color;
 pub const GPUDrawPushConstants = extern struct {
     render_matrix: zm.Mat,
     vb_address: vk.DeviceAddress = undefined,
+    material_buffer_slot: u32,
+    material_index: u32,
 };
 pub const GPUDrawPushConstants2D = extern struct {
     scale: Data.Scale2D,

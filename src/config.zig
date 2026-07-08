@@ -8,7 +8,7 @@ base_project_path: []const u8,
 default_project_name: []const u8,
 
 pub const log: struct {
-    mesh: bool = false,
+    mesh: bool = true,
     buffer: bool = false,
 } = .{};
 

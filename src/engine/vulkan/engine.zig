@@ -47,7 +47,6 @@ const Pipeline = @import("pipeline.zig");
 const RenderPass = @import("render_pass.zig");
 const Sampler = @import("sampler.zig");
 const SceneData = @import("../command.zig").SceneData;
-const SceneManager = @import("../scene_manager.zig");
 const Shader = @import("shader.zig");
 const Swapchain = @import("swapchain.zig").Swapchain;
 
@@ -77,7 +76,6 @@ const GlobalDescriptor = struct {
     draw_image_descriptor_layout: vk.DescriptorSetLayout = undefined,
 
     // Global Scene
-    vk_global_descriptor_set: vk.DescriptorSet = undefined,
     vk_global_descriptor_set_layout: vk.DescriptorSetLayout = undefined,
 
     // Used in the 2D Shader
@@ -88,7 +86,7 @@ const GlobalDescriptor = struct {
         var ratio = [_]DescriptorAllocator.PoolSizeRatio{
             .{ .vk_type = .storage_image, .ratio = 3 },
             .{ .vk_type = .uniform_buffer, .ratio = 4 },
-            // .{ .vk_type = .sampled_image, .ratio = 1 },
+            .{ .vk_type = .storage_buffer, .ratio = 128 },
             .{ .vk_type = .combined_image_sampler, .ratio = 4096 },
             // .{ .vk_type = .sampler, .ratio = 1 },
         };
@@ -134,8 +132,6 @@ pipeline_layouts: std.EnumArray(PipelineType, vk.PipelineLayout) = .initUndefine
 images: std.EnumArray(ImageType, Image) = .initUndefined(),
 samplers: std.EnumArray(SamplerType, Sampler) = .initUndefined(),
 
-// imgui_draw_data: *ig.ImDrawData = undefined,
-imgui_draw_data: *anyopaque = undefined,
 gui_render_fn: ?*const fn (vk.CommandBuffer) void = null,
 
 batcher: Batcher,
@@ -147,13 +143,10 @@ render_scale: f32 = 1.0,
 frame_number: u64 = 0,
 
 // Graphics
-scene_manager: SceneManager = undefined,
-draw_queue: Command.DrawQueue = undefined,
 draw_context: *DrawContext = undefined,
 loaded_nodes: std.StringHashMap(IRenderable),
 // material_default_data: materials.MaterialInstance = undefined,
-material_constants_buffer: Buffer = undefined,
-metal_rough_material: materials.MetallicRoughness = .create(),
+pbr_material: materials.PBRMaterial = .create(),
 
 skybox_constants_buffer: Buffer = undefined,
 skybox_texture: Skybox.CubemapTexture = .create(),
@@ -166,8 +159,12 @@ last_material: ?*materials.MaterialInstance = null,
 last_index_buffer: ?*Buffer = null,
 
 // Bindless texture registry (slot 0 = grey fallback, seeded in setupDescriptors)
-bindless_texture_count: u32 = 0,
+texture_cache_count: u32 = 0,
+buffer_cache_count: u32 = 0,
+cubemap_cache_count: u32 = 0,
 texture_cache: std.ArrayList(vk.DescriptorImageInfo),
+buffer_cache: std.ArrayList(vk.DescriptorBufferInfo),
+cubemap_cache: std.ArrayList(vk.DescriptorImageInfo),
 
 pub fn init(
     allocator: std.mem.Allocator,
@@ -184,6 +181,8 @@ pub fn init(
         .loaded_nodes = .init(allocator),
         .draw_extent = ctx.window.toExtend2D(),
         .texture_cache = .empty,
+        .buffer_cache = .empty,
+        .cubemap_cache = .empty,
     };
 }
 
@@ -224,8 +223,7 @@ pub fn deinit(self: *Engine) void {
     self.text_buffer.destroy(self.ctx);
     self.batcher.deinit();
 
-    self.material_constants_buffer.destroy(self.ctx);
-    self.metal_rough_material.destroy(self);
+    self.pbr_material.destroy(self);
 
     self.skybox_constants_buffer.destroy(self.ctx);
     self.skybox_texture.destroy(self);
@@ -234,8 +232,8 @@ pub fn deinit(self: *Engine) void {
     self.loaded_nodes.deinit();
     // self.draw_context.deinit();
     self.texture_cache.deinit(self.allocator);
-    self.scene_manager.deinit();
-    self.draw_queue.deinit();
+    self.buffer_cache.deinit(self.allocator);
+    self.cubemap_cache.deinit(self.allocator);
 }
 
 pub fn setup(self: *Engine) !void {
@@ -243,9 +241,6 @@ pub fn setup(self: *Engine) !void {
 
     self.samplers.set(.nearest, try .create(self.ctx, .{}));
     self.samplers.set(.linear, try .create(self.ctx, .{ .min_filter = .linear, .mag_filter = .linear, .mipmap_mode = .linear, .max_lod = 1000 }));
-
-    self.draw_queue = try Command.DrawQueue.init(self.allocator, self);
-    self.scene_manager = SceneManager.init(&self.draw_queue, self.io);
 
     try self.createTextures();
 
@@ -257,12 +252,11 @@ pub fn setup(self: *Engine) !void {
 
     // Create Pipelines
     try self.create2DPipeline();
-    try self.metal_rough_material.buildPipeline(self);
+    try self.pbr_material.buildPipeline(self);
     try self.skybox_texture.buildPipeline(self);
 
     try self.compute_effect.buildPipeline(self);
 
-    self.material_constants_buffer = try materials.MetallicRoughness.createMaterialPushConstantsBuffer(self, 1);
     self.skybox_constants_buffer = try Skybox.CubemapTexture.createSkyboxPushConstantsBuffer(self, 1);
 
     // {
@@ -376,12 +370,18 @@ fn setupDescriptors(self: *Engine) !void {
     { // Scene
         var builder = try DescriptorLayoutBuilder.init(self.allocator);
         defer builder.deinit();
-        try builder.addBinding(0, .uniform_buffer);
-        try builder.addBinding(1, .combined_image_sampler);
-        builder.bindings.items[1].descriptor_count = 4048;
+        try builder.addBinding(0, .uniform_buffer); // UBO
+        try builder.addBinding(1, .combined_image_sampler); // Cube Textures (Skybox)
+        try builder.addBinding(2, .storage_buffer); // Data
+        try builder.addBinding(3, .combined_image_sampler); // 2D Textures
+        builder.bindings.items[1].descriptor_count = 32;
+        builder.bindings.items[2].descriptor_count = 1024;
+        builder.bindings.items[3].descriptor_count = 4096;
 
-        const flags: [2]vk.DescriptorBindingFlags = .{
+        const flags: [4]vk.DescriptorBindingFlags = .{
             .{},
+            .{ .partially_bound_bit = true },
+            .{ .partially_bound_bit = true },
             .{ .partially_bound_bit = true, .variable_descriptor_count_bit = true },
         };
         const bind_flags: vk.DescriptorSetLayoutBindingFlagsCreateInfo = .{
@@ -396,14 +396,21 @@ fn setupDescriptors(self: *Engine) !void {
             &bind_flags,
         );
 
-        const variable_count: u32 = 4048;
+        // I have re-enabled the variable count. Previously the layout had
+        // 0 - UBO
+        // 1 - Textures
+        // Variable means textures can grow dynamically
+        // If it happers that I need more, I'll need to put that back in place and move
+        // the [1] slot to the last one and update all the shaders
+        const variable_count: u32 = 4096;
         const variable_count_info: vk.DescriptorSetVariableDescriptorCountAllocateInfo = .{
             .descriptor_set_count = 1,
             .p_descriptor_counts = @ptrCast(&variable_count),
         };
-        self.descriptor.vk_global_descriptor_set = try self.descriptor.desc_allocator.allocate(
+        _ = try self.descriptor.desc_allocator.allocate(
             self.ctx,
             self.descriptor.vk_global_descriptor_set_layout,
+            // null,
             @ptrCast(&variable_count_info),
         );
 
@@ -703,6 +710,7 @@ fn drawGeometry(self: *Engine) !void {
 
     try current_frame.scene_data_buffer.copyInto(self.ctx, &std.mem.toBytes(current_frame.scene_data), 0);
 
+    // See comment about dynamic descriptor count in the global descriptor
     const variable_count: u32 = @intCast(self.texture_cache.items.len);
     const count_info: vk.DescriptorSetVariableDescriptorCountAllocateInfo = .{
         .descriptor_set_count = 1,
@@ -711,6 +719,7 @@ fn drawGeometry(self: *Engine) !void {
     const frame_descriptor_set = try current_frame.frame_descriptor.allocate(
         self.ctx,
         self.descriptor.vk_global_descriptor_set_layout,
+        // null,
         @ptrCast(&count_info),
     );
 
@@ -719,13 +728,27 @@ fn drawGeometry(self: *Engine) !void {
 
     if (self.texture_cache.items.len > 0) {
         const write = vk.WriteDescriptorSet{
-            .dst_binding = 1,
+            .dst_binding = 3,
             .dst_set = .null_handle, // filled by updateSet
             .dst_array_element = 0,
             .descriptor_count = @intCast(self.texture_cache.items.len),
             .descriptor_type = .combined_image_sampler,
             .p_image_info = self.texture_cache.items.ptr,
             .p_buffer_info = undefined,
+            .p_texel_buffer_view = undefined,
+        };
+        try self.descriptor.writer.writes.append(self.descriptor.writer.allocator, write);
+    }
+
+    if (self.buffer_cache.items.len > 0) {
+        const write = vk.WriteDescriptorSet{
+            .dst_binding = 2,
+            .dst_set = .null_handle, // filled by updateSet
+            .dst_array_element = 0,
+            .descriptor_count = @intCast(self.buffer_cache.items.len),
+            .descriptor_type = .storage_buffer,
+            .p_image_info = undefined,
+            .p_buffer_info = self.buffer_cache.items.ptr,
             .p_texel_buffer_view = undefined,
         };
         try self.descriptor.writer.writes.append(self.descriptor.writer.allocator, write);
@@ -811,7 +834,7 @@ fn drawRenderObject(
             self.ctx.device.cmdSetScissor(cmdbuf.vk_command_buffer, 0, &.{self.getCurrentFrame().scissor});
         }
 
-        self.ctx.device.cmdBindDescriptorSets(cmdbuf.vk_command_buffer, .graphics, pipeline.pipeline_layout, 1, &.{ro.material.material_set}, null);
+        // self.ctx.device.cmdBindDescriptorSets(cmdbuf.vk_command_buffer, .graphics, pipeline.pipeline_layout, 1, &.{ro.material.material_set}, null);
     }
 
     // rebind index buffer if needed
@@ -823,9 +846,11 @@ fn drawRenderObject(
     const push_constant: GPUDrawPushConstants = .{
         .render_matrix = ro.transform,
         .vb_address = ro.vertex_buffer.address.?,
+        .material_buffer_slot = ro.material.buffer_slot_idx,
+        .material_index = ro.material.material_idx,
     };
 
-    self.ctx.device.cmdPushConstants(cmdbuf.vk_command_buffer, pipeline.pipeline_layout, .{ .vertex_bit = true }, 0, @sizeOf(GPUDrawPushConstants), @ptrCast(&push_constant));
+    self.ctx.device.cmdPushConstants(cmdbuf.vk_command_buffer, pipeline.pipeline_layout, .{ .vertex_bit = true, .fragment_bit = true }, 0, @sizeOf(GPUDrawPushConstants), @ptrCast(&push_constant));
     self.ctx.device.cmdDrawIndexed(cmdbuf.vk_command_buffer, ro.index_count, 1, ro.first_index, 0, 0);
     self.stats.addDrawCall(ro.index_count / 3, ro.index_count);
 }
@@ -878,36 +903,35 @@ fn drawGuiEditor(self: *Engine) void {
     }
 }
 
-// fn updateScene(self: *Engine, draw_queue: *Command.DrawQueue) void {
-//     // Logger.debug("[Engine.update_scene] {} Draw Commands", .{draw_queue.cmds.cur_pos});
-//     // draw_queue.sort() // optimise draw calls ?
-//
-//     self.getCurrentFrame().scene_data = draw_queue.scene_data;
-//
-//     self.batcher.begin();
-//
-//     for (draw_queue.cmds.buffer.items) |draw_cmd| {
-//         if (self.batcher.shouldFlush(draw_cmd)) {
-//             self.batcher.flush();
-//         }
-//
-//         switch (draw_cmd) {
-//             .imgui => |cmd| self.imgui_draw_data = cmd.data,
-//             else => self.batcher.push(draw_cmd),
-//         }
-//     }
-//
-//     self.pending_batches = self.batcher.end();
-//
-//     // TODO, if can't draw all in 1 batch, process max cmd as possible using a pointer to count how many commands are left
-//     // For now, rewind to 0
-//     draw_queue.cmds.rewind(0);
-// }
-
+/// Call this function to bind image/sampler to a descriptor set
 pub fn registerTexture(self: *Engine, image: *const Image, sampler: *const Sampler) !u32 {
-    const slot = self.bindless_texture_count;
-    self.bindless_texture_count += 1;
+    const slot = self.texture_cache_count;
+    self.texture_cache_count += 1;
     try self.texture_cache.append(self.allocator, .{
+        .sampler = sampler.vk_sampler,
+        .image_view = image.view,
+        .image_layout = .shader_read_only_optimal,
+    });
+    return slot;
+}
+
+/// Call this function to bind a buffer to a descriptor set
+pub fn registerBuffer(self: *Engine, buffer: *const Buffer, offset: u64) !u32 {
+    const slot = self.buffer_cache_count;
+    self.buffer_cache_count += 1;
+    try self.buffer_cache.append(self.allocator, .{
+        .buffer = buffer.vk_buffer,
+        .offset = offset,
+        .range = buffer.size,
+    });
+    return slot;
+}
+
+/// Call this function to bind a Cubemap Texture to a descriptor set
+pub fn registerCubemap(self: *Engine, image: *const Image, sampler: *const Sampler) !u32 {
+    const slot = self.cubemap_cache_count;
+    self.cubemap_cache_count += 1;
+    try self.cubemap_cache.append(self.allocator, .{
         .sampler = sampler.vk_sampler,
         .image_view = image.view,
         .image_layout = .shader_read_only_optimal,

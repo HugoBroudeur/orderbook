@@ -37,7 +37,9 @@ public struct PointLight : ILight {
       float3 H = normalize(lightDir + viewDir);
       float NdotH = dot(normal, H);
       float specularIntensity = pow(saturate(NdotH), specularHardness);
-      OUT.Specular = sign(saturate(NdotL)) * specularIntensity * specularColor *
+      // Fade specular with NdotL instead of the hard sign() gate — the
+      // binary cutoff pops/shimmers at the light terminator.
+      OUT.Specular = saturate(NdotL) * specularIntensity * specularColor *
                      specularPower / dist2;
     }
     return OUT;
@@ -79,10 +81,10 @@ public struct DirectionalLight : ILight {
 
     float3 H = normalize(lightDir + viewDir);
     float NdotH = dot(normal, H);
-    OUT.Specular = sign(saturate(NdotL)) *
-                   pow(saturate(NdotH), specularHardness) * specularColor *
-
-                   specularPower;
+    // Fade specular with NdotL instead of the hard sign() gate — the
+    // binary cutoff pops/shimmers at the light terminator.
+    OUT.Specular = saturate(NdotL) * pow(saturate(NdotH), specularHardness) *
+                   specularColor * specularPower;
     return OUT;
   }
 };
