@@ -3,7 +3,7 @@ const log = std.log.scoped(.materials);
 const vk = @import("vulkan");
 const materials = @import("materials.zig");
 const descriptor = @import("../vulkan/descriptor.zig");
-const Image = @import("../vulkan/image.zig");
+const AllocatedImage = @import("../vulkan/image.zig").AllocatedImage;
 const Sampler = @import("../vulkan/sampler.zig");
 const Buffer = @import("../vulkan/buffer.zig");
 const Buffers = @import("buffers.zig");
@@ -46,12 +46,13 @@ pub const PBRMaterial = struct {
         occlusion_tex_id: u32,
         emissive_tex_id: u32,
         transmission_tex_id: u32,
+        cube_tex_id: u32,
         // Pads the record to 80 bytes = the std430 array stride the shader
         // uses for StructuredBuffer<MaterialData> in scene.slang (its float4
         // members give the struct 16-byte alignment, so 76 bytes of fields
         // round up to 80 per element). extern layout + this pad + the asserts
         // below keep the Zig and Slang sides in lockstep at compile time.
-        _padding1: u32 = 0,
+        // _padding1: u32 = 0,
 
         comptime {
             if (@offsetOf(MaterialConstants, "color_tex_id") != 52) @compileError("color_tex_id must be at offset 52 (must match MaterialData in scene.slang)");
@@ -64,17 +65,17 @@ pub const PBRMaterial = struct {
     }
 
     pub const MaterialResources = struct {
-        color_image: Image,
+        color_image: AllocatedImage,
         color_sampler: Sampler,
-        metal_rough_image: Image,
+        metal_rough_image: AllocatedImage,
         metal_rough_sampler: Sampler,
-        normal_image: Image,
+        normal_image: AllocatedImage,
         normal_sampler: Sampler,
-        emissive_image: Image,
+        emissive_image: AllocatedImage,
         emissive_sampler: Sampler,
-        occlusion_image: Image,
+        occlusion_image: AllocatedImage,
         occlusion_sampler: Sampler,
-        transmission_image: Image,
+        transmission_image: AllocatedImage,
         transmission_sampler: Sampler,
         // data_buffer: Buffer,
         data_buffer_idx: u32,

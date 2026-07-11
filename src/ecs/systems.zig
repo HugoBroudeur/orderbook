@@ -35,11 +35,14 @@ pub const Plugins = struct {
             try world.addResource(Components.DrawContextQueue.init(world.memtator.parent));
             world.flushCommands();
 
-            // Load plugins
+            // Register States
             try world.addPlugin(World.Ecs.StatePlugin(World.Gamestate.boot, World.Schedule.cleanup));
+
+            // Register Events
             try world.addPlugin(World.Ecs.EventPlugin(Components.PendingSceneEvent, Schedule.post_update));
             try world.addPlugin(World.Ecs.EventPlugin(Components.LoadedSceneEvent, Schedule.cleanup));
             try world.addPlugin(World.Ecs.EventPlugin(Components.AssetLoaded, Schedule.cleanup));
+            try world.addPlugin(World.Ecs.EventPlugin(Components.SkyboxRenamed, Schedule.cleanup));
 
             // Pre update systems
             try world.addSystem(Schedule.pre_update, World.Ecs.Chain(.{
@@ -291,6 +294,7 @@ fn drawScene(
         t: *const Components.Transform,
     }),
     draw_context: ResMut(Components.DrawContextQueue),
+    // skybox: Res(Components.Skybox),
     stats: ResMut(Components.Stats),
 ) !void {
     var it = query.iter();
@@ -298,6 +302,8 @@ fn drawScene(
 
     // Clear queues
     draw_context.inner.reset();
+
+    // draw_context.inner.skybox =
 
     while (it.next()) |entry| {
         var top_matrix = entry.t.toMatrix();
@@ -378,6 +384,29 @@ fn onAssetLoaded(
             Components.GltfMesh{ .ptr = event.ptr, .name = event.name, .guid = guid },
             Components.Transform{},
         });
+
+        log.info("Add GLTF Mesh in ECS: {s}", .{event.name});
+    }
+}
+
+fn onSkyboxRenamed(
+    alloc: World.Ecs.Alloc,
+    cmd: World.Ecs.Commands,
+    reader: World.Ecs.EventReader(Components.SkyboxRenamed),
+    skybox: ResMut(Components.Skybox),
+) !void {
+    _ = alloc; // autofix
+    _ = cmd; // autofix
+    for (reader.events) |event| {
+
+        // asset loader has a cube_image cache, it attempts to load the image if not exists
+        // return guid
+
+        // engine has a string hash map name/Skybox (same as pbr_material)
+        // upload data to GPU via the engine/graphic/skybox.zig
+
+        skybox.inner.name = event.name;
+        // skybox.inner.guid = guid;
 
         log.info("Add GLTF Mesh in ECS: {s}", .{event.name});
     }

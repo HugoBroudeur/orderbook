@@ -40,7 +40,8 @@ const DescriptorLayoutBuilder = @import("descriptor.zig").LayoutBuilder;
 const DrawCommand = @import("../command.zig");
 const Frame = @import("frames.zig");
 const GraphicsContext = @import("../../core/graphics_context.zig");
-const Image = @import("image.zig");
+const ImageMetadata = @import("image.zig").ImageMetadata;
+const AllocatedImage = @import("image.zig").AllocatedImage;
 const Logger = @import("../../core/log.zig").MaxLogs(50);
 const Mesh = @import("mesh.zig");
 const Pipeline = @import("pipeline.zig");
@@ -55,7 +56,7 @@ const Engine = @This();
 pub const GPUCommandFn = fn (vk.CommandBuffer) anyerror!void;
 pub const DrawPassType = enum { demo, ui, shadow, ssao, sky, solid, raycast, transparent };
 pub const TransferBufferType = enum { atlas_buffer_data, atlas_texture_data };
-pub const ImageType = enum { atlas, black, white, grey, error_checker };
+pub const ImageType = enum { black, white, grey, error_checker };
 pub const SamplerType = enum { nearest, linear };
 pub const PipelineType = enum { _2d };
 
@@ -102,7 +103,12 @@ const GlobalDescriptor = struct {
         if (self.is_initialised) {
             ctx.device.destroyDescriptorSetLayout(self.draw_image_descriptor_layout, null);
             ctx.device.destroyDescriptorSetLayout(self.vk_global_descriptor_set_layout, null);
-            ctx.device.destroyDescriptorSetLayout(self.vk_2d_descriptor_set_layout, null);
+            // vk_2d_descriptor_set_layout's creation (the "2D images (atlas)"
+            // block in setupDescriptors) is disabled, so this field is never
+            // initialized — destroying it double-frees a garbage handle and
+            // triggers Invalid Object / Couldn't find validation errors on
+            // shutdown. Re-enable this once that block comes back.
+            // ctx.device.destroyDescriptorSetLayout(self.vk_2d_descriptor_set_layout, null);
         }
         self.writer.deinit();
     }
@@ -125,11 +131,11 @@ meshes: std.ArrayList(Mesh),
 // Global descriptors
 descriptor: GlobalDescriptor = undefined,
 
-draw_image: Image = undefined,
-depth_image: Image = undefined,
+draw_image: AllocatedImage = undefined,
+depth_image: AllocatedImage = undefined,
 pipelines: std.EnumArray(PipelineType, Pipeline) = .initUndefined(),
 pipeline_layouts: std.EnumArray(PipelineType, vk.PipelineLayout) = .initUndefined(),
-images: std.EnumArray(ImageType, Image) = .initUndefined(),
+images: std.EnumArray(ImageType, AllocatedImage) = .initUndefined(),
 samplers: std.EnumArray(SamplerType, Sampler) = .initUndefined(),
 
 gui_render_fn: ?*const fn (vk.CommandBuffer) void = null,
@@ -137,7 +143,6 @@ gui_render_fn: ?*const fn (vk.CommandBuffer) void = null,
 batcher: Batcher,
 pending_batches: []Batcher.Batch = &.{},
 is_minimised: bool = false,
-draw_extent: vk.Extent2D,
 render_scale: f32 = 1.0,
 
 frame_number: u64 = 0,
@@ -157,6 +162,7 @@ compute_effect: ComputeEffect = .create(),
 last_pipeline: ?*materials.MaterialPipeline = null,
 last_material: ?*materials.MaterialInstance = null,
 last_index_buffer: ?*Buffer = null,
+// last_skybox: ?*Skybox.CubemapInstance = null,
 
 // Bindless texture registry (slot 0 = grey fallback, seeded in setupDescriptors)
 texture_cache_count: u32 = 0,
@@ -179,7 +185,6 @@ pub fn init(
         // .draw_context = try .init(allocator),
         .meshes = try .initCapacity(allocator, 0),
         .loaded_nodes = .init(allocator),
-        .draw_extent = ctx.window.toExtend2D(),
         .texture_cache = .empty,
         .buffer_cache = .empty,
         .cubemap_cache = .empty,
@@ -205,10 +210,10 @@ pub fn deinit(self: *Engine) void {
 
     self.descriptor.destroy(self.ctx);
 
-    self.draw_image.destroy(self.ctx);
-    self.depth_image.destroy(self.ctx);
+    self.draw_image.destroy(self);
+    self.depth_image.destroy(self);
     for (&self.images.values) |*image| {
-        image.destroy(self.ctx);
+        image.destroy(self);
     }
 
     for (&self.samplers.values) |*sampler| {
@@ -220,7 +225,11 @@ pub fn deinit(self: *Engine) void {
     self.meshes.deinit(self.allocator);
 
     self.batcher_buffer.destroy(self.ctx);
-    self.text_buffer.destroy(self.ctx);
+    // text_buffer's creation (Atlas block in createTextures) is disabled, so
+    // the field is never initialized — destroying it here double-frees a
+    // garbage handle and triggers Invalid Object / Couldn't find validation
+    // errors on shutdown. Re-enable this once the Atlas block comes back.
+    // self.text_buffer.destroy(self.ctx);
     self.batcher.deinit();
 
     self.pbr_material.destroy(self);
@@ -270,87 +279,74 @@ pub fn setup(self: *Engine) !void {
 
 fn createTextures(self: *Engine) !void {
     { // Main Draw image
-        self.draw_image = try Image.create(
-            self,
-            .{
-                .width = self.draw_extent.width,
-                .height = self.draw_extent.height,
-                .depth = 1,
-            },
-            .r16g16b16a16_sfloat,
-            .{
-                .transfer_src_bit = true,
-                .transfer_dst_bit = true,
-                .storage_bit = true,
-                .color_attachment_bit = true,
-            },
-            true,
-        );
+        self.draw_image = try AllocatedImage.create(self, self.ctx.window.getDimension(), .r16g16b16a16_sfloat, .{
+            .transfer_src_bit = true,
+            .transfer_dst_bit = true,
+            .storage_bit = true,
+            .color_attachment_bit = true,
+        }, false, 1);
     }
 
     { // Main Depth image
-        self.depth_image = try Image.create(
-            self,
-            .{
-                .width = self.draw_extent.width,
-                .height = self.draw_extent.height,
-                .depth = 1,
-            },
-            .d32_sfloat,
-            .{
-                .depth_stencil_attachment_bit = true,
-            },
-            false,
-        );
+        self.depth_image = try AllocatedImage.create(self, self.ctx.window.getDimension(), .d32_sfloat, .{
+            .depth_stencil_attachment_bit = true,
+        }, false, 1);
     }
 
-    { // Single 1px color
-        var map: std.EnumMap(ImageType, ?Color) = .init(.{
-            .white = .White,
-            .black = .Black,
-            .grey = .Grey,
+    { // Some basic 1 or 2 pixel images
+        const y = Color.Yellow.toBytes();
+        const b = Color.Black.toBytes();
+        const checker_bytes = y ++ b ++ b ++ y;
+
+        var map: std.EnumMap(ImageType, []const u8) = .init(.{
+            .white = &Color.White.toBytes(),
+            .black = &Color.Black.toBytes(),
+            .grey = &Color.Grey.toBytes(),
+            .error_checker = &checker_bytes,
         });
         var it = map.iterator();
         while (it.next()) |m| {
-            if (m.value.*) |color|
-                self.images.set(m.key, try Image.createFromColor(
-                    self,
-                    color,
-                    .{ .height = 1, .width = 1, .depth = 1 },
-                    .r8g8b8a8_unorm,
-                    .{ .sampled_bit = true },
-                ));
+            const size = std.math.sqrt(m.value.len / 4);
+            var img = ImageMetadata.init(.{ .pixels = .{ .data = m.value.*, .format = .packed_rgba_8_8_8_8 } }, .{ .height = size, .width = size, .depth = 1 });
+
+            const allocated_img = try AllocatedImage.create(self, .{ .width = size, .height = size, .depth = 1 }, .r8g8b8a8_unorm, .{ .sampled_bit = true, .transfer_dst_bit = true, .transfer_src_bit = true }, false, 1);
+            try img.upload(self, allocated_img);
+
+            self.images.set(m.key, allocated_img);
         }
     }
 
-    { // Checker pattern
-        const m = Color.Magenta.toBytes();
-        const b = Color.Black.toBytes();
-        const checker_bytes = m ++ b ++ b ++ m;
+    // { // Checker pattern
+    //     var img = try ImageMetadata.parse(.{ .pixels = .{ .data = &checker_bytes, .dimension = .{ .height = 2, .width = 2 }, .format = .packed_rgba_8_8_8_8 } }, false);
+    //
+    //     try img.allocateGpuMemory(self, .r8g8b8a8_unorm, .{ .sampled_bit = true });
+    //     try img.upload(self);
+    //
+    //     self.images.set(.error_checker, img);
+    //
+    //     // self.images.set(.error_checker, try ImageMetadata.createFromBytes(
+    //     //     self,
+    //     //     &checker_bytes,
+    //     //     .{ .height = 2, .width = 2, .depth = 1 },
+    //     //     .r8g8b8a8_unorm,
+    //     //     .{ .sampled_bit = true },
+    //     //     false,
+    //     // ));
+    // }
 
-        self.images.set(.error_checker, try Image.createFromBytes(
-            self,
-            &checker_bytes,
-            .{ .height = 2, .width = 2, .depth = 1 },
-            .r8g8b8a8_unorm,
-            .{ .sampled_bit = true },
-            false,
-        ));
-    }
-
-    { // Atlas
-        const surface = try Image.loadImageAsset("assets/images/Background.jpg", .array_rgba_32);
-        defer surface.deinit();
-        const image = try Image.createFromPath(
-            self,
-            "assets/images/Background.jpg",
-            .array_rgba_32,
-            .{ .sampled_bit = true },
-        );
-        self.images.set(.atlas, image);
-        self.text_buffer = try Buffer.create(self.ctx, @intCast(self.images.get(.atlas).size), .{ .transfer_dst_bit = true }, .{ .device_local_bit = true });
-        try self.text_buffer.fastTransfer(self.ctx, &self.getCurrentFrame().cmd_pool, surface.getPixels().?);
-    }
+    // { // Atlas
+    //     const surface = try ImageMetadata.loadImageAssetWithFormat("assets/images/Background.jpg", .array_rgba_32);
+    //     defer surface.deinit();
+    //     const image = try ImageMetadata.createFromPath(
+    //         self,
+    //         "assets/images/Background.jpg",
+    //         .array_rgba_32,
+    //         .{ .sampled_bit = true },
+    //     );
+    //     self.images.set(.atlas, image);
+    //     self.text_buffer = try Buffer.create(self.ctx, @intCast(self.images.get(.atlas).size), .{ .transfer_dst_bit = true }, .{ .device_local_bit = true });
+    //     try self.text_buffer.fastTransfer(self.ctx, &self.getCurrentFrame().cmd_pool, surface.getPixels().?);
+    // }
 }
 
 fn setupDescriptors(self: *Engine) !void {
@@ -416,22 +412,22 @@ fn setupDescriptors(self: *Engine) !void {
 
         _ = try self.registerTexture(&self.images.get(.white), &self.samplers.get(.nearest));
     }
-    { // 2D images (atlas)
-        var builder = try DescriptorLayoutBuilder.init(self.allocator);
-        defer builder.deinit();
-        try builder.addBinding(0, .combined_image_sampler);
-        try builder.addBinding(1, .combined_image_sampler);
-        self.descriptor.vk_2d_descriptor_set_layout = try builder.build(self.ctx, .{ .fragment_bit = true }, .{}, null);
-        self.descriptor.vk_2d_descriptor_set = try self.descriptor.desc_allocator.allocate(self.ctx, self.descriptor.vk_2d_descriptor_set_layout, null);
-
-        self.descriptor.writer.clear();
-        try self.descriptor.writer.writeImage(0, self.images.get(.atlas), self.samplers.get(.linear), .shader_read_only_optimal, .combined_image_sampler);
-        self.descriptor.writer.updateSet(self.ctx, self.descriptor.vk_2d_descriptor_set);
-
-        self.descriptor.writer.clear();
-        try self.descriptor.writer.writeImage(1, self.images.get(.error_checker), self.samplers.get(.nearest), .shader_read_only_optimal, .combined_image_sampler);
-        self.descriptor.writer.updateSet(self.ctx, self.descriptor.vk_2d_descriptor_set);
-    }
+    // { // 2D images (atlas)
+    //     var builder = try DescriptorLayoutBuilder.init(self.allocator);
+    //     defer builder.deinit();
+    //     try builder.addBinding(0, .combined_image_sampler);
+    //     try builder.addBinding(1, .combined_image_sampler);
+    //     self.descriptor.vk_2d_descriptor_set_layout = try builder.build(self.ctx, .{ .fragment_bit = true }, .{}, null);
+    //     self.descriptor.vk_2d_descriptor_set = try self.descriptor.desc_allocator.allocate(self.ctx, self.descriptor.vk_2d_descriptor_set_layout, null);
+    //
+    //     self.descriptor.writer.clear();
+    //     try self.descriptor.writer.writeImage(0, self.images.get(.atlas), self.samplers.get(.linear), .shader_read_only_optimal, .combined_image_sampler);
+    //     self.descriptor.writer.updateSet(self.ctx, self.descriptor.vk_2d_descriptor_set);
+    //
+    //     self.descriptor.writer.clear();
+    //     try self.descriptor.writer.writeImage(1, self.images.get(.error_checker), self.samplers.get(.nearest), .shader_read_only_optimal, .combined_image_sampler);
+    //     self.descriptor.writer.updateSet(self.ctx, self.descriptor.vk_2d_descriptor_set);
+    // }
     self.descriptor.is_initialised = true;
 }
 
@@ -458,6 +454,9 @@ pub fn render(self: *Engine, scene: *Scene, asset_pool: *AssetPool) !void {
     self.stats = try scene.reg.app.getResource(Components.Stats);
 
     self.getCurrentFrame().scene_data = scene_data;
+
+    // TODO
+    // self.skybox_texture.load(self, asset_pool._images(skybox.));
 
     // TODO: (Dummy, needs to be in the ECS) Populate draw context from the scene graph each frame
     // {
@@ -524,11 +523,13 @@ fn draw(self: *Engine) !void {
         current_frame = self.getCurrentFrame();
     }
 
-    self.draw_extent = .{
+    const draw_extent: vk.Extent2D = .{
         .width = @intFromFloat(@as(f32, @floatFromInt(@min(self.swapchain.extent.width, self.draw_image.dimension.width))) * self.render_scale),
         .height = @intFromFloat(@as(f32, @floatFromInt(@min(self.swapchain.extent.height, self.draw_image.dimension.height))) * self.render_scale),
     };
-    current_frame.resize(self.draw_extent);
+
+    // self.draw_image.
+    current_frame.resize(draw_extent);
 
     self.fillCommandBuffers() catch {
         current_frame.swapchain_state = .suboptimal;
@@ -570,34 +571,88 @@ fn fillCommandBuffers(self: *Engine) !void {
         self.stats.tickClock(.fence_wait);
     }
 
-    const draw_image = &self.draw_image;
-    const depth_image = &self.depth_image;
-    const cmdbuf = &current_frame.cmd_buf.vk_command_buffer;
+    const cmd_buf = &current_frame.cmd_buf.vk_command_buffer;
+    const swapchain_img = &self.swapchain.currentImage();
     try current_frame.frame_descriptor.clear(self.ctx);
 
     const cmd_begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .one_time_submit_bit = true } };
 
     //now that we are sure that the commands finished executing, we can safely reset the command buffer to begin recording again.
-    try self.ctx.device.resetCommandBuffer(cmdbuf.*, .{});
-    try self.ctx.device.beginCommandBuffer(cmdbuf.*, &cmd_begin_info);
+    try self.ctx.device.resetCommandBuffer(cmd_buf.*, .{});
+    try self.ctx.device.beginCommandBuffer(cmd_buf.*, &cmd_begin_info);
 
     // Compute background
     {
         self.stats.startClock(.compute_pass);
 
-        draw_image.transitionToLayout(self, current_frame.cmd_buf, .undefined, .general);
+        self.draw_image.transitionLayout(self, current_frame.cmd_buf, .undefined, .general, 0, 1);
         self.drawEffects();
 
         self.stats.tickClock(.compute_pass);
+    }
+
+    // Bind data to GPU
+    {
+        self.stats.startClock(.transfer);
+
+        try current_frame.scene_data_buffer.copyInto(self.ctx, &std.mem.toBytes(current_frame.scene_data), 0);
+
+        // See comment about dynamic descriptor count in the global descriptor
+        const variable_count: u32 = @intCast(self.texture_cache.items.len);
+        const count_info: vk.DescriptorSetVariableDescriptorCountAllocateInfo = .{
+            .descriptor_set_count = 1,
+            .p_descriptor_counts = @ptrCast(&variable_count),
+        };
+        current_frame.descriptor_set = try current_frame.frame_descriptor.allocate(
+            self.ctx,
+            self.descriptor.vk_global_descriptor_set_layout,
+            // null,
+            @ptrCast(&count_info),
+        );
+
+        self.descriptor.writer.clear();
+        try self.descriptor.writer.writeBuffer(0, current_frame.scene_data_buffer, current_frame.scene_data_buffer.size, 0, .uniform_buffer);
+
+        if (self.texture_cache.items.len > 0) {
+            const write = vk.WriteDescriptorSet{
+                .dst_binding = 3,
+                .dst_set = .null_handle, // filled by updateSet
+                .dst_array_element = 0,
+                .descriptor_count = @intCast(self.texture_cache.items.len),
+                .descriptor_type = .combined_image_sampler,
+                .p_image_info = self.texture_cache.items.ptr,
+                .p_buffer_info = undefined,
+                .p_texel_buffer_view = undefined,
+            };
+            try self.descriptor.writer.writes.append(self.descriptor.writer.allocator, write);
+        }
+
+        if (self.buffer_cache.items.len > 0) {
+            const write = vk.WriteDescriptorSet{
+                .dst_binding = 2,
+                .dst_set = .null_handle, // filled by updateSet
+                .dst_array_element = 0,
+                .descriptor_count = @intCast(self.buffer_cache.items.len),
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = self.buffer_cache.items.ptr,
+                .p_texel_buffer_view = undefined,
+            };
+            try self.descriptor.writer.writes.append(self.descriptor.writer.allocator, write);
+        }
+
+        self.descriptor.writer.updateSet(self.ctx, current_frame.descriptor_set);
+
+        self.stats.tickClock(.transfer);
     }
 
     // Skybox
     {
         self.stats.startClock(.render_pass_3d);
 
-        draw_image.transitionToLayout(self, current_frame.cmd_buf, .general, .color_attachment_optimal);
-        depth_image.transitionToLayout(self, current_frame.cmd_buf, .undefined, .depth_attachment_optimal);
-        self.images.getPtr(.atlas).transitionToLayout(self, current_frame.cmd_buf, .undefined, .shader_read_only_optimal);
+        self.draw_image.transitionLayout(self, current_frame.cmd_buf, .general, .color_attachment_optimal, 0, 1);
+        self.depth_image.transitionLayout(self, current_frame.cmd_buf, .undefined, .depth_attachment_optimal, 0, 1);
+        // self.images.getPtr(.atlas).transitionToLayout(self, current_frame.cmd_buf, .undefined, .shader_read_only_optimal);
         try self.drawSkybox();
 
         // draw_image.transitionToLayout(self, current_frame.cmd_buf, .color_attachment_optimal, .transfer_src_optimal);
@@ -618,11 +673,12 @@ fn fillCommandBuffers(self: *Engine) !void {
         // self.images.getPtr(.atlas).transitionToLayout(self, current_frame.cmd_buf, .undefined, .shader_read_only_optimal);
         try self.drawGeometry();
 
-        draw_image.transitionToLayout(self, current_frame.cmd_buf, .color_attachment_optimal, .transfer_src_optimal);
+        self.draw_image.transitionLayout(self, current_frame.cmd_buf, .color_attachment_optimal, .transfer_src_optimal, 0, 1);
 
-        Image.vkTransitionToLayout(self, current_frame.cmd_buf, self.swapchain.currentImage(), .undefined, .transfer_dst_optimal, 0);
-        Image.copyImageToImage(self, current_frame.cmd_buf, draw_image.vk_image, self.swapchain.currentImage(), self.draw_extent, self.swapchain.extent);
-        Image.vkTransitionToLayout(self, current_frame.cmd_buf, self.swapchain.currentImage(), .transfer_dst_optimal, .color_attachment_optimal, 0);
+        swapchain_img.transitionLayout(self, current_frame.cmd_buf, .undefined, .transfer_dst_optimal, 0, 1);
+        // ImageMetadata.vkTransitionToLayout(self, current_frame.cmd_buf, self.swapchain.currentImage(), .undefined, .transfer_dst_optimal, 0);
+        self.draw_image.copyTo(self, current_frame.cmd_buf, self.swapchain.currentImage());
+        swapchain_img.transitionLayout(self, current_frame.cmd_buf, .transfer_dst_optimal, .color_attachment_optimal, 0, 1);
 
         self.stats.tickClock(.render_pass_3d);
     }
@@ -640,8 +696,8 @@ fn fillCommandBuffers(self: *Engine) !void {
     {
         self.stats.startClock(.blit);
 
-        Image.vkTransitionToLayout(self, current_frame.cmd_buf, self.swapchain.currentImage(), .color_attachment_optimal, .present_src_khr, 0);
-        try self.ctx.device.endCommandBuffer(cmdbuf.*);
+        swapchain_img.transitionLayout(self, current_frame.cmd_buf, .color_attachment_optimal, .present_src_khr, 0, 1);
+        try self.ctx.device.endCommandBuffer(cmd_buf.*);
 
         self.stats.tickClock(.blit);
     }
@@ -697,65 +753,86 @@ pub fn immediateSubmit(self: *Engine, queue_family: GraphicsContext.QueueFamily,
 }
 
 fn drawSkybox(self: *Engine) !void {
-    _ = self; // autofix
-    // const current_frame = self.getCurrentFrame();
-    //
-    // try current_frame.scene_data_buffer.copyInto(self.ctx, &std.mem.toBytes(current_frame.scene_data), 0);
+    if (self.draw_context.skybox) |so| {
+        const current_frame = self.getCurrentFrame();
+
+        const color_attachment: vk.RenderingAttachmentInfo = .{
+            .image_layout = .color_attachment_optimal,
+            .image_view = self.draw_image.view,
+            .resolve_mode = .{},
+            .resolve_image_layout = .color_attachment_optimal,
+            .load_op = .load,
+            .store_op = .store,
+            .clear_value = .{
+                .color = .{
+                    .float_32 = [_]f32{ 0, 0, 0, 0 }, // 0,0,0,0 transparent
+                },
+            },
+        };
+
+        const depth_attachment = vk.RenderingAttachmentInfo{
+            .image_layout = .depth_attachment_optimal,
+            .image_view = self.depth_image.view,
+            .resolve_mode = .{},
+            .resolve_image_layout = .depth_attachment_optimal,
+            .load_op = .clear,
+            .store_op = .store,
+            .clear_value = .{ .depth_stencil = .{ .depth = 1.0, .stencil = 0 } },
+        };
+
+        const rendering_info: vk.RenderingInfo = .{
+            .layer_count = 1,
+            .render_area = current_frame.scissor,
+            .view_mask = 0,
+            .color_attachment_count = 1,
+            .p_color_attachments = @ptrCast(&.{color_attachment}),
+            .p_depth_attachment = &depth_attachment,
+        };
+
+        self.ctx.device.cmdBeginRendering(self.getCurrentFrame().cmd_buf.vk_command_buffer, &rendering_info);
+        defer self.ctx.device.cmdEndRendering(self.getCurrentFrame().cmd_buf.vk_command_buffer);
+
+        const st = self.skybox_texture;
+
+        const pipeline = st.opaque_pipeline;
+
+        // rebind pipeline and descriptor if the skybox has changed
+        // rebind index buffer
+        // if (@intFromPtr(so.skybox) != @intFromPtr(self.last_skybox)) {
+        //     self.last_skybox = so.skybox;
+        self.stats.addMaterialBind();
+
+        self.stats.addPipelineBind();
+
+        self.ctx.device.cmdBindPipeline(current_frame.cmd_buf.vk_command_buffer, .graphics, pipeline.pipeline.vk_pipeline);
+        self.ctx.device.cmdBindDescriptorSets(current_frame.cmd_buf.vk_command_buffer, .graphics, pipeline.pipeline_layout, 0, &.{current_frame.descriptor_set}, null);
+
+        self.ctx.device.cmdSetViewport(current_frame.cmd_buf.vk_command_buffer, 0, &.{self.getCurrentFrame().viewport});
+        self.ctx.device.cmdSetScissor(current_frame.cmd_buf.vk_command_buffer, 0, &.{self.getCurrentFrame().scissor});
+
+        // self.ctx.device.cmdBindDescriptorSets(cmdbuf.vk_command_buffer, .graphics, pipeline.pipeline_layout, 1, &.{ro.material.material_set}, null);
+
+        self.stats.addIndexBufferBind();
+        self.ctx.device.cmdBindIndexBuffer(current_frame.cmd_buf.vk_command_buffer, so.index_buffer.vk_buffer, 0, .uint32);
+        // }
+
+        const push_constant: GPUDrawPushConstants = .{
+            .render_matrix = so.transform,
+            .vb_address = so.vertex_buffer.address.?,
+            .material_buffer_slot = 0, //so.skybox.buffer_slot_idx,
+            .material_index = 0, //so.material.material_idx,
+        };
+
+        self.ctx.device.cmdPushConstants(current_frame.cmd_buf.vk_command_buffer, pipeline.pipeline_layout, .{ .vertex_bit = true, .fragment_bit = true }, 0, @sizeOf(GPUDrawPushConstants), @ptrCast(&push_constant));
+        self.ctx.device.cmdDrawIndexed(current_frame.cmd_buf.vk_command_buffer, so.index_count, 1, so.first_index, 0, 0);
+        self.stats.addDrawCall(so.index_count / 3, so.index_count);
+    }
 }
 
 fn drawGeometry(self: *Engine) !void {
     const current_frame = self.getCurrentFrame();
 
     self.stats.frame_transparent_objects = @intCast(self.draw_context.transparent_surfaces.items.len);
-
-    try current_frame.scene_data_buffer.copyInto(self.ctx, &std.mem.toBytes(current_frame.scene_data), 0);
-
-    // See comment about dynamic descriptor count in the global descriptor
-    const variable_count: u32 = @intCast(self.texture_cache.items.len);
-    const count_info: vk.DescriptorSetVariableDescriptorCountAllocateInfo = .{
-        .descriptor_set_count = 1,
-        .p_descriptor_counts = @ptrCast(&variable_count),
-    };
-    const frame_descriptor_set = try current_frame.frame_descriptor.allocate(
-        self.ctx,
-        self.descriptor.vk_global_descriptor_set_layout,
-        // null,
-        @ptrCast(&count_info),
-    );
-
-    self.descriptor.writer.clear();
-    try self.descriptor.writer.writeBuffer(0, current_frame.scene_data_buffer, current_frame.scene_data_buffer.size, 0, .uniform_buffer);
-
-    if (self.texture_cache.items.len > 0) {
-        const write = vk.WriteDescriptorSet{
-            .dst_binding = 3,
-            .dst_set = .null_handle, // filled by updateSet
-            .dst_array_element = 0,
-            .descriptor_count = @intCast(self.texture_cache.items.len),
-            .descriptor_type = .combined_image_sampler,
-            .p_image_info = self.texture_cache.items.ptr,
-            .p_buffer_info = undefined,
-            .p_texel_buffer_view = undefined,
-        };
-        try self.descriptor.writer.writes.append(self.descriptor.writer.allocator, write);
-    }
-
-    if (self.buffer_cache.items.len > 0) {
-        const write = vk.WriteDescriptorSet{
-            .dst_binding = 2,
-            .dst_set = .null_handle, // filled by updateSet
-            .dst_array_element = 0,
-            .descriptor_count = @intCast(self.buffer_cache.items.len),
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = self.buffer_cache.items.ptr,
-            .p_texel_buffer_view = undefined,
-        };
-        try self.descriptor.writer.writes.append(self.descriptor.writer.allocator, write);
-    }
-
-    self.descriptor.writer.updateSet(self.ctx, frame_descriptor_set);
-
     const color_attachment: vk.RenderingAttachmentInfo = .{
         .image_layout = .color_attachment_optimal,
         .image_view = self.draw_image.view,
@@ -800,11 +877,11 @@ fn drawGeometry(self: *Engine) !void {
     self.ctx.device.cmdBeginRendering(self.getCurrentFrame().cmd_buf.vk_command_buffer, &rendering_info);
 
     for (self.draw_context._opaque_sufaces_sorted.items) |i| {
-        self.drawRenderObject(self.getCurrentFrame().cmd_buf, &self.draw_context.opaque_surfaces.items[i], frame_descriptor_set);
+        self.drawRenderObject(self.getCurrentFrame().cmd_buf, &self.draw_context.opaque_surfaces.items[i], current_frame.descriptor_set);
     }
 
     for (self.draw_context.transparent_surfaces.items) |*render_object| {
-        self.drawRenderObject(self.getCurrentFrame().cmd_buf, render_object, frame_descriptor_set);
+        self.drawRenderObject(self.getCurrentFrame().cmd_buf, render_object, current_frame.descriptor_set);
     }
 
     self.ctx.device.cmdEndRendering(self.getCurrentFrame().cmd_buf.vk_command_buffer);
@@ -866,8 +943,8 @@ fn drawEffects(self: *Engine) void {
         null,
     );
 
-    const group_count_x: u32 = (@max(self.draw_extent.width, 1) + 15) / 16;
-    const group_count_y: u32 = (@max(self.draw_extent.height, 1) + 15) / 16;
+    const group_count_x: u32 = (@max(self.getCurrentFrame().swap_image.image.dimension.width, 1) + 15) / 16;
+    const group_count_y: u32 = (@max(self.getCurrentFrame().swap_image.image.dimension.height, 1) + 15) / 16;
 
     self.ctx.device.cmdDispatch(self.getCurrentFrame().cmd_buf.vk_command_buffer, group_count_x, group_count_y, 1);
 }
@@ -880,7 +957,7 @@ fn drawGuiEditor(self: *Engine) void {
                     .float_32 = [_]f32{ 0, 0, 0, 0 }, // 0,0,0,0 transparent
                 },
             },
-            .image_view = self.getCurrentFrame().swap_image.view,
+            .image_view = self.getCurrentFrame().swap_image.image.view,
             .image_layout = .color_attachment_optimal,
             .load_op = .load, // preserve blitted 3D content
             .store_op = .store,
@@ -904,7 +981,7 @@ fn drawGuiEditor(self: *Engine) void {
 }
 
 /// Call this function to bind image/sampler to a descriptor set
-pub fn registerTexture(self: *Engine, image: *const Image, sampler: *const Sampler) !u32 {
+pub fn registerTexture(self: *Engine, image: *const AllocatedImage, sampler: *const Sampler) !u32 {
     const slot = self.texture_cache_count;
     self.texture_cache_count += 1;
     try self.texture_cache.append(self.allocator, .{
@@ -928,7 +1005,7 @@ pub fn registerBuffer(self: *Engine, buffer: *const Buffer, offset: u64) !u32 {
 }
 
 /// Call this function to bind a Cubemap Texture to a descriptor set
-pub fn registerCubemap(self: *Engine, image: *const Image, sampler: *const Sampler) !u32 {
+pub fn registerCubemap(self: *Engine, image: *const AllocatedImage, sampler: *const Sampler) !u32 {
     const slot = self.cubemap_cache_count;
     self.cubemap_cache_count += 1;
     try self.cubemap_cache.append(self.allocator, .{

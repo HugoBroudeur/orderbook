@@ -6,6 +6,7 @@ const vk = @import("vulkan");
 
 const Event = @import("../events/event.zig");
 const Display = @import("display.zig");
+const Dimension = @import("../engine/vulkan/image.zig").Dimension;
 
 const Window = @This();
 
@@ -88,4 +89,8 @@ pub fn setIcon(self: *Window, icon_path: [:0]const u8) !void {
 
 pub fn toExtend2D(self: *const Window) vk.Extent2D {
     return .{ .width = @intCast(self.getWidth()), .height = @intCast(self.getHeight()) };
+}
+
+pub fn getDimension(self: *const Window) Dimension {
+    return .{ .width = @intCast(self.getWidth()), .height = @intCast(self.getHeight()), .depth = 0 };
 }

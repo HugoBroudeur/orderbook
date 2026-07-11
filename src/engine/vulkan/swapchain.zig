@@ -3,6 +3,7 @@ const log = std.log.scoped(.Swapchain);
 const vk = @import("vulkan");
 const Engine = @import("engine.zig");
 const Allocator = std.mem.Allocator;
+const AllocatedImage = @import("image.zig").AllocatedImage;
 const Frame = @import("frames.zig");
 
 pub const Swapchain = struct {
@@ -80,7 +81,7 @@ pub const Swapchain = struct {
             engine.ctx.device.destroySwapchainKHR(old_handle, null);
         }
 
-        const frames = try Frame.initSwapchainFrames(engine, handle, surface_format.format, allocator);
+        const frames = try Frame.initSwapchainFrames(engine, handle, surface_format.format, allocator, extent);
         errdefer {
             for (frames) |*frame| frame.destroy(engine);
             allocator.free(frames);
@@ -157,7 +158,7 @@ pub const Swapchain = struct {
         return &self.frames[self.image_index];
     }
 
-    pub fn currentImage(self: *Swapchain) vk.Image {
+    pub fn currentImage(self: *Swapchain) AllocatedImage {
         return self.currentSwapImage().image;
     }
 

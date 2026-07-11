@@ -38,12 +38,13 @@ public struct MaterialData {
   public float4 metalRoughFactors;
   public float4 emissiveFactors;
   public float transmissionFactor;
-  public uint colorTexID;
-  public uint metalRoughTexID;
-  public uint normalTexID;
-  public uint occlusionTexID;
-  public uint emissiveTexID;
-  public uint transmissionTexId;
+  public uint colorTexID;        // Sampler2D
+  public uint metalRoughTexID;   // Sampler2D
+  public uint normalTexID;       // Sampler2D
+  public uint occlusionTexID;    // Sampler2D
+  public uint emissiveTexID;     // Sampler2D
+  public uint transmissionTexId; // Sampler2D
+  public uint cubeTexID;         // SamplerCube
 
   // public uint _padding1;
   // public float4 _padding[11];

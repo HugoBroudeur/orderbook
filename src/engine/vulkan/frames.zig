@@ -10,12 +10,12 @@ const AllocatedCommandBuffer = @import("command_pool.zig").AllocatedCommandBuffe
 const DescriptorAllocator = @import("descriptor.zig").DescriptorAllocator;
 const SceneData = @import("../graphics/buffers.zig").SceneData;
 const Buffer = @import("buffer.zig");
+const AllocatedImage = @import("image.zig").AllocatedImage;
 
 const Frame = @This();
 
 swap_image: SwapImage,
 
-clear_color: vk.ClearValue = .{ .color = .{ .float_32 = .{ 0, 0, 0, 1 } } },
 /// Contains the state if the last swapchain got an error
 swapchain_state: Swapchain.PresentState = .optimal,
 viewport: vk.Viewport = .{ .x = 0, .y = 0, .width = 0, .height = 0, .min_depth = 0, .max_depth = 1 },
@@ -29,14 +29,15 @@ frame_descriptor: DescriptorAllocator = undefined,
 scene_data: SceneData = .{},
 scene_data_buffer: Buffer = undefined,
 
+descriptor_set: vk.DescriptorSet = undefined,
+
 pub const SwapImage = struct {
-    image: vk.Image,
-    view: vk.ImageView,
+    image: AllocatedImage,
     image_acquired: vk.Semaphore,
     render_finished: vk.Semaphore,
     frame_fence: vk.Fence,
 
-    pub fn init(engine: *Engine, image: vk.Image, format: vk.Format) !SwapImage {
+    pub fn init(engine: *Engine, image: vk.Image, format: vk.Format, extent: vk.Extent2D) !SwapImage {
         const view = try engine.ctx.device.createImageView(&.{
             .image = image,
             .view_type = .@"2d",
@@ -61,9 +62,21 @@ pub const SwapImage = struct {
         const frame_fence = try engine.ctx.device.createFence(&.{ .flags = .{ .signaled_bit = true } }, null);
         errdefer engine.ctx.device.destroyFence(frame_fence, null);
 
-        return SwapImage{
-            .image = image,
+        // engine.ctx.device.cmdSetFragmentShadingRateEnumNV
+        const img = AllocatedImage{
+            .dimension = .{ .width = extent.width, .height = extent.height, .depth = 0 },
+            .format = format,
             .view = view,
+            .vk_image = image,
+            .vk_image_memory = undefined,
+            .mip_levels = 0,
+            .size = extent.height * extent.width * 4,
+        };
+
+        return SwapImage{
+            .image = img,
+            // .image = image,
+            // .view = view,
             .image_acquired = image_acquired,
             .render_finished = render_finished,
             .frame_fence = frame_fence,
@@ -72,7 +85,7 @@ pub const SwapImage = struct {
 
     pub fn deinit(self: SwapImage, engine: *Engine) void {
         self.waitForFence(engine) catch return;
-        engine.ctx.device.destroyImageView(self.view, null);
+        engine.ctx.device.destroyImageView(self.image.view, null);
         engine.ctx.device.destroySemaphore(self.image_acquired, null);
         engine.ctx.device.destroySemaphore(self.render_finished, null);
         engine.ctx.device.destroyFence(self.frame_fence, null);
@@ -83,7 +96,7 @@ pub const SwapImage = struct {
     }
 };
 
-pub fn initSwapchainFrames(engine: *Engine, swapchain: vk.SwapchainKHR, format: vk.Format, allocator: Allocator) ![]Frame {
+pub fn initSwapchainFrames(engine: *Engine, swapchain: vk.SwapchainKHR, format: vk.Format, allocator: Allocator, extent: vk.Extent2D) ![]Frame {
     const images = try engine.ctx.device.getSwapchainImagesAllocKHR(swapchain, allocator);
     defer allocator.free(images);
 
@@ -94,7 +107,7 @@ pub fn initSwapchainFrames(engine: *Engine, swapchain: vk.SwapchainKHR, format: 
     errdefer for (frames[0..initialized]) |*frame| frame.destroy(engine);
 
     for (images, 0..) |image, i| {
-        try frames[i].setup(engine, allocator, try SwapImage.init(engine, image, format));
+        try frames[i].setup(engine, allocator, try SwapImage.init(engine, image, format, extent));
         initialized += 1;
     }
 
@@ -133,6 +146,8 @@ pub fn resize(self: *Frame, extent: vk.Extent2D) void {
         .offset = .{ .x = 0, .y = 0 },
         .extent = extent,
     };
+
+    self.swap_image.image.dimension = .{ .width = extent.width, .height = extent.height, .depth = 0 };
 }
 
 pub fn destroy(self: *Frame, engine: *Engine) void {

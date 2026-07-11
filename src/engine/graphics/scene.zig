@@ -8,7 +8,7 @@ const objects = @import("objects.zig");
 const Mesh = @import("../vulkan/mesh.zig");
 const Sampler = @import("../vulkan/sampler.zig");
 const Buffer = @import("../vulkan/buffer.zig");
-const Image = @import("../vulkan/image.zig");
+const AllocatedImage = @import("../vulkan/image.zig").AllocatedImage;
 const Descriptor = @import("../vulkan/descriptor.zig");
 const Engine = @import("../vulkan/engine.zig");
 const Uuid = @import("uuid");
@@ -145,7 +145,7 @@ pub const LoadedGLTF = struct {
     // storage for all the data on a given glTF file
     meshes: std.array_hash_map.String(*Mesh),
     nodes: std.array_hash_map.String(*IRenderable),
-    images: std.array_hash_map.String(*Image),
+    images: std.array_hash_map.String(*AllocatedImage),
     materials: std.array_hash_map.String(*Mesh.GLTFMaterial),
 
     // nodes that dont have a parent, for iterating through the file in tree order
@@ -210,6 +210,7 @@ pub const DrawContext = struct {
     allocator: std.mem.Allocator,
     opaque_surfaces: std.ArrayList(objects.RenderObject),
     transparent_surfaces: std.ArrayList(objects.RenderObject),
+    skybox: ?objects.SkyboxObject,
 
     _opaque_sufaces_sorted: std.ArrayList(u64),
 
@@ -219,6 +220,7 @@ pub const DrawContext = struct {
             .opaque_surfaces = .empty,
             .transparent_surfaces = .empty,
             ._opaque_sufaces_sorted = .empty,
+            .skybox = null,
         };
     }
 

@@ -48,6 +48,7 @@ pub const SavedConfig = struct {
 
     pub const SavedResourceList = .{
         Components.Lights,
+        // Components.Skybox,
         Components.CameraSpeed,
         Components.CameraSensitivity,
     };

@@ -3,7 +3,7 @@ const log = std.log.scoped(.descriptor);
 const vk = @import("vulkan");
 
 const Buffer = @import("buffer.zig");
-const Image = @import("image.zig");
+const AllocatedImage = @import("image.zig").AllocatedImage;
 const Sampler = @import("sampler.zig");
 const GraphicsContext = @import("../../core/graphics_context.zig");
 
@@ -186,7 +186,7 @@ pub const DescriptorWriter = struct {
     pub fn writeImage(
         self: *DescriptorWriter,
         binding: u32,
-        image: Image,
+        image: AllocatedImage,
         sampler: Sampler,
         layout: vk.ImageLayout,
         descriptor_type: vk.DescriptorType,
@@ -198,7 +198,7 @@ pub const DescriptorWriter = struct {
         self: *DescriptorWriter,
         binding: u32,
         array_element: u32,
-        image: Image,
+        image: AllocatedImage,
         sampler: Sampler,
         layout: vk.ImageLayout,
         descriptor_type: vk.DescriptorType,

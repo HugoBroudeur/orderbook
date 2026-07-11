@@ -16,7 +16,9 @@ const MeshNode = Scene.MeshNode;
 const IRenderable = Scene.IRenderable;
 const Sampler = @import("../../engine/vulkan/sampler.zig");
 const Mesh = @import("../../engine/vulkan/mesh.zig");
-const Image = @import("../../engine/vulkan/image.zig");
+const AllocatedImage = @import("../../engine/vulkan/image.zig").AllocatedImage;
+const ImageMetadata = @import("../../engine/vulkan/image.zig").ImageMetadata;
+const ImageDataKind = @import("../../engine/vulkan/image.zig").ImageDataKind;
 const Buffer = @import("../../engine/vulkan/buffer.zig");
 const PBRMaterial = @import("../../engine/graphics/materials.zig").PBRMaterial;
 const MaterialPass = @import("../../engine/graphics/materials.zig").MaterialPass;
@@ -47,6 +49,7 @@ pub const AssetPool = struct {
     // loaded_gltf: std.array_hash_map.String(LoadedGLTF),
     asset_metadata: std.hash_map.AutoHashMap(Uuid.Uuid, AssetMetaFile),
     queued_gltf: std.hash_map.AutoHashMap(Uuid.Uuid, []const u8),
+    queued_images: std.hash_map.AutoHashMap(Uuid.Uuid, []const u8),
     /// Owns memory, it needs to free it
     loaded_gltf: std.array_hash_map.String(*LoadedGLTF),
     /// Owns memory, it needs to free it
@@ -55,19 +58,24 @@ pub const AssetPool = struct {
     /// Owns memory, it needs to free it
     _materials: std.ArrayList(*Mesh.GLTFMaterial),
     /// Owns memory, it needs to free it
-    _images: std.ArrayList(*Image),
+    _images: std.ArrayList(*AllocatedImage),
 
     _current_img_idx: usize = 0,
+
+    /// Owns memory, it needs to free it
+    // _cubemaps: std.hash_map.AutoHashMap(Uuid.Uuid, *Image),
 
     fn init(allocator: std.mem.Allocator) AssetPool {
         return .{
             .loaded_gltf = .empty,
             .queued_gltf = .init(allocator),
+            .queued_images = .init(allocator),
             .asset_metadata = .init(allocator),
             ._materials = .empty,
             ._meshes = .empty,
             ._nodes = .empty,
             ._images = .empty,
+            // ._cubemaps = .empty,
             .arena = std.heap.ArenaAllocator.init(allocator),
         };
     }
@@ -95,10 +103,17 @@ pub const AssetPool = struct {
                 continue;
             }
 
-            img.destroy(engine.ctx);
+            img.destroy(engine);
         }
 
         self._images.deinit(allocator);
+
+        // var cit = self._cubemaps.iterator();
+        // while (cit.next()) |img| {
+        //     img.value_ptr.*.destroy(engine.ctx);
+        // }
+
+        // self._cubemaps.deinit(allocator);
     }
 };
 
@@ -235,6 +250,25 @@ pub fn processQueuedAssets(self: *AssetManager, engine: *Engine) void {
     }
 }
 
+pub fn processQueuedSkyboxes(self: *AssetManager, engine: *Engine) void {
+    if (self.pool.queued_images.count() == 0) return;
+    var pending: std.ArrayList(struct { guid: Uuid.Uuid, dir: []const u8 }) = .empty;
+    defer pending.deinit(self.allocator);
+
+    var it = self.pool.queued_images.iterator();
+
+    while (it.next()) |entry| {
+        pending.append(self.allocator, .{ .guid = entry.key_ptr.*, .dir = entry.value_ptr.* }) catch continue;
+    }
+    for (pending.items) |item| {
+        self.loadSkyboxCubemap(engine, item.guid, item.dir) catch |err| {
+            log.warn("processQueuedSkyboxes: failed to load {s} (GUID {}): {}", .{ item.dir, item.guid, err });
+        };
+        _ = self.pool.queued_images.remove(item.guid);
+        self.allocator.free(item.dir);
+    }
+}
+
 fn findGuidForPath(self: *AssetManager, path: []const u8) ?Uuid.Uuid {
     var it = self.pool.asset_metadata.iterator();
     while (it.next()) |entry| {
@@ -260,6 +294,34 @@ pub fn getAsset(self: *AssetManager, guid: Uuid.Uuid) ?*LoadedGLTF {
     }
     return null;
 }
+
+// pub fn getCubeImage(self: *AssetManager, guid: Uuid.Uuid) ?*Image {
+//     return (self.pool._cubemaps.get(guid) orelse return null).image;
+// }
+pub fn queueSkybox(self: *AssetManager, guid: Uuid.Uuid, dir_path: []const u8) !void {
+    if (self.pool._cubemaps.contains(guid) or self.pool.queued_images.contains(guid)) return;
+    const owned = try self.allocator.dupe(u8, dir_path);
+
+    // const faces = .{
+    //     .px = try std.fs.path.join(self.allocator, &.{ dir_path, "px.png" }),
+    //     .nx = try std.fs.path.join(self.allocator, &.{ dir_path, "nx.png" }),
+    //     .py = try std.fs.path.join(self.allocator, &.{ dir_path, "py.png" }),
+    //     .ny = try std.fs.path.join(self.allocator, &.{ dir_path, "ny.png" }),
+    //     .pz = try std.fs.path.join(self.allocator, &.{ dir_path, "pz.png" }),
+    //     .nz = try std.fs.path.join(self.allocator, &.{ dir_path, "nz.png" }),
+    // };
+    // defer inline for (.{ faces.px, faces.nx, faces.py, faces.ny, faces.pz, faces.nz }) |p| self.allocator.free(p);
+
+    const image = try self.pool.arena.allocator().create(AllocatedImage);
+    image.* = AllocatedImage.init(.{ .cubemap_path = dir_path }, true);
+    // image.* = try Image.createCubemapFromPath(engine, faces, .r8g8b8a8_srgb, .{ .sampled_bit = true }, true);
+
+    try self.pool.queued_images.put(self.allocator, guid, owned);
+}
+
+// fn loadSkyboxCubemap(self: *AssetManager, guid: Uuid.Uuid, dir_path: []const u8) !void {
+//     try self.pool._cubemaps.put(self.allocator, guid, .{ .image = image, .bindless_slot = slot });
+// }
 
 // TODO, decouple engine such as the asset is loaded in the pool then have a function to load the pool in the GPU
 pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file_path: []const u8) !void {
@@ -358,27 +420,48 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
             break :blk alt_name;
         };
 
-        const image = try self.pool.arena.allocator().create(Image);
+        const allocated_img = try self.pool.arena.allocator().create(AllocatedImage);
+        const img_data_kind: ?ImageDataKind = if (img.uri != null) .{ .path = img.uri.? } else if (img.data != null) .{ .pixels = .{ .data = img.data.? } } else null;
 
-        image.* = if (img.uri) |uri| blk: {
-            if (Config.log.mesh) {
-                log.info("[DBG] image[{d}] uri={s}", .{ i, uri });
-            }
-            break :blk Image.createFromPath(engine, uri, .packed_rgba_8_8_8_8, .{ .sampled_bit = true }) catch engine.images.get(.error_checker);
-        } else if (img.data) |bytes| blk: {
-            if (Config.log.mesh) {
-                log.info("[DBG] image[{d}] embedded {d} bytes mime={?s}", .{ i, bytes.len, img.mime_type });
-            }
-            const is_alpha_matter = (alpha_matter_image_idx.get(@intCast(i)) != null);
-            break :blk Image.createFromBytesWithSDL(engine, bytes, img.mime_type, .{ .sampled_bit = true }, is_alpha_matter) catch engine.images.get(.error_checker);
-        } else blk: {
-            if (Config.log.mesh) {
-                log.warn("[DBG] image[{d}] MISSING — using error_checker", .{i});
-            }
-            break :blk engine.images.get(.error_checker);
-        };
+        if (img_data_kind) |k| {
+            const img_meta: ImageMetadata = ImageMetadata.init(k, null);
+            const alloc_img = try img_meta.allocateImage(engine, .{ .sampled_bit = true }, true, 1);
+            try img_meta.upload(engine, alloc_img);
+            allocated_img.* = alloc_img;
 
-        self.pool._images.appendAssumeCapacity(image);
+            // const is_alpha_matter = (alpha_matter_image_idx.get(@intCast(i)) != null);
+        } else {
+            allocated_img.* = engine.images.get(.error_checker);
+        }
+
+        // allocated_img.* = switch (img_data_kind) {
+        //     .uri => try AllocatedImage.init(.{ .path = img.uri.? }, true),
+        //     .bytes => try AllocatedImage.init(.{ .pixels = .{ .data = img.data.? } }, true),
+        //     .none => engine.images.get(.error_checker),
+        // };
+
+        // try allocated_img.allocateGpuMemory(engine, if (is_alpha_matter) .r8g8b8a8_unorm else .r8g8b8_unorm, .{ .sampled_bit = true });
+        // try allocated_img.upload(engine);
+
+        // image_metadata.* = if (img.uri) |uri| blk: {
+        //     if (Config.log.mesh) {
+        //         log.info("[DBG] image[{d}] uri={s}", .{ i, uri });
+        //     }
+        //     break :blk Image.createFromPath(engine, uri, .packed_rgba_8_8_8_8, .{ .sampled_bit = true }) catch engine.images.get(.error_checker);
+        // } else if (img.data) |bytes| blk: {
+        //     if (Config.log.mesh) {
+        //         log.info("[DBG] image[{d}] embedded {d} bytes mime={?s}", .{ i, bytes.len, img.mime_type });
+        //     }
+        //     const is_alpha_matter = (alpha_matter_image_idx.get(@intCast(i)) != null);
+        //     break :blk Image.createFromBytesWithSDL(engine, bytes, img.mime_type, .{ .sampled_bit = true }, is_alpha_matter) catch engine.images.get(.error_checker);
+        // } else blk: {
+        //     if (Config.log.mesh) {
+        //         log.warn("[DBG] image[{d}] MISSING — using error_checker", .{i});
+        //     }
+        //     break :blk engine.images.get(.error_checker);
+        // };
+
+        self.pool._images.appendAssumeCapacity(allocated_img);
         if (Config.log.mesh) {
             log.info("[DBG] image[{d}] '{s}'", .{ i, name });
         }
@@ -485,6 +568,7 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
                 .emissive_tex_id = emissive_tex_id,
                 .emissive_factor = .{ mat.emissive_factor[0], mat.emissive_factor[1], mat.emissive_factor[2], mat.emissive_strength },
                 .transmission_tex_id = transmission_tex_id,
+                .cube_tex_id = 0, //TODO/rethink
             };
 
             // Index is LOCAL to this GLTF's material buffer (the buffer_slot

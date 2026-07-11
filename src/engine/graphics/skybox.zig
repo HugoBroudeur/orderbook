@@ -3,7 +3,7 @@ const log = std.log.scoped(.materials);
 const vk = @import("vulkan");
 const materials = @import("materials.zig");
 const descriptor = @import("../vulkan/descriptor.zig");
-const Image = @import("../vulkan/image.zig");
+const ImageMetadata = @import("../vulkan/image.zig").ImageMetadata;
 const Sampler = @import("../vulkan/sampler.zig");
 const Buffer = @import("../vulkan/buffer.zig");
 const Buffers = @import("buffers.zig");
@@ -43,7 +43,7 @@ pub const CubemapTexture = struct {
 
     pub const CubemapResources = struct {
         sampler: Sampler,
-        cubemap_image: Image,
+        cubemap_image: ImageMetadata,
         data_buffer: Buffer,
         data_buffer_offset: vk.DeviceSize = 0,
     };
@@ -125,14 +125,14 @@ pub const CubemapTexture = struct {
         try pipeline_builder.setShaders(&vert, &frag);
         pipeline_builder.setInputTopology(.triangle_list);
         pipeline_builder.setPolygonMode(.fill);
-        pipeline_builder.setCullMode(vk.CullModeFlags{}, .counter_clockwise);
+        pipeline_builder.setCullMode(vk.CullModeFlags{ .front_bit = true }, .counter_clockwise);
         pipeline_builder.setMultisamplingNone();
         pipeline_builder.disableBlending();
-        pipeline_builder.enableDepthTest(.false, .less_or_equal);
+        pipeline_builder.enableDepthTest(.true, .less_or_equal);
 
         // render format
         pipeline_builder.setColorAttachmentFormat(engine.draw_image.format);
-        // pipeline_builder.setDepthFormat(engine.depth_image.format);
+        pipeline_builder.setDepthFormat(engine.depth_image.format);
 
         // Use the layout we created
         pipeline_builder.pipeline_layout = pipeline_layout;
@@ -150,11 +150,13 @@ pub const CubemapTexture = struct {
         self.light_reflection_pipeline.pipeline = try pipeline_builder.buildPipeline(engine.ctx);
     }
 
-    pub fn load(self: *CubemapTexture, engine: *Engine, cube_image: *Image) !void {
-        _ = cube_image; // autofix
-        try self.buildPipeline(engine);
-    }
-    pub fn bind() void {}
+    // pub fn load(self: *CubemapTexture, engine: *Engine, cube_image: *ImageMetadata) !void {
+    //     _ = cube_image; // autofix
+    //     // try self.buildPipeline(engine);
+    //
+    //     self.
+    // }
+    // pub fn bind() void {}
 
     pub fn writeCubeTexture(
         self: *CubemapTexture,

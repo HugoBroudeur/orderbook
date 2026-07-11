@@ -8,6 +8,7 @@ const Uuid = @import("uuid");
 const SceneManager = @import("../project/scene/manager.zig");
 const AssetManager = @import("../project/asset/manager.zig");
 const LoadedGLTF = @import("../engine/graphics/scene.zig").LoadedGLTF;
+const ImageMetadata = @import("../engine/vulkan/image.zig").ImageMetadata;
 
 // ACSII Generator: https://patorjk.com/software/taag/#p=display&f=ANSI%20Shadow&t=Graphics
 
@@ -79,6 +80,12 @@ pub const Lights = struct {
     sunlight_direction: [4]f32 = .{ 0, 1, 0.5, 1 }, // w for sun power
     sunlight_color: [4]f32 = .{ 1, 1, 1, 1 },
     sunlight_specular_color: [4]f32 = .{ 1, 1, 1, 1 },
+};
+
+pub const Skybox = struct {
+    guid: Uuid.Uuid, // Asset reference
+    name: []const u8,
+    ptr: *ImageMetadata,
 };
 
 pub const GltfMesh = struct {
@@ -392,4 +399,8 @@ pub const AssetLoaded = struct {
     guid: Uuid.Uuid,
     name: []const u8,
     ptr: *LoadedGLTF,
+};
+
+pub const SkyboxRenamed = struct {
+    name: []const u8,
 };
