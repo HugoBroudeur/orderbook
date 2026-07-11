@@ -79,10 +79,6 @@ const GlobalDescriptor = struct {
     // Global Scene
     vk_global_descriptor_set_layout: vk.DescriptorSetLayout = undefined,
 
-    // Used in the 2D Shader
-    vk_2d_descriptor_set: vk.DescriptorSet = undefined,
-    vk_2d_descriptor_set_layout: vk.DescriptorSetLayout = undefined,
-
     pub fn init(allocator: std.mem.Allocator, ctx: *const GraphicsContext) !GlobalDescriptor {
         var ratio = [_]DescriptorAllocator.PoolSizeRatio{
             .{ .vk_type = .storage_image, .ratio = 3 },
@@ -103,12 +99,6 @@ const GlobalDescriptor = struct {
         if (self.is_initialised) {
             ctx.device.destroyDescriptorSetLayout(self.draw_image_descriptor_layout, null);
             ctx.device.destroyDescriptorSetLayout(self.vk_global_descriptor_set_layout, null);
-            // vk_2d_descriptor_set_layout's creation (the "2D images (atlas)"
-            // block in setupDescriptors) is disabled, so this field is never
-            // initialized — destroying it double-frees a garbage handle and
-            // triggers Invalid Object / Couldn't find validation errors on
-            // shutdown. Re-enable this once that block comes back.
-            // ctx.device.destroyDescriptorSetLayout(self.vk_2d_descriptor_set_layout, null);
         }
         self.writer.deinit();
     }
@@ -123,7 +113,6 @@ ctx: *const GraphicsContext,
 swapchain: Swapchain = undefined,
 
 batcher_buffer: Buffer = undefined,
-text_buffer: Buffer = undefined,
 // uniform_buffer: Buffer = undefined,
 
 meshes: std.ArrayList(Mesh),
@@ -225,11 +214,6 @@ pub fn deinit(self: *Engine) void {
     self.meshes.deinit(self.allocator);
 
     self.batcher_buffer.destroy(self.ctx);
-    // text_buffer's creation (Atlas block in createTextures) is disabled, so
-    // the field is never initialized — destroying it here double-frees a
-    // garbage handle and triggers Invalid Object / Couldn't find validation
-    // errors on shutdown. Re-enable this once the Atlas block comes back.
-    // self.text_buffer.destroy(self.ctx);
     self.batcher.deinit();
 
     self.pbr_material.destroy(self);
