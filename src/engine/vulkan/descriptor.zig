@@ -3,6 +3,7 @@ const log = std.log.scoped(.descriptor);
 const vk = @import("vulkan");
 
 const Buffer = @import("buffer.zig");
+const Engine = @import("engine.zig");
 const AllocatedImage = @import("image.zig").AllocatedImage;
 const Sampler = @import("sampler.zig");
 const GraphicsContext = @import("../../core/graphics_context.zig");
@@ -24,16 +25,16 @@ pub const DescriptorAllocator = struct {
     ready_pools: std.ArrayList(vk.DescriptorPool),
     sets_per_pool: u32,
 
-    pub fn init(allocator: std.mem.Allocator, ctx: *const GraphicsContext, max_sets: u32, pool_ratios: []const PoolSizeRatio) !DescriptorAllocator {
+    pub fn init(engine: *Engine, max_sets: u32, pool_ratios: []const PoolSizeRatio) !DescriptorAllocator {
         var desc_alloc: DescriptorAllocator = .{
-            .arena = std.heap.ArenaAllocator.init(allocator),
+            .arena = std.heap.ArenaAllocator.init(engine.allocator),
             .sets_per_pool = max_sets,
-            .ratios = try .initCapacity(allocator, pool_ratios.len),
-            .full_pools = try .initCapacity(allocator, 0),
-            .ready_pools = try .initCapacity(allocator, 1),
+            .ratios = try .initCapacity(engine.allocator, pool_ratios.len),
+            .full_pools = try .initCapacity(engine.allocator, 0),
+            .ready_pools = try .initCapacity(engine.allocator, 1),
         };
 
-        desc_alloc.ready_pools.appendAssumeCapacity(createPool(allocator, ctx, max_sets, pool_ratios).?);
+        desc_alloc.ready_pools.appendAssumeCapacity(createPool(engine.allocator, engine.ctx, max_sets, pool_ratios).?);
         for (pool_ratios) |ratio| {
             desc_alloc.ratios.appendAssumeCapacity(ratio);
         }

@@ -7,6 +7,7 @@ const vk = @import("vulkan");
 const Config = @import("../../config.zig");
 const CommandPool = @import("command_pool.zig").CommandPool;
 const GraphicsContext = @import("../../core/graphics_context.zig");
+const Engine = @import("engine.zig");
 const Shader = @import("shader.zig");
 
 pub const VERTEX_BUFFER_SIZE = 64 * 1024; //64k vertices
@@ -84,6 +85,8 @@ pub const BufferLayout = struct {
 
 const Buffer = @This();
 
+engine: *Engine,
+
 vk_buffer: vk.Buffer,
 size: u32,
 sharing_mode: vk.SharingMode,
@@ -92,7 +95,7 @@ usage: vk.BufferUsageFlags,
 properties: vk.MemoryPropertyFlags,
 address: ?vk.DeviceAddress,
 
-pub fn create(ctx: *const GraphicsContext, size: u32, usage: vk.BufferUsageFlags, properties: vk.MemoryPropertyFlags) !Buffer {
+pub fn create(engine: *Engine, size: u32, usage: vk.BufferUsageFlags, properties: vk.MemoryPropertyFlags) !Buffer {
     if (Config.log.buffer) {
         log.info("[Buffer.create] {} bytes", .{size});
     }
@@ -104,26 +107,27 @@ pub fn create(ctx: *const GraphicsContext, size: u32, usage: vk.BufferUsageFlags
         .usage = usage,
         .sharing_mode = sharing_mode,
     };
-    const vk_buffer = try ctx.device.createBuffer(&bci, null);
+    const vk_buffer = try engine.ctx.device.createBuffer(&bci, null);
 
-    const memory_requirements = ctx.device.getBufferMemoryRequirements(vk_buffer);
+    const memory_requirements = engine.ctx.device.getBufferMemoryRequirements(vk_buffer);
 
-    const alloc_info = try ctx.createMemoryAllocateInfo(memory_requirements, properties, usage.shader_device_address_bit == true);
-    const memory = try ctx.device.allocateMemory(&alloc_info, null);
+    const alloc_info = try engine.ctx.createMemoryAllocateInfo(memory_requirements, properties, usage.shader_device_address_bit == true);
+    const memory = try engine.ctx.device.allocateMemory(&alloc_info, null);
 
-    try ctx.device.bindBufferMemory(vk_buffer, memory, 0);
+    try engine.ctx.device.bindBufferMemory(vk_buffer, memory, 0);
 
     var address: ?vk.DeviceAddress = null;
     if (usage.shader_device_address_bit == true) {
         // Disable that for now as I'm getting Vulkan errors
         const bdai: vk.BufferDeviceAddressInfo = .{ .buffer = vk_buffer };
-        address = ctx.device.getBufferDeviceAddress(&bdai);
+        address = engine.ctx.device.getBufferDeviceAddress(&bdai);
         if (Config.log.buffer) {
             log.info("Create buffer size {} with address bit {?}", .{ size, address });
         }
     }
 
     return .{
+        .engine = engine,
         .vk_buffer = vk_buffer,
         .size = size,
         .usage = usage,
@@ -134,22 +138,22 @@ pub fn create(ctx: *const GraphicsContext, size: u32, usage: vk.BufferUsageFlags
     };
 }
 
-pub fn destroy(self: *Buffer, ctx: *const GraphicsContext) void {
-    ctx.device.freeMemory(self.memory, null);
-    ctx.device.destroyBuffer(self.vk_buffer, null);
+pub fn destroy(self: *Buffer) void {
+    self.engine.ctx.device.freeMemory(self.memory, null);
+    self.engine.ctx.device.destroyBuffer(self.vk_buffer, null);
 }
 
-pub fn copyInto(self: *Buffer, ctx: *const GraphicsContext, data: []const u8, offset: u64) !void {
+pub fn copyInto(self: *Buffer, data: []const u8, offset: u64) !void {
     assert(self.size >= data.len + offset);
     assert(self.hasBindedMemory());
 
-    var map: [*]u8 = @ptrCast(try ctx.device.mapMemory(self.memory, offset, data.len, .{}));
-    defer ctx.device.unmapMemory(self.memory);
+    var map: [*]u8 = @ptrCast(try self.engine.ctx.device.mapMemory(self.memory, offset, data.len, .{}));
+    defer self.engine.ctx.device.unmapMemory(self.memory);
 
     std.mem.copyForwards(u8, map[0..data.len], data);
 }
 
-pub fn transfer(self: *Buffer, ctx: *const GraphicsContext, cmd_pool: *const CommandPool, dst: *Buffer, src_offset: u64, dst_offset: u64) !void {
+pub fn transfer(self: *Buffer, cmd_pool: *const CommandPool, dst: *Buffer, src_offset: u64, dst_offset: u64) !void {
     assert(dst.size - dst_offset >= self.size - src_offset);
     assert(self.hasBindedMemory() and dst.hasBindedMemory());
     assert(dst.usage.transfer_dst_bit == true);
@@ -161,8 +165,8 @@ pub fn transfer(self: *Buffer, ctx: *const GraphicsContext, cmd_pool: *const Com
     };
 
     var command_buffer: vk.CommandBuffer = undefined;
-    try ctx.device.allocateCommandBuffers(&alloc_info, @ptrCast(&command_buffer));
-    defer ctx.device.freeCommandBuffers(cmd_pool.vk_cmd_pool, &.{command_buffer});
+    try self.engine.ctx.device.allocateCommandBuffers(&alloc_info, @ptrCast(&command_buffer));
+    defer self.engine.ctx.device.freeCommandBuffers(cmd_pool.vk_cmd_pool, &.{command_buffer});
 
     const begin_info = vk.CommandBufferBeginInfo{
         .flags = .{ .one_time_submit_bit = true },
@@ -170,16 +174,16 @@ pub fn transfer(self: *Buffer, ctx: *const GraphicsContext, cmd_pool: *const Com
     };
 
     { // Issue commands
-        try ctx.device.beginCommandBuffer(command_buffer, &begin_info);
+        try self.engine.ctx.device.beginCommandBuffer(command_buffer, &begin_info);
 
         const copy_region = [_]vk.BufferCopy{.{
             .src_offset = src_offset,
             .dst_offset = dst_offset,
             .size = self.size,
         }};
-        ctx.device.cmdCopyBuffer(command_buffer, self.vk_buffer, dst.vk_buffer, &copy_region);
+        self.engine.ctx.device.cmdCopyBuffer(command_buffer, self.vk_buffer, dst.vk_buffer, &copy_region);
 
-        try ctx.device.endCommandBuffer(command_buffer);
+        try self.engine.ctx.device.endCommandBuffer(command_buffer);
     }
 
     const submit_infos = [_]vk.SubmitInfo{.{
@@ -192,40 +196,56 @@ pub fn transfer(self: *Buffer, ctx: *const GraphicsContext, cmd_pool: *const Com
         .p_signal_semaphores = undefined,
     }};
 
-    try ctx.device.queueSubmit(ctx.graphics_queue.handle, &submit_infos, .null_handle);
-    try ctx.device.queueWaitIdle(ctx.graphics_queue.handle);
+    try self.engine.ctx.device.queueSubmit(self.engine.ctx.graphics_queue.handle, &submit_infos, .null_handle);
+    try self.engine.ctx.device.queueWaitIdle(self.engine.ctx.graphics_queue.handle);
+}
+
+pub fn resize(self: *Buffer, cmd_pool: *const CommandPool, size: u32) !void {
+    assert(size > self.size);
+
+    if (Config.log.buffer) {
+        log.info("[Buffer.resize] {} -> {} bytes", .{ self.size, size });
+    }
+
+    var new_buffer = try Buffer.create(self.engine, size, self.usage, self.properties);
+    errdefer new_buffer.destroy();
+
+    try self.transfer(cmd_pool, &new_buffer, 0, 0);
+
+    self.destroy();
+    self.* = new_buffer;
 }
 
 // Fast Transfer creates a staging buffer and destroy it immediatly after
 // Not recommended to use in loops
-pub fn fastTransfer(self: *Buffer, ctx: *const GraphicsContext, cmd_pool: *const CommandPool, data: []const u8) !void {
+pub fn fastTransfer(self: *Buffer, cmd_pool: *const CommandPool, data: []const u8) !void {
     assert(data.len <= std.math.maxInt(u32));
     var staging_buffer = try Buffer.create(
-        ctx,
+        self.engine,
         @intCast(data.len),
         .{ .transfer_src_bit = true },
         .{ .host_visible_bit = true, .host_coherent_bit = true },
     );
-    defer staging_buffer.destroy(ctx);
+    defer staging_buffer.destroy();
 
-    try staging_buffer.copyInto(ctx, data, 0);
-    try staging_buffer.transfer(ctx, cmd_pool, self, 0, 0);
+    try staging_buffer.copyInto(data, 0);
+    try staging_buffer.transfer(cmd_pool, self, 0, 0);
 }
 
 // Fast Transfer creates a staging buffer and destroy it immediatly after
 // Not recommended to use in loops
-pub fn fastTransferOffset(self: *Buffer, ctx: *const GraphicsContext, cmd_pool: *const CommandPool, data: []const u8, src_offset: u64, dst_offset: u64) !void {
+pub fn fastTransferOffset(self: *Buffer, cmd_pool: *const CommandPool, data: []const u8, src_offset: u64, dst_offset: u64) !void {
     assert(data.len <= std.math.maxInt(u32));
     var staging_buffer = try Buffer.create(
-        ctx,
+        self.engine,
         @intCast(data.len),
         .{ .transfer_src_bit = true },
         .{ .host_visible_bit = true, .host_coherent_bit = true },
     );
-    defer staging_buffer.destroy(ctx);
+    defer staging_buffer.destroy();
 
-    try staging_buffer.copyInto(ctx, data, src_offset);
-    try staging_buffer.transfer(ctx, cmd_pool, self, src_offset, dst_offset);
+    try staging_buffer.copyInto(data, src_offset);
+    try staging_buffer.transfer(cmd_pool, self, src_offset, dst_offset);
 }
 
 fn hasBindedMemory(self: *Buffer) bool {

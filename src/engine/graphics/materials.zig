@@ -60,28 +60,6 @@ pub const PBRMaterial = struct {
         }
     };
 
-    pub fn createMaterialPushConstantsBuffer(engine: *const Engine, size: u32) !Buffer {
-        return try Buffer.create(engine.ctx, @sizeOf(PBRMaterial.MaterialConstants) * size, .{ .storage_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
-    }
-
-    pub const MaterialResources = struct {
-        color_image: AllocatedImage,
-        color_sampler: Sampler,
-        metal_rough_image: AllocatedImage,
-        metal_rough_sampler: Sampler,
-        normal_image: AllocatedImage,
-        normal_sampler: Sampler,
-        emissive_image: AllocatedImage,
-        emissive_sampler: Sampler,
-        occlusion_image: AllocatedImage,
-        occlusion_sampler: Sampler,
-        transmission_image: AllocatedImage,
-        transmission_sampler: Sampler,
-        // data_buffer: Buffer,
-        data_buffer_idx: u32,
-        data_buffer_offset: vk.DeviceSize = 0,
-    };
-
     pub fn create() PBRMaterial {
         return .{
             .opaque_pipeline = undefined,

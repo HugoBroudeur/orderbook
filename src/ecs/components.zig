@@ -5,10 +5,10 @@ const Serde = @import("serde");
 const zm = @import("zmath");
 const IRect = @import("../primitive.zig").IRect;
 const Uuid = @import("uuid");
-const SceneManager = @import("../project/scene/manager.zig");
-const AssetManager = @import("../project/asset/manager.zig");
-const LoadedGLTF = @import("../engine/graphics/scene.zig").LoadedGLTF;
+const SceneManager = @import("../scene_management/manager.zig");
+const AssetManager = @import("../resource_management/manager.zig");
 const ImageMetadata = @import("../engine/vulkan/image.zig").ImageMetadata;
+const Resource = @import("../resource_management/resource.zig");
 
 // ACSII Generator: https://patorjk.com/software/taag/#p=display&f=ANSI%20Shadow&t=Graphics
 
@@ -47,15 +47,15 @@ pub const AssetManagerHandle = struct { ptr: *AssetManager };
 // ╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║██║╚██████╗███████║
 //  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝
 
-pub const DrawContextQueue = @import("../engine/graphics/scene.zig").DrawContext;
+pub const DrawContextQueue = @import("../scene_management/graph.zig").SceneGraph;
 
-pub const Transform = struct {
+pub const TransformComponent = struct {
     translation: Translation = .{},
     /// Identity quaternion
     rotation: [4]f32 = .{ 0, 0, 0, 1 },
     scale: Scale = .{},
 
-    pub fn toMatrix(self: *const Transform) zm.Mat {
+    pub fn toMatrix(self: *const TransformComponent) zm.Mat {
         const s = zm.scaling(self.scale.x, self.scale.y, self.scale.z);
         const r = zm.matFromQuat(@as(zm.F32x4, self.rotation));
         const t = zm.translation(self.translation.x, self.translation.y, self.translation.z);
@@ -88,10 +88,26 @@ pub const Skybox = struct {
     ptr: *ImageMetadata,
 };
 
-pub const GltfMesh = struct {
+// TODO: This needs to be removed from the ECS because Model is OOP
+/// ECS wrapper around a loaded glTF model — the model itself lives in the
+/// AssetManager; entities only reference it.
+pub const Model = struct {
     guid: Uuid.Uuid,
-    name: []const u8,
-    ptr: *LoadedGLTF,
+    name: []const u8 = "",
+    ptr: *@import("../scene_management/objects.zig").Model,
+};
+
+pub const MeshComponent = struct {
+    mesh: *Resource.Mesh,
+};
+
+pub const ParentComponent = struct {
+    parent: ID,
+    level: u32,
+};
+
+pub const MaterialComponent = struct {
+    material: *Resource.Material,
 };
 
 //  ██████╗ █████╗ ███╗   ███╗███████╗██████╗  █████╗
@@ -398,7 +414,7 @@ pub const LoadedSceneEvent = struct {
 pub const AssetLoaded = struct {
     guid: Uuid.Uuid,
     name: []const u8,
-    ptr: *LoadedGLTF,
+    ptr: *@import("../scene_management/objects.zig").Model,
 };
 
 pub const SkyboxRenamed = struct {

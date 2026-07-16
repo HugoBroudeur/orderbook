@@ -151,7 +151,7 @@ fn spawnCamera(
             .fov = 70,
         },
         Components.CameraActive{ .is_active = true },
-        Components.Transform{ .translation = .{ .z = 5 } },
+        Components.TransformComponent{ .translation = .{ .z = 5 } },
         Components.Rotated{},
         Components.Velocity{},
         World.Ecs.StateScoped(World.Gamestate){ .state = .main },
@@ -160,7 +160,7 @@ fn spawnCamera(
 
 fn transformVelocity(
     query: Query(struct {
-        t: *Components.Transform,
+        t: *Components.TransformComponent,
         v: *const Components.Velocity,
     }),
 ) !void {
@@ -183,7 +183,7 @@ fn transformVelocity(
 
 fn transformRotated(
     query: Query(struct {
-        t: *Components.Transform,
+        t: *Components.TransformComponent,
         r: *const Components.Rotated,
     }),
 ) !void {
@@ -202,7 +202,7 @@ fn cameraInput(
     sp: World.Ecs.Res(Components.CameraSpeed),
     se: World.Ecs.Res(Components.CameraSensitivity),
     query: QueryF(struct {
-        t: *const Components.Transform,
+        t: *const Components.TransformComponent,
         r: *Components.Rotated,
         v: *Components.Velocity,
     }, With(Components.CameraActive)),
@@ -263,7 +263,7 @@ fn updateRenderCamera(
     window: World.Ecs.Res(Components.WindowState),
     query: QueryF(struct {
         c: *Components.Camera,
-        t: *const Components.Transform,
+        t: *const Components.TransformComponent,
     }, With(Components.CameraActive)),
     render_camera: World.Ecs.ResMut(Components.RenderCamera),
 ) !void {
@@ -290,8 +290,8 @@ fn updateRenderCamera(
 
 fn drawScene(
     query: Query(struct {
-        m: *Components.GltfMesh,
-        t: *const Components.Transform,
+        m: *Components.Model,
+        t: *const Components.TransformComponent,
     }),
     draw_context: ResMut(Components.DrawContextQueue),
     // skybox: Res(Components.Skybox),
@@ -346,7 +346,7 @@ fn instantiateScene(
                 if (assets.inner.ptr.getAsset(guid)) |ptr| {
                     const meta = assets.inner.ptr.pool.asset_metadata.get(guid);
                     try cmd.insert(entity, .{
-                        Components.GltfMesh{
+                        Components.Model{
                             .guid = guid,
                             .name = if (meta) |m| m.name else "",
                             .ptr = ptr,
@@ -381,8 +381,8 @@ fn onAssetLoaded(
         const guid = Uuid.v4.new(alloc.io);
         _ = try cmd.spawn(.{
             Components.ID{ .guid = guid },
-            Components.GltfMesh{ .ptr = event.ptr, .name = event.name, .guid = guid },
-            Components.Transform{},
+            Components.Model{ .ptr = event.ptr, .name = event.name, .guid = guid },
+            Components.TransformComponent{},
         });
 
         log.info("Add GLTF Mesh in ECS: {s}", .{event.name});
