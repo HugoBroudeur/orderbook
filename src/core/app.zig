@@ -11,8 +11,8 @@ const sdl = @import("sdl3");
 // const impl_sdlgpu3 = @import("impl_sdlgpu3");
 
 const ProjectManager = @import("../project/manager.zig");
-const SceneManager = @import("../project/scene/manager.zig");
-const AssetManager = @import("../project/asset/manager.zig");
+const SceneManager = @import("../scene_management/manager.zig");
+const AssetManager = @import("../resource_management/manager.zig");
 
 const Layer = @import("layer.zig");
 const LayerStack = @import("layer_stack.zig").LayerStack;
@@ -62,8 +62,15 @@ pub fn init(self: *App, config: Config) !void {
     self.framerate = Framerate.init(@intFromFloat(self.graphics_context.display.refresh_rate));
     self.framerate.on();
 
+    self.engine = try Engine.init(self.allocator, &self.graphics_context, self.io);
+    try self.engine.setup();
+
     self.scene_manager.init(self.allocator, self.io, &self.world);
-    self.asset_manager = .init(self.allocator, self.io);
+    self.asset_manager = .init(
+        self.allocator,
+        self.io,
+        &self.engine,
+    );
     self.project_manager = .init(self.allocator, self.io, config, &self.scene_manager, &self.asset_manager);
 
     self.world = try .init(self.allocator, self.io);
@@ -71,9 +78,18 @@ pub fn init(self: *App, config: Config) !void {
     try self.world.app.addResource(World.Components.AssetManagerHandle{ .ptr = &self.asset_manager });
     try self.world.app.addPlugin(Systems.Plugins.Startup);
 
-    self.render_layer = RenderLayer.init(self.allocator, self.io, &self.graphics_context, &self.framerate, &self.world, &self.project_manager);
-    self.game_layer = GameLayer.init(self.allocator, self.io, config, &self.render_layer.engine, &self.framerate, &self.world);
-    self.editor_layer = EditorLayer.init(self.allocator, self.io, config, &self.project_manager, &self.world, &self.render_layer.engine);
+    // WindowState only updates on window_resized events, which may never fire
+    // (Wayland emits none at startup). Seed it with the real window size so
+    // frame-1 consumers — the camera projection aspect ratio in particular —
+    // never divide 0/0 into a NaN view_proj. See docs/plans/window-state-update.md.
+    const win_dim = self.graphics_context.window.getDimension();
+    const window_state = try self.world.app.getResource(World.Components.WindowState);
+    window_state.width = @intCast(win_dim.width);
+    window_state.height = @intCast(win_dim.height);
+
+    self.render_layer = RenderLayer.init(self.allocator, self.io, &self.engine, &self.framerate, &self.world, &self.project_manager);
+    self.game_layer = GameLayer.init(self.allocator, self.io, config, &self.engine, &self.framerate, &self.world);
+    self.editor_layer = EditorLayer.init(self.allocator, self.io, config, &self.project_manager, &self.world, &self.engine);
 
     try self.project_manager.open(config.default_project_name);
 

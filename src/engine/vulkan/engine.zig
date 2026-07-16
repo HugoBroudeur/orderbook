@@ -252,18 +252,6 @@ pub fn getCurrentFrame(self: *Engine) *Frame {
     return self.swapchain.getCurrentFrame();
 }
 
-/// Get (or lazily create) the cached sampler for the given options.
-/// Returned by value — the cache owns and destroys the vk handle.
-pub fn getSampler(self: *Engine, option: Sampler.SamplerOption) !Sampler {
-    for (self.sampler_cache.items) |entry| {
-        if (std.meta.eql(entry.option, option)) return entry.sampler;
-    }
-
-    const sampler = try Sampler.create(self.ctx, option);
-    try self.sampler_cache.append(self.allocator, .{ .option = option, .sampler = sampler });
-    return sampler;
-}
-
 pub fn render(self: *Engine, scene: *Scene, asset_pool: *ResourceManager) !void {
     _ = asset_pool;
     const camera = try scene.reg.app.getResource(Components.RenderCamera);
@@ -790,4 +778,14 @@ fn create2DPipeline(self: *Engine) !void {
 
     self.pipelines.set(._2d, pipeline);
     self.pipeline_layouts.set(._2d, pipeline_layout);
+}
+
+pub fn getSampler(self: *Engine, option: Sampler.SamplerOption) !Sampler {
+    for (self.sampler_cache.items) |entry| {
+        if (std.meta.eql(entry.option, option)) return entry.sampler;
+    }
+
+    const sampler = try Sampler.create(self.ctx, option);
+    try self.sampler_cache.append(self.allocator, .{ .option = option, .sampler = sampler });
+    return sampler;
 }

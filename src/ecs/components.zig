@@ -239,10 +239,19 @@ pub const Camera = struct {
         const forward = zm.normalize3(zm.mul(zm.f32x4(0, 0, -1, 0), rot_matrix));
         self.view_matrix = zm.lookToRh(self.pos, forward, self.up);
 
+        // A zero-sized viewport (WindowState not yet initialized) would put
+        // NaN into the projection and poison view_proj for the whole frame —
+        // every object gets frustum-culled and nothing renders. Fall back to
+        // a square aspect rather than propagate 0/0.
+        const aspect: f32 = if (self.viewport.width > 0 and self.viewport.heigth > 0)
+            @as(f32, @floatFromInt(self.viewport.width)) / @as(f32, @floatFromInt(self.viewport.heigth))
+        else
+            1.0;
+
         self.projection_matrix = switch (self.kind) {
             .perspective => zm.perspectiveFovRh(
                 self.fov * (std.math.pi / 180.0),
-                @as(f32, @floatFromInt(self.viewport.width)) / @as(f32, @floatFromInt(self.viewport.heigth)),
+                aspect,
                 self.near,
                 self.far,
             ),

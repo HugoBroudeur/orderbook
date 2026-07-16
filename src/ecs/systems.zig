@@ -358,16 +358,17 @@ fn drawScene(
 /// materials), and a ParentComponent pointing at the model-root entity.
 /// Children carry no ID on purpose: they are derived from the asset and
 /// re-spawned at instantiation, so the scene serializer must not save them.
-fn spawnModelMeshEntities(cmd: Commands, root: Components.ID, model: *SceneObjects.Model) !void {
+fn spawnModelMeshEntities(alloc: World.Ecs.Alloc, cmd: Commands, root: Components.ID, model: *SceneObjects.Model) !void {
     for (model.top_nodes.items) |node| {
-        try spawnNodeMeshEntities(cmd, root, node);
+        try spawnNodeMeshEntities(alloc, cmd, root, node);
     }
 }
 
-fn spawnNodeMeshEntities(cmd: Commands, root: Components.ID, node: *SceneObjects.Node) !void {
+fn spawnNodeMeshEntities(alloc: World.Ecs.Alloc, cmd: Commands, root: Components.ID, node: *SceneObjects.Node) !void {
     switch (node.kind) {
         .mesh => |mesh| {
             const entity = try cmd.spawn(.{
+                Components.ID{ .guid = Uuid.v4.new(alloc.io) },
                 Components.MeshComponent{ .mesh = mesh },
                 Components.TransformComponent.fromMatrix(node.world_transform),
                 Components.ParentComponent{ .parent = root, .level = 1 },
@@ -384,11 +385,12 @@ fn spawnNodeMeshEntities(cmd: Commands, root: Components.ID, node: *SceneObjects
     }
 
     for (node.child_nodes.items) |child| {
-        try spawnNodeMeshEntities(cmd, root, child);
+        try spawnNodeMeshEntities(alloc, cmd, root, child);
     }
 }
 
 fn instantiateScene(
+    alloc: World.Ecs.Alloc,
     cmd: Commands,
     reader: EventReader(Components.PendingSceneEvent),
     writer: EventWriter(Components.LoadedSceneEvent),
@@ -426,7 +428,7 @@ fn instantiateScene(
                             .name = if (meta) |m| m.name else "",
                         },
                     });
-                    try spawnModelMeshEntities(cmd, .{ .guid = e.entity_guid }, ptr);
+                    try spawnModelMeshEntities(alloc, cmd, .{ .guid = e.entity_guid }, ptr);
                 } else {
                     log.warn("Scene entity {} references unknown/unloaded GLTF asset {} — was the project's asset pool loaded?", .{ e.entity_guid, guid });
                 }
@@ -459,7 +461,7 @@ fn onAssetLoaded(
             Components.AssetReference{ .guid = event.guid, .name = event.name },
             Components.TransformComponent{},
         });
-        try spawnModelMeshEntities(cmd, root_id, event.ptr);
+        try spawnModelMeshEntities(alloc, cmd, root_id, event.ptr);
 
         log.info("Add GLTF model in ECS: {s}", .{event.name});
     }
