@@ -61,6 +61,27 @@ pub const TransformComponent = struct {
         const t = zm.translation(self.translation.x, self.translation.y, self.translation.z);
         return zm.mul(zm.mul(s, r), t);
     }
+
+    /// Decompose an affine TRS matrix (e.g. a glTF node's world transform)
+    /// back into translation/rotation/scale. Skew is not representable and
+    /// gets lost; zero scale is clamped to avoid a degenerate rotation basis.
+    pub fn fromMatrix(m: zm.Mat) TransformComponent {
+        const sx = zm.length3(m[0])[0];
+        const sy = zm.length3(m[1])[0];
+        const sz = zm.length3(m[2])[0];
+
+        var rot = zm.identity();
+        rot[0] = m[0] / @as(zm.F32x4, @splat(if (sx > 1e-8) sx else 1));
+        rot[1] = m[1] / @as(zm.F32x4, @splat(if (sy > 1e-8) sy else 1));
+        rot[2] = m[2] / @as(zm.F32x4, @splat(if (sz > 1e-8) sz else 1));
+        const q = zm.matToQuat(rot);
+
+        return .{
+            .translation = .{ .x = m[3][0], .y = m[3][1], .z = m[3][2] },
+            .rotation = .{ q[0], q[1], q[2], q[3] },
+            .scale = .{ .x = sx, .y = sy, .z = sz },
+        };
+    }
 };
 
 const Translation = struct {
@@ -88,13 +109,13 @@ pub const Skybox = struct {
     ptr: *ImageMetadata,
 };
 
-// TODO: This needs to be removed from the ECS because Model is OOP
-/// ECS wrapper around a loaded glTF model — the model itself lives in the
-/// AssetManager; entities only reference it.
-pub const Model = struct {
+/// Marks a model-root entity: records which glTF asset the entity (and its
+/// child mesh entities, linked back via ParentComponent) was instantiated
+/// from. Purely provenance — rendering goes through the child entities'
+/// MeshComponent/TransformComponent, never through the asset object itself.
+pub const AssetReference = struct {
     guid: Uuid.Uuid,
     name: []const u8 = "",
-    ptr: *@import("../scene_management/objects.zig").Model,
 };
 
 pub const MeshComponent = struct {

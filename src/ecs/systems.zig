@@ -19,6 +19,7 @@ const EventReader = World.Ecs.EventReader;
 const EventWriter = World.Ecs.EventWriter;
 
 const Uuid = @import("uuid");
+const SceneObjects = @import("../scene_management/objects.zig");
 
 pub const Plugins = struct {
     pub const Startup = struct {
@@ -288,29 +289,103 @@ fn updateRenderCamera(
     }
 }
 
+/// ECS render prep: every renderable is an entity carrying
+/// MeshComponent + TransformComponent (+ ParentComponent linking to the
+/// model-root entity whose transform places the whole model). No OOP
+/// node-tree traversal — the hierarchy was flattened into entities when
+/// the asset was instantiated.
 fn drawScene(
-    query: Query(struct {
-        m: *Components.Model,
+    meshes: Query(struct {
+        m: *const Components.MeshComponent,
+        t: *const Components.TransformComponent,
+        p: *const Components.ParentComponent,
+    }),
+    roots: Query(struct {
+        id: *const Components.ID,
         t: *const Components.TransformComponent,
     }),
     draw_context: ResMut(Components.DrawContextQueue),
-    // skybox: Res(Components.Skybox),
     stats: ResMut(Components.Stats),
 ) !void {
-    var it = query.iter();
     stats.inner.startClock(.scene_build);
 
     // Clear queues
-    draw_context.inner.reset();
+    const graph = draw_context.inner;
+    graph.reset();
 
-    // draw_context.inner.skybox =
-
+    var it = meshes.iter();
     while (it.next()) |entry| {
-        var top_matrix = entry.t.toMatrix();
-        try entry.m.ptr.draw(&top_matrix, draw_context.inner);
+        const local = entry.t.toMatrix();
+
+        // Resolve the model-root placement (one hierarchy level: the glTF
+        // node transforms were baked into the mesh entity's transform at
+        // spawn, so only the root's scene placement remains to apply).
+        var final = local;
+        var rit = roots.iter();
+        while (rit.next()) |root| {
+            if (root.id.guid == entry.p.parent.guid) {
+                final = zm.mul(root.t.toMatrix(), local);
+                break;
+            }
+        }
+
+        const mesh = entry.m.mesh;
+        for (mesh.surfaces.items) |surface| {
+            const material = surface.material orelse continue;
+            const ro: SceneObjects.RenderObject = .{
+                .index_count = @intCast(surface.count),
+                .first_index = @intCast(surface.start_index),
+                .index_buffer = mesh.buffers.index,
+                .vertex_buffer = mesh.buffers.vertex,
+                .material = &material.data,
+                .transform = final,
+                .bounds = surface.bounds,
+            };
+            const list = switch (ro.material.pass_type) {
+                .Transparent => &graph.transparent_surfaces,
+                else => &graph.opaque_surfaces,
+            };
+            try list.append(graph.allocator, ro);
+        }
     }
 
     stats.inner.tickClock(.scene_build);
+}
+
+/// Flatten a loaded glTF into ECS entities: one entity per mesh-carrying
+/// node, holding the node's baked world transform, its Mesh resource, the
+/// first surface material (editor handle — rendering uses per-surface
+/// materials), and a ParentComponent pointing at the model-root entity.
+/// Children carry no ID on purpose: they are derived from the asset and
+/// re-spawned at instantiation, so the scene serializer must not save them.
+fn spawnModelMeshEntities(cmd: Commands, root: Components.ID, model: *SceneObjects.Model) !void {
+    for (model.top_nodes.items) |node| {
+        try spawnNodeMeshEntities(cmd, root, node);
+    }
+}
+
+fn spawnNodeMeshEntities(cmd: Commands, root: Components.ID, node: *SceneObjects.Node) !void {
+    switch (node.kind) {
+        .mesh => |mesh| {
+            const entity = try cmd.spawn(.{
+                Components.MeshComponent{ .mesh = mesh },
+                Components.TransformComponent.fromMatrix(node.world_transform),
+                Components.ParentComponent{ .parent = root, .level = 1 },
+            });
+
+            for (mesh.surfaces.items) |surface| {
+                if (surface.material) |material| {
+                    try cmd.insert(entity, .{Components.MaterialComponent{ .material = material }});
+                    break;
+                }
+            }
+        },
+        else => {},
+    }
+
+    for (node.child_nodes.items) |child| {
+        try spawnNodeMeshEntities(cmd, root, child);
+    }
 }
 
 fn instantiateScene(
@@ -346,12 +421,12 @@ fn instantiateScene(
                 if (assets.inner.ptr.getAsset(guid)) |ptr| {
                     const meta = assets.inner.ptr.pool.asset_metadata.get(guid);
                     try cmd.insert(entity, .{
-                        Components.Model{
+                        Components.AssetReference{
                             .guid = guid,
                             .name = if (meta) |m| m.name else "",
-                            .ptr = ptr,
                         },
                     });
+                    try spawnModelMeshEntities(cmd, .{ .guid = e.entity_guid }, ptr);
                 } else {
                     log.warn("Scene entity {} references unknown/unloaded GLTF asset {} — was the project's asset pool loaded?", .{ e.entity_guid, guid });
                 }
@@ -378,14 +453,15 @@ fn onAssetLoaded(
     reader: World.Ecs.EventReader(Components.AssetLoaded),
 ) !void {
     for (reader.events) |event| {
-        const guid = Uuid.v4.new(alloc.io);
+        const root_id: Components.ID = .{ .guid = Uuid.v4.new(alloc.io) };
         _ = try cmd.spawn(.{
-            Components.ID{ .guid = guid },
-            Components.Model{ .ptr = event.ptr, .name = event.name, .guid = guid },
+            root_id,
+            Components.AssetReference{ .guid = event.guid, .name = event.name },
             Components.TransformComponent{},
         });
+        try spawnModelMeshEntities(cmd, root_id, event.ptr);
 
-        log.info("Add GLTF Mesh in ECS: {s}", .{event.name});
+        log.info("Add GLTF model in ECS: {s}", .{event.name});
     }
 }
 

@@ -234,9 +234,9 @@ const SceneSerializer = struct {
                     }
                 }
 
-                // if (world.app.components.getSingle(entry.entity, World.Components.Model)) |model| {
-                //     entity_data.gltf_uuid = model.guid;
-                // }
+                if (world.app.components.getSingle(entry.entity, World.Components.AssetReference)) |asset_ref| {
+                    entity_data.gltf_uuid = asset_ref.guid;
+                }
 
                 try entities.append(allocator, entity_data);
             }

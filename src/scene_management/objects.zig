@@ -96,37 +96,6 @@ pub const Node = struct {
         for (self.child_nodes.items) |child| child.refreshTransform(self.world_transform);
     }
 
-    pub fn draw(self: *Node, top_matrix: *zm.Mat, graph: *SceneGraph) !void {
-        switch (self.kind) {
-            .mesh => |mesh| {
-                const node_matrix = zm.mul(top_matrix.*, self.world_transform);
-
-                for (mesh.surfaces.items) |surface| {
-                    // No material bound (glTF without any materials): skip
-                    // rather than crash — there is nothing valid to draw with.
-                    const material = surface.material orelse continue;
-                    const ro: RenderObject = .{
-                        .index_count = @intCast(surface.count),
-                        .first_index = @intCast(surface.start_index),
-                        .index_buffer = mesh.buffers.index,
-                        .vertex_buffer = mesh.buffers.vertex,
-                        .material = &material.data,
-                        .transform = node_matrix,
-                        .bounds = surface.bounds,
-                    };
-                    const list = switch (ro.material.pass_type) {
-                        .Transparent => &graph.transparent_surfaces,
-                        else => &graph.opaque_surfaces,
-                    };
-                    try list.append(self.allocator, ro);
-                }
-            },
-            else => {},
-        }
-
-        for (self.child_nodes.items) |child| try child.draw(top_matrix, graph);
-    }
-
     pub fn deinit(self: *Node) void {
         self.child_nodes.deinit(self.allocator);
         self.parent_node = null;
@@ -162,12 +131,6 @@ pub const Model = struct {
             .textures = .empty,
             .materials = .empty,
         };
-    }
-
-    pub fn draw(self: *Model, top_matrix: *zm.Mat, graph: *SceneGraph) !void {
-        for (self.top_nodes.items) |node| {
-            try node.draw(top_matrix, graph);
-        }
     }
 
     pub fn deinit(self: *Model) void {
