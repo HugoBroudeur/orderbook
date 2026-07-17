@@ -19,18 +19,17 @@ label: []const u8 = "Render Layer",
 
 allocator: std.mem.Allocator,
 io: std.Io,
-graphics_context: *GraphicsContext,
-engine: Engine = undefined,
+engine: *Engine,
 world: *World,
 // draw_context: *Scene.DrawContext, // App-owned (Step 3)
 framerate: *Framerate,
 project_manager: *ProjectManager,
 
-pub fn init(allocator: std.mem.Allocator, io: std.Io, graphics_context: *GraphicsContext, framerate: *Framerate, world: *World, project_manager: *ProjectManager) RenderLayer {
+pub fn init(allocator: std.mem.Allocator, io: std.Io, engine: *Engine, framerate: *Framerate, world: *World, project_manager: *ProjectManager) RenderLayer {
     return .{
         .allocator = allocator,
         .io = io,
-        .graphics_context = graphics_context,
+        .engine = engine,
         .framerate = framerate,
         .world = world,
         .project_manager = project_manager,
@@ -40,7 +39,7 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, graphics_context: *Graphic
 pub fn deinit(self: *RenderLayer) void {
     self.engine.ctx.device.deviceWaitIdle() catch {};
     self.engine.gui_render_fn = null;
-    self.project_manager.asset_manager.deinit(&self.engine);
+    self.project_manager.asset_manager.deinit(self.engine);
     zgui.backend.deinit();
     zgui.deinit();
 
@@ -56,12 +55,6 @@ pub fn getLabel(self: *RenderLayer) []const u8 {
 }
 
 pub fn onAttach(self: *RenderLayer) !void {
-    self.engine = try Engine.init(self.allocator, self.graphics_context, self.io);
-    self.engine.setup() catch |err| {
-        log.err("Can't setup the Vulkan Engine : {}", .{err});
-        return err;
-    };
-
     const size = try self.engine.ctx.window.ptr.getSize();
     if (self.world.app.getResource(World.Components.WindowState) catch null) |ws| {
         ws.width = @intCast(size[0]);
@@ -70,7 +63,7 @@ pub fn onAttach(self: *RenderLayer) !void {
 
     try self.setupZgui();
 
-    self.project_manager.asset_manager.processQueuedAssets(&self.engine);
+    self.project_manager.asset_manager.processQueuedAssets(self.engine);
 }
 
 pub fn onUpdate(self: *RenderLayer) void {
@@ -80,9 +73,6 @@ pub fn onUpdate(self: *RenderLayer) void {
     };
 
     if (!self.framerate.shouldDraw()) return;
-
-    // Don't render if window is minimised
-    if (self.engine.ctx.window.getWidth() == 0 or self.engine.ctx.window.getHeight() == 0) return;
 
     self.world.app.runPar(World.Schedule.pre_render);
     self.world.app.flushCommands();

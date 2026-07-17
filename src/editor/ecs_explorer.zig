@@ -21,7 +21,7 @@ const inspected_resources = .{
 
 const probed_components = .{
     .{ "Camera", Components.Camera },
-    .{ "Transform", Components.Transform },
+    .{ "Transform", Components.TransformComponent },
     .{ "Velocity", Components.Velocity },
     .{ "Rotated", Components.Rotated },
 };

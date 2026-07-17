@@ -9,6 +9,7 @@ const SceneManager = @import("../scene_management/manager.zig");
 const AssetManager = @import("../resource_management/manager.zig");
 const ImageMetadata = @import("../engine/vulkan/image.zig").ImageMetadata;
 const Resource = @import("../resource_management/resource.zig");
+const Node = @import("../scene_management/objects.zig").Node;
 
 // ACSII Generator: https://patorjk.com/software/taag/#p=display&f=ANSI%20Shadow&t=Graphics
 
@@ -109,22 +110,8 @@ pub const Skybox = struct {
     ptr: *ImageMetadata,
 };
 
-/// Marks a model-root entity: records which glTF asset the entity (and its
-/// child mesh entities, linked back via ParentComponent) was instantiated
-/// from. Purely provenance — rendering goes through the child entities'
-/// MeshComponent/TransformComponent, never through the asset object itself.
-pub const AssetReference = struct {
-    guid: Uuid.Uuid,
-    name: []const u8 = "",
-};
-
-pub const MeshComponent = struct {
-    mesh: *Resource.Mesh,
-};
-
-pub const ParentComponent = struct {
-    parent: ID,
-    level: u32,
+pub const NodeComponent = struct {
+    node: *Node,
 };
 
 pub const MaterialComponent = struct {
@@ -239,10 +226,6 @@ pub const Camera = struct {
         const forward = zm.normalize3(zm.mul(zm.f32x4(0, 0, -1, 0), rot_matrix));
         self.view_matrix = zm.lookToRh(self.pos, forward, self.up);
 
-        // A zero-sized viewport (WindowState not yet initialized) would put
-        // NaN into the projection and poison view_proj for the whole frame —
-        // every object gets frustum-culled and nothing renders. Fall back to
-        // a square aspect rather than propagate 0/0.
         const aspect: f32 = if (self.viewport.width > 0 and self.viewport.heigth > 0)
             @as(f32, @floatFromInt(self.viewport.width)) / @as(f32, @floatFromInt(self.viewport.heigth))
         else

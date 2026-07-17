@@ -3,8 +3,8 @@ const log = std.log.scoped(.scene_editor);
 const zgui = @import("zgui");
 const Uuid = @import("uuid");
 
-const ProjectManager = @import("../project/manager.zig");
-const SceneManager = @import("../engine/scene_manager.zig");
+// const ProjectManager = @import("../project/manager.zig");
+const ResourceManager = @import("../resource_management/manager.zig");
 const World = @import("../ecs/world.zig");
 
 // TODO, don't use the engine, instead emit an event to say something is loaded and the engine can consume it to create the GPU resource
@@ -42,7 +42,7 @@ const AssetEntry = struct {
 
 allocator: std.mem.Allocator,
 io: std.Io,
-project_manager: *ProjectManager,
+resource_manager: *ResourceManager,
 world: *World.Ecs.App,
 engine: *Engine,
 
@@ -52,11 +52,11 @@ icon_size: f32 = 64,
 icon_spacing: f32 = 10,
 needs_rescan: bool = true,
 
-pub fn init(allocator: std.mem.Allocator, io: std.Io, project_manager: *ProjectManager, world: *World.Ecs.App, engine: *Engine) AssetExplorer {
+pub fn init(allocator: std.mem.Allocator, io: std.Io, resource_manager: *ResourceManager, world: *World.Ecs.App, engine: *Engine) AssetExplorer {
     return .{
         .allocator = allocator,
         .io = io,
-        .project_manager = project_manager,
+        .resource_manager = resource_manager,
         .world = world,
         .engine = engine,
     };
@@ -122,7 +122,7 @@ fn clearEntries(self: *AssetExplorer) void {
 }
 
 fn drawGrid(self: *AssetExplorer) void {
-    const pool = &self.project_manager.asset_manager.pool;
+    // const pool = &self.project_manager.asset_manager.pool;
 
     if (!zgui.beginChild("AssetGrid", .{})) {
         zgui.endChild();
@@ -176,7 +176,8 @@ fn drawGrid(self: *AssetExplorer) void {
         }
 
         // ── Tile decoration (drawlist) ──────────────────────────────────────
-        const loaded = pool.loaded_gltf.contains(entry.name);
+        // const loaded = pool.loaded_gltf.contains(entry.name);
+        const loaded = false;
 
         const bg = zgui.colorConvertFloat4ToU32(switch (entry.kind) {
             .mesh => [4]f32{ 0.26, 0.32, 0.44, 1.0 },
@@ -222,12 +223,12 @@ fn drawGrid(self: *AssetExplorer) void {
 }
 
 fn requestLoad(self: *AssetExplorer, entry: AssetEntry) void {
-    const guid = self.project_manager.asset_manager.importAsset(self.engine, entry.path) catch |err| {
+    const guid = self.resource_manager.importAsset(entry.path) catch |err| {
         log.err("[AssetExplorer] import failed for {s}: {}", .{ entry.path, err });
         return;
     };
 
-    const ptr = self.project_manager.asset_manager.getAsset(guid) orelse {
+    const ptr = self.resource_manager.getAsset(guid) orelse {
         log.err("[AssetExplorer] importAsset succeeded but no loaded asset found for {s} (GUID {})", .{ entry.path, guid });
         return;
     };

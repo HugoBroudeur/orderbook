@@ -71,21 +71,17 @@ pub fn init(self: *App, config: Config) !void {
         self.io,
         &self.engine,
     );
+    // Must run before anything else can register a bindless texture:
+    // `white` needs to claim slot 0 (the implicit fallback slot untextured
+    // material fields default to).
+    try self.asset_manager.initBasicTextures();
     self.project_manager = .init(self.allocator, self.io, config, &self.scene_manager, &self.asset_manager);
 
     self.world = try .init(self.allocator, self.io);
+
     try self.world.app.addResource(World.Components.RawInputQueue{ .allocator = self.allocator, .io = self.io });
     try self.world.app.addResource(World.Components.AssetManagerHandle{ .ptr = &self.asset_manager });
     try self.world.app.addPlugin(Systems.Plugins.Startup);
-
-    // WindowState only updates on window_resized events, which may never fire
-    // (Wayland emits none at startup). Seed it with the real window size so
-    // frame-1 consumers — the camera projection aspect ratio in particular —
-    // never divide 0/0 into a NaN view_proj. See docs/plans/window-state-update.md.
-    const win_dim = self.graphics_context.window.getDimension();
-    const window_state = try self.world.app.getResource(World.Components.WindowState);
-    window_state.width = @intCast(win_dim.width);
-    window_state.height = @intCast(win_dim.height);
 
     self.render_layer = RenderLayer.init(self.allocator, self.io, &self.engine, &self.framerate, &self.world, &self.project_manager);
     self.game_layer = GameLayer.init(self.allocator, self.io, config, &self.engine, &self.framerate, &self.world);

@@ -326,194 +326,6 @@ pub const AllocatedImage = struct {
     }
 };
 
-vk_image: vk.Image,
-vk_image_memory: vk.DeviceMemory,
-view: vk.ImageView,
-format: vk.Format,
-dimension: vk.Extent3D,
-size: usize = 0,
-mip_levels: u32 = 1,
-
-pub fn create(
-    engine: *Engine,
-    dimension: vk.Extent3D,
-    format: vk.Format,
-    usage: vk.ImageUsageFlags,
-    is_mipmapped: bool,
-    array_layer_len: u32,
-) !Image {
-    const mip_levels = if (is_mipmapped) calculateMipLevels(dimension.width, dimension.height) else 1;
-
-    const image_info = vk.ImageCreateInfo{
-        .flags = .{},
-        .queue_family_index_count = 0,
-        .p_queue_family_indices = undefined,
-        .image_type = .@"2d",
-        .extent = dimension,
-        .mip_levels = mip_levels,
-        .array_layers = array_layer_len,
-        .format = format,
-        .tiling = .optimal,
-        .initial_layout = .undefined,
-        .usage = usage,
-        .samples = .{ .@"1_bit" = true },
-        .sharing_mode = .exclusive,
-    };
-    const vk_image = try engine.ctx.device.createImage(&image_info, null);
-
-    const mem_requirements = engine.ctx.device.getImageMemoryRequirements(vk_image);
-    var alloc_info = try engine.ctx.createMemoryAllocateInfo(mem_requirements, .{ .device_local_bit = true }, false);
-
-    const image_memory = try engine.ctx.device.allocateMemory(&alloc_info, null);
-    try engine.ctx.device.bindImageMemory(vk_image, image_memory, 0);
-
-    var aspect_flag: vk.ImageAspectFlags = .{ .color_bit = true };
-    if (format == .d32_sfloat) {
-        aspect_flag = .{ .depth_bit = true };
-    }
-
-    const view_info = vk.ImageViewCreateInfo{
-        .image = vk_image,
-        .view_type = .@"2d",
-        .format = format,
-        .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
-        .subresource_range = .{
-            .aspect_mask = aspect_flag,
-            .base_mip_level = 0,
-            .base_array_layer = 0,
-            .layer_count = 1,
-            .level_count = mip_levels,
-        },
-    };
-    // Must be call after ctx.device.bindImageMemory(vk_image, image_memory, 0);
-    const view = try engine.ctx.device.createImageView(&view_info, null);
-
-    return .{
-        .vk_image = vk_image,
-        .vk_image_memory = image_memory,
-        .view = view,
-        .dimension = dimension,
-        .format = format,
-        .mip_levels = mip_levels,
-        // .size = extent.width * extent.height *
-    };
-}
-
-pub fn createFromSurface(
-    engine: *Engine,
-    surface: sdl.surface.Surface,
-    usage: vk.ImageUsageFlags,
-    override_format: ?vk.Format,
-) !Image {
-    var _usage = usage;
-    _usage.transfer_src_bit = true;
-    _usage.transfer_dst_bit = true;
-
-    return Image.createFromBytes(
-        engine,
-        surface.getPixels().?,
-        .{ .width = @intCast(surface.getWidth()), .height = @intCast(surface.getHeight()), .depth = 1 },
-        if (override_format) |fmt| fmt else toVulkanFormat(surface.getFormat().?),
-        _usage,
-        true,
-    );
-}
-
-pub fn createFromPath(
-    engine: *Engine,
-    path: []const u8,
-    pixel_format: sdl.pixels.Format,
-    usage: vk.ImageUsageFlags,
-) !Image {
-    const surface = try loadImageAssetWithFormat(path, pixel_format);
-    return try Image.createFromSurface(engine, surface, usage, null);
-}
-
-pub fn createFromColor(
-    engine: *Engine,
-    color: Primitive.Color,
-    size: vk.Extent3D,
-    format: vk.Format,
-    usage: vk.ImageUsageFlags,
-) !Image {
-    var _usage = usage;
-    _usage.transfer_src_bit = true;
-    _usage.transfer_dst_bit = true;
-
-    return Image.createFromBytes(
-        engine,
-        &color.toBytes(),
-        size,
-        format,
-        _usage,
-        false,
-    );
-}
-
-pub fn createFromBytes(
-    engine: *Engine,
-    data: []const u8,
-    size: vk.Extent3D,
-    format: vk.Format,
-    usage: vk.ImageUsageFlags,
-    is_mipmapped: bool,
-) !Image {
-    var _usage = usage;
-    _usage.transfer_src_bit = true;
-    _usage.transfer_dst_bit = true;
-
-    var image = try create(engine, size, format, _usage, is_mipmapped, 1);
-    // image.size = size.width * size.height;
-    image.size = data.len;
-
-    var immediate_cmd = try VulkanCommand.ImmediateCommands.init(engine, engine.getCurrentFrame().cmd_pool);
-    defer immediate_cmd.deinit(engine);
-
-    var gpu_cmd = try TransferToGpuCmd.create(engine, &immediate_cmd.buffer, &image, data, is_mipmapped, 1);
-    defer gpu_cmd.destroy();
-
-    try immediate_cmd.addCommand(engine.allocator, gpu_cmd.interface());
-
-    try engine.immediateSubmit(.graphic, immediate_cmd);
-
-    return image;
-}
-
-pub fn createFromBytesWithSDL(
-    engine: *Engine,
-    data: []const u8,
-    mime: ?[]const u8,
-    usage: vk.ImageUsageFlags,
-    is_alpha_matter: bool,
-) !Image {
-    const stream = try sdl.io_stream.Stream.initFromConstMem(data);
-
-    const stem = std.fs.path.stem(mime orelse "");
-    const format = ImageFormat.fromStem(stem);
-    if (format == null) {
-        log.err("Can't load image. Extension {s} not supported", .{stem});
-        return error.ImageExtNotSupported;
-    }
-
-    const surface = switch (format.?) {
-        .jpg, .jpeg => try sdl.image.loadJpgIo(stream),
-        .png => try sdl.image.loadPngIo(stream),
-        // .webp => try sdl.image.loadWebpIo(stream),
-    };
-    defer surface.deinit();
-
-    // const surface = sdl.image.loadIo(stream, true) catch |err| {
-    //     log.err("{}, {?s}", .{ err, sdl.errors.get() });
-    //     @panic("Image.createFromBytes");
-    // };
-    defer surface.deinit();
-    const surface_rgba = try surface.convertFormat(.array_rgba_32);
-    defer surface_rgba.deinit();
-
-    const vk_format: ?vk.Format = if (is_alpha_matter) .r8g8b8a8_srgb else null;
-    return Image.createFromSurface(engine, surface_rgba, usage, vk_format);
-}
-
 pub fn createCubemapFromPath(
     engine: *Engine,
     faces: struct {
@@ -583,12 +395,6 @@ pub fn createCubemapFromPath(
     return image;
 }
 
-pub fn destroy(self: *Image, ctx: *const GraphicsContext) void {
-    ctx.device.destroyImage(self.vk_image, null);
-    ctx.device.freeMemory(self.vk_image_memory, null);
-    ctx.device.destroyImageView(self.view, null);
-}
-
 pub fn loadImageAssetWithFormat(image_path: []const u8, pixel_format: sdl.pixels.Format) !sdl.surface.Surface {
     const surface = try loadFile(image_path);
 
@@ -655,47 +461,6 @@ fn toVulkanFormat(sdl_format: sdl.pixels.Format) vk.Format {
     };
 }
 
-pub fn copyToImage(self: *Image, ctx: *const GraphicsContext, cmd: vk.CommandBuffer, destination: *Image) void {
-    const blit_region: vk.ImageBlit2 = .{
-        .src_offsets = .{
-            .{ .x = 0, .y = 0, .z = 0 },
-            .{ .x = self.width, .y = self.height, .z = 1 },
-        },
-        .dst_offsets = .{
-            .{ .x = 0, .y = 0, .z = 0 },
-            .{ .x = destination.width, .y = destination.height, .z = 1 },
-        },
-        .src_subresource = .{
-            .aspect_mask = .{ .color_bit = true },
-            .base_array_layer = 0,
-            .layer_count = 1,
-            .mip_level = 0,
-        },
-        .dst_subresource = .{
-            .aspect_mask = .{ .color_bit = true },
-            .base_array_layer = 0,
-            .layer_count = 1,
-            .mip_level = 0,
-        },
-    };
-
-    const blit_info: vk.BlitImageInfo2 = .{
-        .src_image = self.vk_image,
-        .src_image_layout = .transfer_src_optimal,
-        .dst_image = destination.vk_image,
-        .dst_image_layout = .transfer_dst_optimal,
-        .filter = .linear,
-        .region_count = 1,
-        .p_regions = &blit_region,
-    };
-
-    ctx.device.cmdBlitImage2(cmd, &blit_info);
-}
-
-pub fn createDescriptorImageInfo(self: *const Image) vk.DescriptorImageInfo {
-    return .{ .image_layout = .general, .image_view = self.view, .sampler = self.sampler.vk_sampler };
-}
-
 pub const TransferToGpuCmd = struct {
     staging_buffer: Buffer,
     engine: *Engine,
@@ -704,13 +469,13 @@ pub const TransferToGpuCmd = struct {
 
     pub fn create(engine: *Engine, cmd_buffer: *VulkanCommand.AllocatedCommandBuffer, image: AllocatedImage, data: []const u8) !TransferToGpuCmd {
         var staging_buffer = try Buffer.create(
-            engine.ctx,
+            engine,
             @intCast(data.len),
             .{ .transfer_src_bit = true },
             .{ .host_visible_bit = true, .host_coherent_bit = true },
         );
 
-        try staging_buffer.copyInto(engine.ctx, data, 0);
+        try staging_buffer.copyInto(data, 0);
 
         return .{
             .engine = engine,
@@ -721,7 +486,7 @@ pub const TransferToGpuCmd = struct {
     }
 
     pub fn destroy(self: *TransferToGpuCmd) void {
-        self.staging_buffer.destroy(self.engine.ctx);
+        self.staging_buffer.destroy();
     }
 
     pub fn execute(self: *TransferToGpuCmd, engine: *Engine) void {

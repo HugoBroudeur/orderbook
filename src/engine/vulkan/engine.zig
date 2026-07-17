@@ -16,7 +16,6 @@ const Node = Objects.Node;
 const RenderObject = Objects.RenderObject;
 const Buffers = @import("../graphics/buffers.zig");
 const GPUDrawPushConstants = Buffers.GPUDrawPushConstants;
-const Color = @import("../../primitive.zig").Color;
 const Components = @import("../../ecs/components.zig");
 
 // const Api = @import("../backend.zig").Vulkan;
@@ -51,7 +50,6 @@ const Engine = @This();
 pub const GPUCommandFn = fn (vk.CommandBuffer) anyerror!void;
 pub const DrawPassType = enum { demo, ui, shadow, ssao, sky, solid, raycast, transparent };
 pub const TransferBufferType = enum { atlas_buffer_data, atlas_texture_data };
-pub const ImageType = enum { black, white, grey, error_checker };
 pub const SamplerType = enum { nearest, linear };
 pub const PipelineType = enum { _2d };
 
@@ -76,7 +74,6 @@ draw_image: AllocatedImage = undefined,
 depth_image: AllocatedImage = undefined,
 pipelines: std.EnumArray(PipelineType, Pipeline) = .initUndefined(),
 pipeline_layouts: std.EnumArray(PipelineType, vk.PipelineLayout) = .initUndefined(),
-images: std.EnumArray(ImageType, AllocatedImage) = .initUndefined(),
 samplers: std.EnumArray(SamplerType, Sampler) = .initUndefined(),
 
 gui_render_fn: ?*const fn (vk.CommandBuffer) void = null,
@@ -144,9 +141,6 @@ pub fn deinit(self: *Engine) void {
 
     self.draw_image.destroy(self);
     self.depth_image.destroy(self);
-    for (&self.images.values) |*image| {
-        image.destroy(self);
-    }
 
     for (&self.samplers.values) |*sampler| {
         sampler.destroy(self.ctx);
@@ -210,28 +204,9 @@ fn createTextures(self: *Engine) !void {
         }, false, 1);
     }
 
-    { // Some basic 1 or 2 pixel images
-        const y = Color.Yellow.toBytes();
-        const b = Color.Black.toBytes();
-        const checker_bytes = y ++ b ++ b ++ y;
-
-        var map: std.EnumMap(ImageType, []const u8) = .init(.{
-            .white = &Color.White.toBytes(),
-            .black = &Color.Black.toBytes(),
-            .grey = &Color.Grey.toBytes(),
-            .error_checker = &checker_bytes,
-        });
-        var it = map.iterator();
-        while (it.next()) |m| {
-            const size = std.math.sqrt(m.value.len / 4);
-            var img = ImageMetadata.init(.{ .pixels = .{ .data = m.value.*, .format = .packed_rgba_8_8_8_8 } }, .{ .height = size, .width = size, .depth = 1 });
-
-            const allocated_img = try AllocatedImage.create(self, .{ .width = size, .height = size, .depth = 1 }, .r8g8b8a8_unorm, .{ .sampled_bit = true, .transfer_dst_bit = true, .transfer_src_bit = true }, false, 1);
-            try img.upload(self, allocated_img);
-
-            self.images.set(m.key, allocated_img);
-        }
-    }
+    // Basic placeholder textures (white/black/grey/checker) moved to
+    // AssetManager.initBasicTextures — real ref-counted Texture/Image
+    // resources with stable ids, not raw engine-owned images.
 
     // { // Atlas
     //     const surface = try ImageMetadata.loadImageAssetWithFormat("assets/images/Background.jpg", .array_rgba_32);

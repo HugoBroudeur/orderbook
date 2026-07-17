@@ -145,11 +145,6 @@ pub fn build(b: *std.Build) !void {
     // Load Icon
     // exe.root_module.addWin32ResourceFile(.{ .file = b.path("src/res/res.rc") });
 
-    // std.Build: Deprecate Step.Compile APIs that mutate the root module #22587
-    // See. https://github.com/ziglang/zig/pull/22587
-    //----------------------------------
-    const sdlPath = "lib/libc/SDL/SDL3-3.2.28/x86_64-w64-mingw32";
-
     //-------------------
     // For application
     //-------------------
@@ -157,33 +152,7 @@ pub fn build(b: *std.Build) !void {
     // Libs
     //------
     // exe.root_module.linkSystemLibrary("glfw3", .{});
-    if (builtin.target.os.tag == .windows) {
-        exe.root_module.linkSystemLibrary("gdi32", .{});
-        exe.root_module.linkSystemLibrary("imm32", .{});
-        exe.root_module.linkSystemLibrary("advapi32", .{});
-        exe.root_module.linkSystemLibrary("comdlg32", .{});
-        exe.root_module.linkSystemLibrary("dinput8", .{});
-        exe.root_module.linkSystemLibrary("dxerr8", .{});
-        exe.root_module.linkSystemLibrary("dxguid", .{});
-        exe.root_module.linkSystemLibrary("gdi32", .{});
-        exe.root_module.linkSystemLibrary("hid", .{});
-        exe.root_module.linkSystemLibrary("kernel32", .{});
-        exe.root_module.linkSystemLibrary("ole32", .{});
-        exe.root_module.linkSystemLibrary("oleaut32", .{});
-        exe.root_module.linkSystemLibrary("setupapi", .{});
-        exe.root_module.linkSystemLibrary("shell32", .{});
-        exe.root_module.linkSystemLibrary("user32", .{});
-        exe.root_module.linkSystemLibrary("uuid", .{});
-        exe.root_module.linkSystemLibrary("version", .{});
-        exe.root_module.linkSystemLibrary("winmm", .{});
-        exe.root_module.linkSystemLibrary("winspool", .{});
-        exe.root_module.linkSystemLibrary("ws2_32", .{});
-        exe.root_module.linkSystemLibrary("opengl32", .{});
-        exe.root_module.linkSystemLibrary("shell32", .{});
-        exe.root_module.linkSystemLibrary("user32", .{});
-        // Static link
-        exe.addObjectFile(b.path(b.pathJoin(&.{ sdlPath, "lib", "libSDL3.dll.a" })));
-    } else if (builtin.target.os.tag == .linux) {
+    if (builtin.target.os.tag == .linux) {
         // exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
         // exe.addLibraryPath(.{ .cwd_relative = "/usr/lib64" });
         // exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
@@ -198,12 +167,6 @@ pub fn build(b: *std.Build) !void {
         // exe.root_module.linkSystemLibrary("SDL3_ttf", .{});
         // exe.root_module.linkSystemLibrary("sqlite3", .{});
     }
-    // sdl3
-    //exe.addLibraryPath(b.path(b.pathJoin(&.{sdlPath, "lib-mingw-64"})));
-    //exe.linkSystemLibrary("SD32");      // For static link
-    // Dynamic link
-    //exe.addObjectFile(b.path(b.pathJoin(&.{sdlPath, "lib","libSDL3dll.a"})));
-    //exe.linkSystemLibrary("SDL3dll"); // For dynamic link
 
     // SDL3_ttf
     // exe.root_module.linkLibrary(dep_sdl_ttf.artifact("SDL3_ttf"));

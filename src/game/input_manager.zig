@@ -2,7 +2,6 @@ const std = @import("std");
 const DbManager = @import("db_manager.zig");
 // const RendererManager = @import("renderer_manager.zig");
 const MarketManager = @import("market_manager.zig");
-const SceneManager = @import("scene_manager.zig");
 const Ecs = @import("ecs/ecs.zig");
 const Prefab = @import("ecs/prefabs/prefab.zig");
 const OrderbookSystem = @import("ecs/systems/orderbook_system.zig");
@@ -17,11 +16,10 @@ allocator: std.mem.Allocator,
 db_manager: *DbManager,
 // renderer_manager: *RendererManager,
 market_manager: *MarketManager,
-scene_manager: *SceneManager,
 entities: zcs.Entities,
 cmd_buf: zcs.CmdBuf,
 
-pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, market_manager: *MarketManager, scene_manager: *SceneManager) !EcsManager {
+pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, market_manager: *MarketManager) !EcsManager {
     var es = try zcs.Entities.init(.{ .gpa = allocator });
 
     const cb = try zcs.CmdBuf.init(.{
@@ -34,7 +32,6 @@ pub fn init(allocator: std.mem.Allocator, db_manager: *DbManager, market_manager
         .allocator = allocator,
         .db_manager = db_manager,
         // .renderer_manager = renderer_manager,
-        .scene_manager = scene_manager,
         .market_manager = market_manager,
         .entities = es,
         .cmd_buf = cb,

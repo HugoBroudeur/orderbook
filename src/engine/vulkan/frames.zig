@@ -107,14 +107,14 @@ pub fn initSwapchainFrames(engine: *Engine, swapchain: vk.SwapchainKHR, format: 
     errdefer for (frames[0..initialized]) |*frame| frame.destroy(engine);
 
     for (images, 0..) |image, i| {
-        try frames[i].setup(engine, allocator, try SwapImage.init(engine, image, format, extent));
+        try frames[i].setup(engine, try SwapImage.init(engine, image, format, extent));
         initialized += 1;
     }
 
     return frames;
 }
 
-pub fn setup(self: *Frame, engine: *Engine, allocator: std.mem.Allocator, swap_image: SwapImage) !void {
+pub fn setup(self: *Frame, engine: *Engine, swap_image: SwapImage) !void {
     self.swap_image = swap_image;
     self.cmd_pool = try CommandPool.create(engine);
 
@@ -124,9 +124,9 @@ pub fn setup(self: *Frame, engine: *Engine, allocator: std.mem.Allocator, swap_i
         .{ .vk_type = .uniform_buffer, .ratio = 3 },
         .{ .vk_type = .combined_image_sampler, .ratio = 5 },
     };
-    self.frame_descriptor = try DescriptorAllocator.init(allocator, engine.ctx, 1000, frame_sizes);
+    self.frame_descriptor = try DescriptorAllocator.init(engine, 1000, frame_sizes);
 
-    self.scene_data_buffer = try Buffer.create(engine.ctx, @sizeOf(SceneData), .{
+    self.scene_data_buffer = try Buffer.create(engine, @sizeOf(SceneData), .{
         .uniform_buffer_bit = true,
     }, .{ .host_visible_bit = true, .device_local_bit = true });
 
@@ -154,6 +154,6 @@ pub fn destroy(self: *Frame, engine: *Engine) void {
     self.cmd_buf.destroy(engine);
     self.cmd_pool.destroy(engine);
     self.frame_descriptor.destroy(engine.ctx);
-    self.scene_data_buffer.destroy(engine.ctx);
+    self.scene_data_buffer.destroy();
     self.swap_image.deinit(engine);
 }

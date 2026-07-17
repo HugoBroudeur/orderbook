@@ -1,3 +1,7 @@
+## Game design
+
+`docs/game_design.md` is the central game design document — everything in this engine is built to run this game. Read it whenever a task is about the game itself (mechanics, content, balance, features driven by game design) rather than pure engine architecture, and keep it updated as the design evolves.
+
 ## Agent skills
 
 ### Issue tracker

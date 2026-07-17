@@ -5,10 +5,11 @@ const Uuid = @import("uuid");
 const Gltf = @import("zgltf").Gltf;
 const Serde = @import("serde");
 
-const AssetManager = @This();
+const ResourceManager = @This();
 const Config = @import("../config.zig");
 
 const Resource = @import("resource.zig").Resource;
+const ResourceId = @import("resource.zig").ResourceId;
 const RefCountedPool = @import("resource.zig").RefCountedPool;
 const ResourceData = @import("resource.zig").ResourceData;
 const ResourceHandle = @import("resource.zig").ResourceHandle;
@@ -22,13 +23,14 @@ const Surface = @import("mesh.zig").Surface;
 const Material = @import("material.zig").Material;
 const Texture = @import("texture.zig").Texture;
 const Image = @import("image.zig").Image;
+const BasicTexture = @import("image.zig").BasicTexture;
 const AllocatedImage = @import("../engine/vulkan/image.zig").AllocatedImage;
 
 allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 io: std.Io,
 engine: *Engine,
-pool: ResourceManager,
+pool: Pool,
 
 // meshes: RefCountedPool(Mesh),
 ref_pool: RefCountedPool,
@@ -45,7 +47,7 @@ pub const AssetMetaFile = struct {
     name: []const u8,
 };
 
-pub const ResourceManager = struct {
+pub const Pool = struct {
     pub const MAX_FILE_SIZE = 512_000_000_000;
 
     arena: std.heap.ArenaAllocator,
@@ -57,7 +59,7 @@ pub const ResourceManager = struct {
     /// their resources (meshes/materials/textures) live in the ref pool.
     models: std.hash_map.AutoHashMap(Uuid.Uuid, *LoadedGLTF),
 
-    fn init(allocator: std.mem.Allocator) ResourceManager {
+    fn init(allocator: std.mem.Allocator) Pool {
         return .{
             .queued_gltf = .init(allocator),
             .queued_images = .init(allocator),
@@ -67,7 +69,7 @@ pub const ResourceManager = struct {
         };
     }
 
-    fn deinit(self: *ResourceManager, allocator: std.mem.Allocator, engine: *Engine) void {
+    fn deinit(self: *Pool, allocator: std.mem.Allocator, engine: *Engine) void {
         _ = allocator;
         _ = engine;
         self.queued_gltf.deinit();
@@ -79,9 +81,10 @@ pub const ResourceManager = struct {
     }
 };
 
-pub fn init(allocator: std.mem.Allocator, io: std.Io, engine: *Engine) AssetManager {
+pub fn init(allocator: std.mem.Allocator, io: std.Io, engine: *Engine) ResourceManager {
     const arena = std.heap.ArenaAllocator.init(allocator);
-    return .{
+
+    var manager: ResourceManager = .{
         .allocator = allocator,
         .arena = arena,
         .engine = engine,
@@ -89,9 +92,15 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, engine: *Engine) AssetMana
         .pool = .init(allocator),
         .ref_pool = .init(allocator),
     };
+    // Create common basic resources like 1px white image, etc...
+    inline for (std.meta.tags(BasicTexture)) |kind| {
+        _ = try manager.loadTexture(Texture.init(.{ .reserved = @intFromEnum(kind) }, @tagName(kind), .{ .basic = kind }));
+    }
+
+    return manager;
 }
 
-pub fn deinit(self: *AssetManager, engine: *Engine) void {
+pub fn deinit(self: *ResourceManager, engine: *Engine) void {
     self.pool.deinit(self.allocator, engine);
 
     self.ref_pool.deinit(self);
@@ -99,7 +108,7 @@ pub fn deinit(self: *AssetManager, engine: *Engine) void {
 
 // TODO, I need to improve that to make a copy of the file first, then save, then use the copy.
 // That would prevent file corruption if stopped while saving
-pub fn saveAssetPool(self: *AssetManager, project_folder: []const u8) !void {
+pub fn saveAssetPool(self: *ResourceManager, project_folder: []const u8) !void {
     // 1. Delete stale meta files: on-disk .dlmeta whose GUID isn't in asset_metadata anymore.
     const dir = try std.Io.Dir.cwd().openDir(self.io, project_folder, .{ .iterate = true });
     var it = dir.iterate();
@@ -131,7 +140,7 @@ pub fn saveAssetPool(self: *AssetManager, project_folder: []const u8) !void {
     }
 }
 
-pub fn loadAssetPool(self: *AssetManager, project_folder: []const u8) !void {
+pub fn loadAssetPool(self: *ResourceManager, project_folder: []const u8) !void {
     const dir = std.Io.Dir.cwd().openDir(self.io, project_folder, .{ .iterate = true }) catch return;
     var it = dir.iterate();
     while (try it.next(self.io)) |entry| {
@@ -156,7 +165,7 @@ pub fn loadAssetPool(self: *AssetManager, project_folder: []const u8) !void {
     }
 }
 
-fn saveMetaFile(self: *AssetManager, metafile_path: []const u8, metafile: AssetMetaFile) !void {
+fn saveMetaFile(self: *ResourceManager, metafile_path: []const u8, metafile: AssetMetaFile) !void {
     if (!std.mem.endsWith(u8, metafile_path, ASSET_META_FILE_EXTENSION)) {
         log.warn("saveMetaFile: invalid file extension '{s}'", .{metafile_path});
         return error.InvalidExtension;
@@ -169,7 +178,7 @@ fn saveMetaFile(self: *AssetManager, metafile_path: []const u8, metafile: AssetM
     log.info("saveMetaFile: wrote metadata for GUID {}", .{metafile.guid});
 }
 
-fn loadMetaFile(self: *AssetManager, metafile_path: []const u8) ?AssetMetaFile {
+fn loadMetaFile(self: *ResourceManager, metafile_path: []const u8) ?AssetMetaFile {
     if (!std.mem.endsWith(u8, metafile_path, ASSET_META_FILE_EXTENSION)) return null;
 
     const content = std.Io.Dir.cwd().readFileAlloc(self.io, metafile_path, self.allocator, .unlimited) catch |err| {
@@ -184,7 +193,7 @@ fn loadMetaFile(self: *AssetManager, metafile_path: []const u8) ?AssetMetaFile {
     };
 }
 
-pub fn importAsset(self: *AssetManager, asset_path: []const u8) !Uuid.Uuid {
+pub fn importAsset(self: *ResourceManager, asset_path: []const u8) !Uuid.Uuid {
     if (self.findGuidForPath(asset_path)) |existing| {
         if (self.getAsset(existing) == null) {
             try self.loadGLTFAsset(self.engine, existing, asset_path);
@@ -202,7 +211,7 @@ pub fn importAsset(self: *AssetManager, asset_path: []const u8) !Uuid.Uuid {
     return guid;
 }
 
-pub fn processQueuedAssets(self: *AssetManager, engine: *Engine) void {
+pub fn processQueuedAssets(self: *ResourceManager, engine: *Engine) void {
     var pending: std.ArrayList(struct { guid: Uuid.Uuid, path: []const u8 }) = .empty;
     defer pending.deinit(self.allocator);
 
@@ -237,7 +246,7 @@ pub fn processQueuedAssets(self: *AssetManager, engine: *Engine) void {
 //     }
 // }
 
-fn findGuidForPath(self: *AssetManager, path: []const u8) ?Uuid.Uuid {
+fn findGuidForPath(self: *ResourceManager, path: []const u8) ?Uuid.Uuid {
     var it = self.pool.asset_metadata.iterator();
     while (it.next()) |entry| {
         if (std.mem.eql(u8, entry.value_ptr.source_path, path)) return entry.key_ptr.*;
@@ -251,46 +260,41 @@ fn findGuidForPath(self: *AssetManager, path: []const u8) ?Uuid.Uuid {
 //     try self.pool.loaded_gltf.put(self.allocator, name, structure_file);
 // }
 
-pub fn getAsset(self: *AssetManager, guid: Uuid.Uuid) ?*LoadedGLTF {
+pub fn getAsset(self: *ResourceManager, guid: Uuid.Uuid) ?*LoadedGLTF {
     return self.pool.models.get(guid);
 }
 
-pub fn loadMesh(self: *AssetManager, mesh: Mesh) !ResourceHandle(Mesh) {
-    return self.loadAny(Mesh, mesh);
+pub fn loadMesh(self: *ResourceManager, mesh: Mesh) !ResourceHandle(Mesh) {
+    return self.load(Mesh, mesh);
 }
 
-pub fn loadMaterial(self: *AssetManager, material: Material) !ResourceHandle(Material) {
-    return self.loadAny(Material, material);
+pub fn loadMaterial(self: *ResourceManager, material: Material) !ResourceHandle(Material) {
+    return self.load(Material, material);
 }
 
-pub fn loadTexture(self: *AssetManager, texture: Texture) !ResourceHandle(Texture) {
-    return self.loadAny(Texture, texture);
+pub fn loadTexture(self: *ResourceManager, texture: Texture) !ResourceHandle(Texture) {
+    return self.load(Texture, texture);
 }
 
-pub fn loadImage(self: *AssetManager, image: Image) !ResourceHandle(Image) {
-    return self.loadAny(Image, image);
+pub fn loadImage(self: *ResourceManager, image: Image) !ResourceHandle(Image) {
+    return self.load(Image, image);
 }
 
-/// The only place that touches pool plumbing. `value` must be inert
-/// (constructed by T.init — id + source only, no allocations, no GPU work),
-/// so discarding it on a dedup hit is free.
-///
-/// Id ownership: the pool dupes the id for the resident copy and frees it
-/// on the last release; the id inside `value` stays owned by the caller.
-fn loadAny(self: *AssetManager, comptime T: type, value: T) !ResourceHandle(T) {
+fn load(self: *ResourceManager, comptime T: type, value: T) !ResourceHandle(T) {
     if (self.ref_pool.incrementRef(T, value.getId())) {
-        // Return the RESIDENT copy's id (stable for the resource's
-        // lifetime) — not value.getId(), whose backing memory belongs to
-        // the caller and may be freed after this call.
-        const resident = self.ref_pool.get(T, value.getId()).?;
-        return .{ ._id = resident.getId(), ._manager = self };
+        return .{ ._id = value.getId(), ._manager = self };
     }
 
     const ptr = try self.allocator.create(T);
     errdefer self.allocator.destroy(ptr);
     ptr.* = value;
-    ptr.id = try self.allocator.dupe(u8, value.getId());
-    errdefer self.allocator.free(ptr.id);
+    // name's backing memory belongs to the caller (often glTF-owned data,
+    // freed once loadGLTFAsset's `gltf.deinit()` runs) and may not survive
+    // past this call — dupe it so the pooled resource owns a stable copy.
+    // id needs no such dupe: it's a plain ResourceId value now, not a
+    // pointer into memory someone else owns.
+    ptr.name = try self.allocator.dupe(u8, value.name);
+    errdefer self.allocator.free(ptr.name);
 
     try ptr.load(self);
     try self.ref_pool.put(T, ptr.interface());
@@ -298,18 +302,18 @@ fn loadAny(self: *AssetManager, comptime T: type, value: T) !ResourceHandle(T) {
     return .{ ._id = ptr.getId(), ._manager = self };
 }
 
-pub fn getResource(self: *AssetManager, comptime T: type, id: []const u8) ?*T {
+pub fn getResource(self: *ResourceManager, comptime T: type, id: ResourceId) ?*T {
     return self.ref_pool.get(T, id);
 }
 
-pub fn release(self: *AssetManager, comptime T: type, id: []const u8) void {
+pub fn release(self: *ResourceManager, comptime T: type, id: ResourceId) void {
     self.ref_pool.remove(T, id, self);
 }
 
 // pub fn getCubeImage(self: *AssetManager, guid: Uuid.Uuid) ?*Image {
 //     return (self.pool._cubemaps.get(guid) orelse return null).image;
 // }
-pub fn queueSkybox(self: *AssetManager, guid: Uuid.Uuid, dir_path: []const u8) !void {
+pub fn queueSkybox(self: *ResourceManager, guid: Uuid.Uuid, dir_path: []const u8) !void {
     if (self.pool._cubemaps.contains(guid) or self.pool.queued_images.contains(guid)) return;
     const owned = try self.allocator.dupe(u8, dir_path);
 
@@ -334,8 +338,39 @@ pub fn queueSkybox(self: *AssetManager, guid: Uuid.Uuid, dir_path: []const u8) !
 //     try self.pool._cubemaps.put(self.allocator, guid, .{ .image = image, .bindless_slot = slot });
 // }
 
+/// Identifies what a `ResourceId` is derived from — the one call surface
+/// every loader uses (`makeId`) instead of remembering which of several
+/// id-building functions applies to which resource kind.
+pub const IdSource = union(enum) {
+    /// A resource whose identity is scoped to one file: its position in
+    /// that file's own array. Used for glTF-internal meshes/materials/
+    /// textures/embedded images.
+    local: struct { file_guid: Uuid.Uuid, index: u32 },
+    /// A resource whose identity must match across files by content —
+    /// currently only file-backed Image dedup by URI.
+    content: []const u8,
+    /// Fixed identity for engine-intrinsic resources that have no source
+    /// file at all — currently only the basic placeholder textures (see
+    /// `BasicTexture`). Safe from colliding with `.local`/`.content`: both
+    /// of those are ~uniform over the full 128-bit space, `.reserved` only
+    /// ever takes the small hand-assigned values below.
+    reserved: u32,
+};
+
+pub fn makeId(source: IdSource) ResourceId {
+    return switch (source) {
+        .local => |l| l.file_guid ^ @as(u128, l.index),
+        .content => |bytes| blk: {
+            const lo: u64 = std.hash.Wyhash.hash(0x5A5A_5A5A, bytes);
+            const hi: u64 = std.hash.Wyhash.hash(0xA5A5_A5A5, bytes);
+            break :blk (@as(u128, hi) << 64) | @as(u128, lo);
+        },
+        .reserved => |r| r,
+    };
+}
+
 // TODO, decouple engine such as the asset is loaded in the pool then have a function to load the pool in the GPU
-pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file_path: []const u8) !void {
+pub fn loadGLTFAsset(self: *ResourceManager, engine: *Engine, guid: Uuid.Uuid, file_path: []const u8) !void {
     var gltf = Gltf.init(self.allocator);
     defer gltf.deinit();
 
@@ -374,12 +409,16 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
     // shared by several textures uploads once. Must complete before any
     // material loads: material records store final bindless slot ids.
     for (gltf.data.textures, 0..) |_, i| {
-        const tex_id = try std.fmt.allocPrint(self.allocator, "{x}#tex{d}", .{ guid, i });
-        const handle = try self.loadTexture(Texture.init(tex_id, .{
+        // glTF textures carry no name field, unlike meshes/materials —
+        // positional fallback is the only option, same shape as the
+        // mesh/material fallbacks below.
+        const name = std.fmt.allocPrint(self.allocator, "texture_idx_{d}", .{i}) catch "";
+        const tex_id = makeId(.{ .local = .{ .file_guid = guid, .index = @intCast(i) } });
+        const handle = try self.loadTexture(Texture.init(tex_id, name, .{
             .gltf_texture = .{ .gltf = &gltf, .texture_idx = @intCast(i), .guid = guid },
         }));
         bindless_slots[i] = handle.get().?.slot;
-        try model.textures.put(self.allocator, tex_id, handle.get().?);
+        try model.textures.put(self.allocator, name, handle.get().?);
 
         if (Config.log.mesh) {
             log.info("[DBG] textures[{d}] → bindless slot {d}", .{ i, bindless_slots[i] });
@@ -395,8 +434,15 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
 
     for (gltf.data.materials, 0..) |gltf_material, material_idx| {
         const name = gltf_material.name orelse std.fmt.allocPrint(self.allocator, "material_idx_{}", .{material_idx}) catch "";
+        // Id is scoped to this file's guid + this material's array position
+        // (makeId(.local)) — glTF material names (explicit or the
+        // positional fallback above) are only unique within one file, and
+        // two files sharing a name (generic exporter defaults like
+        // "Material.001" collide constantly) would otherwise dedup onto the
+        // wrong file's already-loaded material if the id were name-based.
+        const id = makeId(.{ .local = .{ .file_guid = guid, .index = @intCast(material_idx) } });
 
-        const handle = try self.loadMaterial(Material.init(name, .{
+        const handle = try self.loadMaterial(Material.init(id, name, .{
             .gltf_material = .{ .gltf = &gltf, .material_idx = @intCast(material_idx), .bindless_slots = bindless_slots },
         }));
         local_materials.appendAssumeCapacity(handle.get().?);
@@ -406,8 +452,13 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
     // Load Meshes
     for (gltf.data.meshes, 0..) |mesh, mesh_idx| {
         const name = mesh.name orelse std.fmt.allocPrint(self.allocator, "mesh_idx_{}", .{mesh_idx}) catch "";
+        // Same reasoning as materials above — generic exporter names
+        // ("Plane.001" etc.) collide across files constantly, which used to
+        // silently reuse another file's already-loaded geometry AND rebind
+        // its surfaces to this file's materials on dedup.
+        const id = makeId(.{ .local = .{ .file_guid = guid, .index = @intCast(mesh_idx) } });
 
-        const handle = try self.loadMesh(Mesh.init(name, .{
+        const handle = try self.loadMesh(Mesh.init(id, name, .{
             .gltf_item = .{ .gltf = &gltf, .mesh_idx = @intCast(mesh_idx) },
         }));
         handle.get().?.bindMaterials(local_materials.items);
@@ -450,7 +501,7 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
 
         if (gltf_node.mesh) |mesh_idx| {
             const mesh_name = gltf.data.meshes[mesh_idx].name orelse std.fmt.allocPrint(self.allocator, "mesh_idx_{}", .{mesh_idx}) catch "";
-            node.* = Node.init(self.allocator, .{ .mesh = self.getResource(Mesh, mesh_name).? });
+            node.* = Node.init(self.allocator, .{ .mesh = model.meshes.get(mesh_name).? });
         } else {
             node.* = Node.init(self.allocator, .basic);
         }
@@ -486,7 +537,7 @@ pub fn loadGLTFAsset(self: *AssetManager, engine: *Engine, guid: Uuid.Uuid, file
     }
 }
 
-pub fn resolveMeshPath(self: *AssetManager, name: []const u8) !?[]const u8 {
+pub fn resolveMeshPath(self: *ResourceManager, name: []const u8) !?[]const u8 {
     for (asset_dirs) |dir_path| {
         const dir = std.Io.Dir.cwd().openDir(self.io, dir_path, .{ .iterate = true }) catch continue;
         var it = dir.iterate();

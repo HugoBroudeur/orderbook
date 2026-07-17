@@ -11,6 +11,7 @@ const Buffer = @import("../engine/vulkan/buffer.zig");
 const Engine = @import("../engine/vulkan/engine.zig");
 const AssetManager = @import("manager.zig");
 const Resource = @import("resource.zig").Resource;
+const ResourceId = @import("resource.zig").ResourceId;
 const Material = @import("material.zig").Material;
 const Gltf = @import("zgltf").Gltf;
 const VulkanCommand = @import("../engine/vulkan/command_pool.zig");
@@ -52,7 +53,8 @@ pub const Bounds = struct {
 
 /// Implementation of the Vulkan Mesh Resource that is managed by the Resource manager
 pub const Mesh = struct {
-    id: []const u8,
+    id: ResourceId,
+    name: []const u8,
     source: Source,
 
     buffers: MeshBuffers = undefined,
@@ -68,14 +70,15 @@ pub const Mesh = struct {
         return Resource.interface(self);
     }
 
-    pub fn init(id: []const u8, source: Source) Mesh {
+    pub fn init(id: ResourceId, name: []const u8, source: Source) Mesh {
         return .{
             .id = id,
+            .name = name,
             .source = source,
         };
     }
 
-    pub fn getId(self: *const Mesh) []const u8 {
+    pub fn getId(self: *const Mesh) ResourceId {
         return self.id;
     }
 
@@ -111,13 +114,19 @@ pub const Mesh = struct {
     }
 
     pub fn bindMaterials(self: *Mesh, materials: []const *Material) void {
+        if (materials.len == 0) return;
         for (self.surfaces.items) |*surface| {
+            // Primitive without a material: fall back to the file's
+            // first material (matches the pre-refactor behavior).
+            surface.material = materials[0];
+
             if (surface.material_index) |idx| {
-                surface.material = materials[idx];
-            } else if (materials.len > 0) {
-                // Primitive without a material: fall back to the file's
-                // first material (matches the pre-refactor behavior).
-                surface.material = materials[0];
+                if (idx < materials.len) {
+                    surface.material = materials[idx];
+                } else {
+                    log.warn("[Mesh.bindMaterials] mesh '{s}': surface material_index {d} out of range (materials.len={d}), falling back to materials[0]", .{ self.name, idx, materials.len });
+                    surface.material = materials[0];
+                }
             }
         }
     }
@@ -184,12 +193,6 @@ pub const Mesh = struct {
                         .count = @intCast(gltf.data.accessors[primitive_index].count),
                         .material_index = if (primitive.material) |i| @intCast(i) else null,
                     };
-
-                    // if (primitive.material) |mat_idx| {
-                    //     new_surface.material = self.pool._materials.items[initial_material_index + mat_idx];
-                    // } else {
-                    //     new_surface.material = self.pool._materials.items[initial_material_index];
-                    // }
 
                     const initial_vertex = vertices.items.len;
 

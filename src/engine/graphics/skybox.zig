@@ -84,8 +84,8 @@ pub const CubemapTexture = struct {
         engine.ctx.device.destroyDescriptorSetLayout(self.cube_layout, null);
     }
 
-    pub fn createSkyboxPushConstantsBuffer(engine: *const Engine, size: u32) !Buffer {
-        return try Buffer.create(engine.ctx, @sizeOf(CubemapConstants) * size, .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
+    pub fn createSkyboxPushConstantsBuffer(engine: *Engine, size: u32) !Buffer {
+        return try Buffer.create(engine, @sizeOf(CubemapConstants) * size, .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
     }
 
     pub fn buildPipeline(self: *CubemapTexture, engine: *Engine) !void {

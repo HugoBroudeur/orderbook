@@ -4,9 +4,11 @@ const Uuid = @import("uuid");
 const Gltf = @import("zgltf").Gltf;
 
 const Sampler = @import("../engine/vulkan/sampler.zig");
-const AssetManager = @import("manager.zig");
+const ResourceManager = @import("manager.zig");
 const Resource = @import("resource.zig").Resource;
+const ResourceId = @import("resource.zig").ResourceId;
 const Image = @import("image.zig").Image;
+const BasicTexture = @import("image.zig").BasicTexture;
 
 /// Implementation of the Vulkan Texture Resource that is managed by the Resource manager.
 ///
@@ -15,12 +17,13 @@ const Image = @import("image.zig").Image;
 /// in a ref-counted Image dependency loaded through the manager, and the
 /// sampler is a flyweight from the engine cache.
 pub const Texture = struct {
-    id: []const u8,
+    id: ResourceId,
+    name: []const u8,
     source: Source,
 
     image: *Image = undefined,
-    /// Kept to release the Image ref in unload. Owned by this Texture.
-    image_id: []const u8 = "",
+    /// Kept to release the Image ref in unload.
+    image_id: ResourceId = 0,
     /// Copied from the engine sampler cache — never destroyed here.
     sampler: Sampler = undefined,
     /// Bindless slot in the global 2D texture array (binding 3).
@@ -28,69 +31,84 @@ pub const Texture = struct {
 
     pub const Source = union(enum) {
         gltf_texture: struct { gltf: *Gltf, texture_idx: u32, guid: Uuid.Uuid },
+        /// One of AssetManager's basic placeholder textures (white/black/
+        /// grey/checker), generated at `AssetManager.initBasicTextures`
+        /// instead of loaded from a glTF file.
+        basic: BasicTexture,
     };
 
     pub fn interface(self: *Texture) Resource {
         return Resource.interface(self);
     }
 
-    pub fn init(id: []const u8, source: Source) Texture {
+    pub fn init(id: ResourceId, name: []const u8, source: Source) Texture {
         return .{
             .id = id,
+            .name = name,
             .source = source,
         };
     }
 
-    pub fn getId(self: *const Texture) []const u8 {
+    pub fn getId(self: *const Texture) ResourceId {
         return self.id;
     }
 
-    pub fn load(self: *Texture, mgr: *AssetManager) !void {
-        const engine = mgr.engine;
-        const s = self.source.gltf_texture;
-        const gltf_texture = s.gltf.data.textures[s.texture_idx];
+    pub fn load(self: *Texture, res_manager: *ResourceManager) !void {
+        const engine = res_manager.engine;
 
-        // Sampler: glTF record -> SamplerOption -> engine cache (or default).
-        self.sampler = if (gltf_texture.sampler) |sampler_idx|
-            try engine.getSampler(samplerOptionFromGltf(s.gltf.data.samplers[sampler_idx]))
-        else
-            engine.samplers.get(.linear);
+        switch (self.source) {
+            .gltf_texture => |s| {
+                const gltf_texture = s.gltf.data.textures[s.texture_idx];
 
-        // Image: ref-counted composition. Identity is sampler-independent,
-        // so N textures sharing pixels -> one upload, ref_count = N.
-        if (gltf_texture.source) |image_idx| {
-            self.image_id = try imageId(mgr.allocator, s.gltf, @intCast(image_idx), s.guid);
-            const handle = try mgr.loadImage(Image.init(self.image_id, .{
-                .gltf_image = .{ .gltf = s.gltf, .image_idx = @intCast(image_idx) },
-            }));
-            self.image = handle.get().?;
-        } else {
-            self.image_id = try std.fmt.allocPrint(mgr.allocator, "{x}#missing", .{s.guid});
-            const handle = try mgr.loadImage(Image.init(self.image_id, .missing));
-            self.image = handle.get().?;
+                // Sampler: glTF record -> SamplerOption -> engine cache (or default).
+                self.sampler = if (gltf_texture.sampler) |sampler_idx|
+                    try engine.getSampler(samplerOptionFromGltf(s.gltf.data.samplers[sampler_idx]))
+                else
+                    try engine.getSampler(.{ .min_filter = .linear, .mag_filter = .linear, .mipmap_mode = .linear, .max_lod = 1000 });
+
+                if (gltf_texture.source) |image_idx| {
+                    const img = s.gltf.data.images[image_idx];
+                    self.image_id = if (img.uri) |uri|
+                        ResourceManager.makeId(.{ .content = uri })
+                    else
+                        ResourceManager.makeId(.{ .local = .{ .file_guid = s.guid, .index = @intCast(image_idx) } });
+
+                    const handle = try res_manager.loadImage(Image.init(self.image_id, img.name orelse img.uri orelse "embedded", .{
+                        .gltf_image = .{ .gltf = s.gltf, .image_idx = @intCast(image_idx) },
+                    }));
+                    self.image = handle.get().?;
+                } else {
+                    // No source image at all: one shared "missing" placeholder
+                    // per file — sentinel index collapses every source-less
+                    // texture in one glTF onto the same entry, matching prior
+                    // behavior.
+                    self.image_id = ResourceManager.makeId(.{ .local = .{ .file_guid = s.guid, .index = std.math.maxInt(u32) } });
+                    const handle = try res_manager.loadImage(Image.init(self.image_id, "missing", .missing));
+                    self.image = handle.get().?;
+                }
+            },
+            .basic => |kind| {
+                // Nearest, not the gltf-default linear: these are 1x1/2x2
+                // solid blocks — sampling should just return the block's
+                // color, not blur across a texture that has no useful
+                // neighboring texels.
+                self.sampler = try engine.getSampler(.{ .min_filter = .nearest, .mag_filter = .nearest, .mipmap_mode = .nearest, .max_lod = 1000 });
+
+                self.image_id = ResourceManager.basicTextureId(kind);
+                const handle = try res_manager.loadImage(Image.init(self.image_id, @tagName(kind), .{
+                    .solid = .{ .pixels = kind.pixels(), .size = kind.size() },
+                }));
+                self.image = handle.get().?;
+            },
         }
 
         // The texture's own GPU footprint: one (image view, sampler) pair
         // registered on the bindless array.
-        self.slot = try engine.descriptor.registerTexture(&self.image.allocated_image, &self.sampler);
+        self.slot = try engine.descriptor.registerTexture(self);
     }
 
-    pub fn unload(self: *Texture, mgr: *AssetManager) void {
-        mgr.release(Image, self.image_id);
-        mgr.allocator.free(self.image_id);
-        // sampler: cache-owned. slot: append-only registry, not reclaimed
-        // (same accepted limitation as material slots).
-    }
-
-    /// URI when the image is file-backed (dedupes across glTF files that
-    /// reference the same texture file); guid#img{idx} for embedded images
-    /// (file-local — no cross-file identity exists to exploit).
-    fn imageId(allocator: std.mem.Allocator, gltf: *Gltf, image_idx: u32, guid: Uuid.Uuid) ![]const u8 {
-        const img = gltf.data.images[image_idx];
-        return if (img.uri) |uri|
-            try allocator.dupe(u8, uri)
-        else
-            try std.fmt.allocPrint(allocator, "{x}#img{d}", .{ guid, image_idx });
+    pub fn unload(self: *Texture, res_manager: *ResourceManager) void {
+        res_manager.release(Image, self.image_id);
     }
 
     fn samplerOptionFromGltf(samp: Gltf.TextureSampler) Sampler.SamplerOption {

@@ -61,7 +61,7 @@ pub fn onAttach(self: *EditorLayer) !void {
 
     self.scene_editor = SceneEditor.init(self.allocator, self.project_manager, self.world.app);
     self.ecs_explorer = EcsExplorer.init(self.world.app);
-    self.asset_explorer = AssetExplorer.init(self.allocator, self.io, self.project_manager, self.world.app, self.engine);
+    self.asset_explorer = AssetExplorer.init(self.allocator, self.io, self.project_manager.asset_manager, self.world.app, self.engine);
 
     const setting_path = try std.mem.concatWithSentinel(self.allocator, u8, &.{
         self.project_manager.project_folder,

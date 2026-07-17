@@ -5,6 +5,7 @@ const Config = @import("../config.zig");
 const Engine = @import("../engine/vulkan/engine.zig");
 const AssetManager = @import("manager.zig");
 const Resource = @import("resource.zig").Resource;
+const ResourceId = @import("resource.zig").ResourceId;
 const Gltf = @import("zgltf").Gltf;
 
 const materials = @import("../engine/graphics/materials.zig");
@@ -19,7 +20,8 @@ const MaterialConstants = materials.PBRMaterial.MaterialConstants;
 /// and uploads its constants at the offset that slot gives it. Everything
 /// anything needs afterwards is `data` (pipeline + buffer slot + index).
 pub const Material = struct {
-    id: []const u8,
+    id: ResourceId,
+    name: []const u8,
     source: Source,
 
     data: MaterialInstance = undefined,
@@ -38,14 +40,15 @@ pub const Material = struct {
         return Resource.interface(self);
     }
 
-    pub fn init(id: []const u8, source: Source) Material {
+    pub fn init(id: ResourceId, name: []const u8, source: Source) Material {
         return .{
             .id = id,
+            .name = name,
             .source = source,
         };
     }
 
-    pub fn getId(self: *const Material) []const u8 {
+    pub fn getId(self: *const Material) ResourceId {
         return self.id;
     }
 
@@ -74,7 +77,7 @@ pub const Material = struct {
         self.data = engine.pbr_material.createMaterialInstance(pass_type, material_idx, engine.descriptor.pbr_material_buffer_slot);
 
         if (Config.log.mesh) {
-            log.info("[Material.load] '{s}' pass={} slot={d} color_tex={d}", .{ self.id, pass_type, material_idx, constants.color_tex_id });
+            log.info("[Material.load] '{s}' pass={} slot={d} color_tex={d}", .{ self.name, pass_type, material_idx, constants.color_tex_id });
         }
 
         try self.upload(engine, constants);

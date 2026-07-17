@@ -2,12 +2,8 @@ const std = @import("std");
 const Commands = @import("command.zig");
 const SceneData = @import("graphics/buffers.zig").SceneData;
 const UniformData = @import("../engine/command.zig").UniformData;
-const SceneA = @import("graphics/scene.zig");
-const EcsManager = @import("../game/ecs_manager.zig");
 const Ecs = @import("../game/ecs/ecs.zig");
 const zm = @import("zmath");
-const Color = @import("../primitive.zig").Color;
-const LoadedGLTF = @import("graphics/scene.zig").LoadedGLTF;
 // const AssetManager = @import("asset_manager.zig").AssetManager;
 const Engine = @import("vulkan/engine.zig");
 
@@ -44,11 +40,11 @@ pub fn deinit(self: *SceneManager) void {
     _ = self;
 }
 
-pub fn render(self: *SceneManager, ecs_manager: *const EcsManager, engine: *Engine) void {
+pub fn render(self: *SceneManager, engine: *Engine) void {
     Ecs.logger.info("[SceneManager.render] Camera: {s}", .{self.camera.name});
     // const draw_data = ecs_manager.get_singleton(Ecs.components.Graphics.DrawData);
 
-    self.beginScene(engine, ecs_manager);
+    self.beginScene(engine);
 
     // Draw the Imgui UI
     // self.draw_queue.push(.{ .imgui = .{ .data = draw_data.ui } });
@@ -64,10 +60,9 @@ pub fn render(self: *SceneManager, ecs_manager: *const EcsManager, engine: *Engi
     self.endScene();
 }
 
-pub fn beginScene(self: *SceneManager, engine: *Engine, ecs_manager: *const EcsManager) void {
+pub fn beginScene(self: *SceneManager, engine: *Engine) void {
     _ = self; // autofix
     _ = engine; // autofix
-    _ = ecs_manager; // autofix
     // _ = self;
     // std.log.debug("[Renderer2D.beginScene] Camera: {s}", .{self.camera.name});
 

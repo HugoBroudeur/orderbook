@@ -1,31 +1,25 @@
 const std = @import("std");
 const AssetManager = @import("manager.zig");
+const Uuid = @import("uuid");
 
 pub const Mesh = @import("mesh.zig").Mesh;
 pub const Material = @import("material.zig").Material;
 pub const Texture = @import("texture.zig").Texture;
 pub const Image = @import("image.zig").Image;
 
-/// Type-erased resource handle. This is the work-item currency for the
-/// (future) async loading queue: a heterogeneous list of pending loads can
-/// hold plain `Resource` values and call `.load()` without knowing the
-/// concrete type.
-///
-/// The vtable is intentionally minimal (getId/load/unload). There is no
-/// setDataSource: callers construct resources fully (`T.init(id, source)`
-/// with each type's own typed `Source` union) before handing them to the
-/// AssetManager, so sources never squeeze through the erased interface.
+pub const ResourceId = Uuid.Uuid;
+
 pub const Resource = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
 
     const VTable = struct {
-        getId: *const fn (*const anyopaque) []const u8,
+        getId: *const fn (*const anyopaque) ResourceId,
         load: *const fn (*anyopaque, *AssetManager) anyerror!void,
         unload: *const fn (*anyopaque, *AssetManager) void,
     };
 
-    pub fn getId(self: *const Resource) []const u8 {
+    pub fn getId(self: *const Resource) ResourceId {
         return self.vtable.getId(self.ptr);
     }
 
@@ -41,7 +35,7 @@ pub const Resource = struct {
         const T = @TypeOf(ptr);
         const ptr_info = @typeInfo(T);
         const Impl = struct {
-            fn getId(impl: *const anyopaque) []const u8 {
+            fn getId(impl: *const anyopaque) ResourceId {
                 const self: T = @ptrCast(@alignCast(@constCast(impl)));
                 return ptr_info.pointer.child.getId(self);
             }
@@ -69,7 +63,7 @@ pub const Resource = struct {
 pub fn ResourceHandle(comptime T: type) type {
     return struct {
         const Self = @This();
-        _id: []const u8,
+        _id: ResourceId,
         _manager: *AssetManager,
 
         pub fn get(self: Self) ?*T {
@@ -90,9 +84,9 @@ pub const ResourceData = struct {
 pub const RefCountedPool = struct {
     allocator: std.mem.Allocator,
     /// @typeName(T) -> id -> Resource
-    pool: std.StringHashMap(std.StringHashMap(Resource)),
+    pool: std.StringHashMap(std.AutoHashMap(ResourceId, Resource)),
     /// @typeName(T) -> id -> ResourceData
-    ref_counts: std.StringHashMap(std.StringHashMap(ResourceData)),
+    ref_counts: std.StringHashMap(std.AutoHashMap(ResourceId, ResourceData)),
 
     pub fn init(allocator: std.mem.Allocator) RefCountedPool {
         return .{ .allocator = allocator, .pool = .init(allocator), .ref_counts = .init(allocator) };
@@ -117,19 +111,19 @@ pub const RefCountedPool = struct {
         return self.pool.count();
     }
 
-    fn typedPool(self: *RefCountedPool, comptime T: type) !*std.StringHashMap(Resource) {
+    fn typedPool(self: *RefCountedPool, comptime T: type) !*std.AutoHashMap(ResourceId, Resource) {
         const pool = try self.pool.getOrPut(@typeName(T));
         if (!pool.found_existing) pool.value_ptr.* = .init(self.allocator);
         return pool.value_ptr;
     }
 
-    fn typedRefCount(self: *RefCountedPool, comptime T: type) !*std.StringHashMap(ResourceData) {
+    fn typedRefCount(self: *RefCountedPool, comptime T: type) !*std.AutoHashMap(ResourceId, ResourceData) {
         const ref_count = try self.ref_counts.getOrPut(@typeName(T));
         if (!ref_count.found_existing) ref_count.value_ptr.* = .init(self.allocator);
         return ref_count.value_ptr;
     }
 
-    pub fn incrementRef(self: *RefCountedPool, comptime T: type, id: []const u8) bool {
+    pub fn incrementRef(self: *RefCountedPool, comptime T: type, id: ResourceId) bool {
         const ref_count = self.typedRefCount(T) catch return false;
         const entry = ref_count.getPtr(id) orelse return false;
         entry.ref_count += 1;
@@ -145,7 +139,7 @@ pub const RefCountedPool = struct {
         }
     }
 
-    pub fn get(self: *RefCountedPool, comptime T: type, id: []const u8) ?*T {
+    pub fn get(self: *RefCountedPool, comptime T: type, id: ResourceId) ?*T {
         const pool = self.typedPool(T) catch return null;
         if (pool.get(id)) |res| {
             return @ptrCast(@alignCast(res.ptr));
@@ -154,7 +148,7 @@ pub const RefCountedPool = struct {
         return null;
     }
 
-    pub fn remove(self: *RefCountedPool, comptime T: type, id: []const u8, mgr: *AssetManager) void {
+    pub fn remove(self: *RefCountedPool, comptime T: type, id: ResourceId, mgr: *AssetManager) void {
         const ref_count = self.typedRefCount(T) catch return;
         const entry = ref_count.getPtr(id) orelse return;
 
@@ -167,12 +161,6 @@ pub const RefCountedPool = struct {
 
             _ = ref_count.remove(id);
             _ = pool.remove(id);
-
-            // The pooled resource owns its id (duped by AssetManager.loadAny)
-            // and its own struct allocation.
-            const typed: *T = @ptrCast(@alignCast(resource.ptr));
-            self.allocator.free(typed.id);
-            self.allocator.destroy(typed);
         }
     }
 };

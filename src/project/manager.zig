@@ -3,8 +3,8 @@ const log = std.log.scoped(.project_manager);
 
 const zgui = @import("zgui");
 const Config = @import("../config.zig");
-const SceneManager = @import("scene/manager.zig");
-const AssetManager = @import("asset/manager.zig");
+const SceneManager = @import("../scene_management/manager.zig");
+const AssetManager = @import("../resource_management/manager.zig");
 const RenderSettings = @import("../engine/settings.zig");
 const Engine = @import("../engine/vulkan/engine.zig");
 const Uuid = @import("uuid");

@@ -3,6 +3,8 @@ const vk = @import("vulkan");
 
 const Engine = @import("engine.zig");
 
+const Texture = @import("../../resource_management/texture.zig").Texture;
+
 const DescriptorAllocator = @import("descriptor.zig").DescriptorAllocator;
 const DescriptorWriter = @import("descriptor.zig").DescriptorWriter;
 const DescriptorLayoutBuilder = @import("descriptor.zig").LayoutBuilder;
@@ -39,7 +41,8 @@ pub const Registry = struct {
     pbr_material_buffer_slot: u32 = 0,
     pbr_material_count: u32 = 0,
 
-    // Bindless texture registry (slot 0 = grey fallback, seeded in setupDescriptors)
+    // Bindless texture registry (slot 0 = AssetManager's basic white
+    // texture, the implicit fallback untextured material fields default to)
     texture_cache_count: u32 = 0,
     buffer_cache_count: u32 = 0,
     cubemap_cache_count: u32 = 0,
@@ -140,7 +143,11 @@ pub const Registry = struct {
             @ptrCast(&variable_count_info),
         );
 
-        _ = try self.registerTexture(&self.engine.images.get(.white), &self.engine.samplers.get(.nearest));
+        // Slot 0 is no longer pre-seeded here: it runs before AssetManager
+        // exists, and AssetManager.initBasicTextures (called right after
+        // AssetManager.init, before anything else can register a texture)
+        // registers `white` first, which claims slot 0 — the same slot
+        // untextured material fields implicitly fall back to.
         self.pbr_material_buffer = try self.createMaterialBuffer(DEFAULT_MATERIAL_COUNT);
         self.pbr_material_buffer_slot = try self.registerBuffer(&self.pbr_material_buffer, 0);
     }
@@ -165,12 +172,12 @@ pub const Registry = struct {
     }
 
     /// Call this function to bind image/sampler to a descriptor set
-    pub fn registerTexture(self: *Registry, image: *const AllocatedImage, sampler: *const Sampler) !u32 {
+    pub fn registerTexture(self: *Registry, texture: *const Texture) !u32 {
         const slot = self.texture_cache_count;
         self.texture_cache_count += 1;
         try self.texture_cache.append(self.allocator, .{
-            .sampler = sampler.vk_sampler,
-            .image_view = image.view,
+            .sampler = texture.sampler.vk_sampler,
+            .image_view = texture.image.allocated_image.view,
             .image_layout = .shader_read_only_optimal,
         });
         return slot;

@@ -46,5 +46,4 @@ pub fn main(init: std.process.Init) !void {
 test {
     _ = @import("core/app.zig");
     _ = @import("data_structure.zig");
-    _ = @import("engine/vulkan/mesh.zig");
 }

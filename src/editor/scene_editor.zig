@@ -3,7 +3,6 @@ const log = std.log.scoped(.scene_editor);
 const zgui = @import("zgui");
 
 const ProjectManager = @import("../project/manager.zig");
-const SceneManager = @import("../engine/scene_manager.zig");
 const World = @import("../ecs/world.zig");
 
 const SceneEditor = @This();

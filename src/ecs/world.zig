@@ -39,7 +39,7 @@ pub const Gamestate = enum {
 pub const SavedConfig = struct {
     pub const SavedComponentList = .{
         Components.Tag,
-        Components.Transform,
+        Components.TransformComponent,
         Components.Camera,
         Components.CameraActive,
         Components.Velocity,
