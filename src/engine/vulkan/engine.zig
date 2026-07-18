@@ -9,6 +9,7 @@ const zm = @import("zmath");
 const materials = @import("../graphics/materials.zig");
 const ComputeEffect = @import("../graphics/effects.zig").ComputeEffect;
 const Skybox = @import("../graphics/skybox.zig");
+const UI = @import("../graphics/ui.zig");
 const Scene = @import("../../scene_management/scene.zig");
 const SceneGraph = @import("../../scene_management/graph.zig").SceneGraph;
 const Objects = @import("../../scene_management/objects.zig");
@@ -95,6 +96,9 @@ skybox_texture: Skybox.CubemapTexture = .create(),
 
 compute_effect: ComputeEffect = .create(),
 
+// Game UI (Clay) renderer — owns its clay context, font atlas and buffers.
+ui: UI = undefined,
+
 // Draw optimisation
 last_pipeline: ?*materials.MaterialPipeline = null,
 last_material: ?*materials.MaterialInstance = null,
@@ -115,6 +119,7 @@ pub fn init(
         .io = io,
         .allocator = allocator,
         .batcher = try .init(allocator),
+        .ui = UI.init(allocator),
         .ctx = ctx,
         // .draw_context = try .init(allocator),
     };
@@ -160,6 +165,7 @@ pub fn deinit(self: *Engine) void {
     self.skybox_texture.destroy(self);
 
     self.compute_effect.destroy(self);
+    self.ui.deinit();
     // self.draw_context.deinit();
 }
 
@@ -246,6 +252,15 @@ pub fn render(self: *Engine, scene: *Scene, asset_pool: *ResourceManager) !void 
     self.stats = try scene.reg.app.getResource(Components.Stats);
 
     self.getCurrentFrame().scene_data = scene_data;
+
+    // Build the game UI for this frame (CPU-side: clay layout -> geometry ->
+    // upload). ensureInit's first call bakes the font atlas — it must run
+    // after the resource manager has claimed bindless slot 0 for white, which
+    // it has by the time any frame renders.
+    try self.ui.ensureInit(self);
+    self.ui.buildFrame(self.swapchain.extent) catch |err| {
+        Logger.err("[Engine.render] UI buildFrame failed: {}", .{err});
+    };
 
     // TODO
     // self.skybox_texture.load(self, asset_pool._images(skybox.));
@@ -408,6 +423,10 @@ fn fillCommandBuffers(self: *Engine) !void {
         // depth_image.transitionToLayout(self, current_frame.cmd_buf, .undefined, .depth_attachment_optimal);
         // self.images.getPtr(.atlas).transitionToLayout(self, current_frame.cmd_buf, .undefined, .shader_read_only_optimal);
         try self.drawGeometry();
+
+        // Game UI (Clay) composites on top of the 3D scene, into draw_image
+        // while it's still a color attachment, before the blit to swapchain.
+        self.ui.recordDraw(self, self.swapchain.extent);
 
         self.draw_image.transitionLayout(self, current_frame.cmd_buf, .color_attachment_optimal, .transfer_src_optimal, 0, 1);
 
@@ -729,12 +748,12 @@ fn create2DPipeline(self: *Engine) !void {
     pipeline_builder.setPolygonMode(.fill);
     pipeline_builder.setCullMode(.{}, .clockwise);
     pipeline_builder.setMultisamplingNone();
-    pipeline_builder.disableBlending();
+    pipeline_builder.enableBlendingAlphablend(); // UI needs alpha blending (glyph edges, translucent panels)
     pipeline_builder.disableDepthTest();
     pipeline_builder.setColorAttachmentFormat(self.draw_image.format);
     pipeline_builder.setDepthFormat(.undefined);
 
-    const push_constant_range: vk.PushConstantRange = .{ .offset = 0, .size = @sizeOf(GPUDrawPushConstants), .stage_flags = .{ .vertex_bit = true } };
+    const push_constant_range: vk.PushConstantRange = .{ .offset = 0, .size = @sizeOf(Buffers.UIPushConstants), .stage_flags = .{ .vertex_bit = true } };
 
     const set_layouts = [_]vk.DescriptorSetLayout{
         self.descriptor.vk_global_descriptor_set_layout, // set 0
