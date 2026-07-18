@@ -173,11 +173,20 @@ pub const Registry = struct {
 
     /// Call this function to bind image/sampler to a descriptor set
     pub fn registerTexture(self: *Registry, texture: *const Texture) !u32 {
+        return self.registerImageView(texture.image.allocated_image.view, texture.sampler.vk_sampler);
+    }
+
+    /// Registers a raw (image view, sampler) pair into the bindless 2D
+    /// texture array (binding 3, `allTextures[]`), returning its slot.
+    /// For engine-owned images that aren't resource_management assets —
+    /// font atlases, render targets — so they don't need a Texture/Image
+    /// resource wrapper just to become bindless-addressable.
+    pub fn registerImageView(self: *Registry, view: vk.ImageView, sampler: vk.Sampler) !u32 {
         const slot = self.texture_cache_count;
         self.texture_cache_count += 1;
         try self.texture_cache.append(self.allocator, .{
-            .sampler = texture.sampler.vk_sampler,
-            .image_view = texture.image.allocated_image.view,
+            .sampler = sampler,
+            .image_view = view,
             .image_layout = .shader_read_only_optimal,
         });
         return slot;

@@ -38,6 +38,20 @@ pub const Quad = struct {
     pub const Indice = u16; // type of indice
 };
 
+/// GPU vertex for the 2D/UI pipeline (2d_bis.slang). `extern` for a
+/// guaranteed layout — this is pulled via buffer-device-address in the
+/// shader, so field offsets must match the Slang `Vertex` struct exactly.
+/// `col` (float4) is 16-byte aligned, mirroring how the 3D mesh Vertex
+/// aligns its float4 color; `_pad` rounds the stride up to a 16-byte
+/// multiple so an array of these keeps `col` aligned in every element.
+pub const UIVertex = extern struct {
+    pos: [2]f32, //   offset 0
+    uv: [2]f32, //    offset 8
+    col: [4]f32, //   offset 16 (16-aligned)
+    tex_id: u32, //   offset 32 — bindless slot; 0 = engine white 1x1 fallback
+    _pad: [3]u32 = .{ 0, 0, 0 }, // stride -> 48
+};
+
 pub const triangle_vertices = [_]Quad.Vertex{
     .{ .pos = .{ 0, -0.5 }, .uv = .{ 0.5, 0 }, .col = .{ 1, 0, 0, 1 } },
     .{ .pos = .{ 0.5, 0.5 }, .uv = .{ 1, 1 }, .col = .{ 0, 1, 0, 1 } },

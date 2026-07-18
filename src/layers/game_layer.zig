@@ -88,10 +88,14 @@ pub fn onAttach(self: *RuntimeLayer) !void {
         return err;
     };
 
-    self.clay_manager.setup() catch |err| {
-        log.err("Can't setup the ClayManager : {}", .{err});
-        return err;
-    };
+    // Clay is now initialized and driven by the engine's UI renderer
+    // (engine/graphics/ui.zig) — the legacy game-side ClayManager/FontManager
+    // are superseded. Its setup is disabled so it doesn't re-initialize Clay's
+    // global context out from under the engine.
+    // self.clay_manager.setup() catch |err| {
+    //     log.err("Can't setup the ClayManager : {}", .{err});
+    //     return err;
+    // };
     self.market_manager.setup(&self.ecs_manager) catch |err| {
         log.err("Can't setup the MarketManager : {}", .{err});
         return err;

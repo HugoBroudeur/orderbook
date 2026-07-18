@@ -17,6 +17,16 @@ pub const GPUDrawPushConstants2D = extern struct {
     vb_address: vk.DeviceAddress = undefined,
 };
 
+/// Push constants for the 2D/UI pipeline (2d_bis.slang). `screen_size` (in
+/// pixels) drives the pixel->NDC transform in the vertex shader — no ortho
+/// matrix needed for a flat screen-space overlay. `vb_address` is the
+/// buffer-device-address of the UI vertex buffer the shader pulls from.
+pub const UIPushConstants = extern struct {
+    screen_size: [2]f32,
+    _pad: [2]f32 = .{ 0, 0 }, // keep vb_address (u64) 8-byte aligned
+    vb_address: vk.DeviceAddress = undefined,
+};
+
 // Vertex Data sent in Vertex buffers
 pub const Vertex = extern struct {
     pos: [3]f32,
