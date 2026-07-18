@@ -9,5 +9,5 @@ guid: Uuid.Uuid,
 
 reg: *World,
 
-skybox_guid: Uuid.Uuid,
-skybox_filepath: []const u8,
+// skybox_guid: Uuid.Uuid,
+// skybox_filepath: []const u8,

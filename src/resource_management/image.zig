@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const AssetManager = @import("manager.zig");
+const ResourceManager = @import("manager.zig");
 const Resource = @import("resource.zig").Resource;
 const ResourceId = @import("resource.zig").ResourceId;
 const Gltf = @import("zgltf").Gltf;
@@ -49,8 +49,8 @@ pub const Image = struct {
         return self.id;
     }
 
-    pub fn load(self: *Image, mgr: *AssetManager) !void {
-        const engine = mgr.engine;
+    pub fn load(self: *Image, res_manager: *ResourceManager) !void {
+        const engine = res_manager.engine;
 
         const kind: ?ImageDataKind = switch (self.source) {
             .gltf_image => |s| blk: {
@@ -101,12 +101,12 @@ pub const Image = struct {
             // a separate engine-owned copy — one basic-texture system, not
             // two. Guaranteed loaded: AssetManager.initBasicTextures runs
             // before anything else can reach this fallback.
-            self.allocated_image = mgr.getResource(Image, AssetManager.basicTextureId(.checker)).?.allocated_image;
+            self.allocated_image = res_manager.getResource(Image, res_manager.common_resources.image.checker).?.allocated_image;
             self.owns_image = false;
         }
     }
 
-    pub fn unload(self: *Image, mgr: *AssetManager) void {
+    pub fn unload(self: *Image, mgr: *ResourceManager) void {
         if (self.owns_image) self.allocated_image.destroy(mgr.engine);
     }
 };

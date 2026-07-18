@@ -433,3 +433,35 @@ pub const AssetLoaded = struct {
 pub const SkyboxRenamed = struct {
     name: []const u8,
 };
+
+//  ██████╗  █████╗ ███╗   ███╗███████╗
+// ██╔════╝ ██╔══██╗████╗ ████║██╔════╝
+// ██║  ███╗███████║██╔████╔██║█████╗
+// ██║   ██║██╔══██║██║╚██╔╝██║██╔══╝
+// ╚██████╔╝██║  ██║██║ ╚═╝ ██║███████╗
+//  ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝
+
+pub const Actor = struct {
+    name: []const u8 = "",
+};
+pub const Movable = struct {};
+pub const Owner = struct {};
+pub const Locked = struct {};
+pub const Class = struct {};
+pub const Skill = struct {};
+pub const Gambit = struct {};
+
+pub const MapBoardState = struct {};
+
+pub const MapZoneReward = struct {};
+pub const MapZone = struct {
+    name: []const u8,
+    reward: MapZoneReward,
+};
+
+pub const Visbility = struct {};
+
+pub const Agent = struct {};
+pub const Syndicate = struct {};
+
+pub const ZoneEvent = struct {};

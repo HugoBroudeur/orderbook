@@ -79,7 +79,7 @@ pub fn onUpdate(self: *RenderLayer) void {
     self.world.app.run(World.Schedule.render);
     self.world.app.flushCommands();
 
-    self.engine.render(scene, &self.project_manager.asset_manager.pool) catch |err| {
+    self.engine.render(scene, self.project_manager.asset_manager) catch |err| {
         log.err("Render failed: {}", .{err});
     };
 }

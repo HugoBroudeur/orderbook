@@ -62,6 +62,11 @@ pub fn display(self: *SceneEditor) void {
                 }
             }
         }
+        // if (zgui.button("Spawn Camera", .{ .w = 200.0 })) {
+        //     if (World.Ecs.EventWriter(World.Components.SpawnCameraRequested).fromWorld(self.world) catch null) |writer| {
+        //         writer.send(.{}) catch log.err("Can't spawn camera", .{});
+        //     }
+        // }
     }
     zgui.end();
 

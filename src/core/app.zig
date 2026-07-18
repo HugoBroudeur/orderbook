@@ -12,7 +12,7 @@ const sdl = @import("sdl3");
 
 const ProjectManager = @import("../project/manager.zig");
 const SceneManager = @import("../scene_management/manager.zig");
-const AssetManager = @import("../resource_management/manager.zig");
+const ResourceManager = @import("../resource_management/manager.zig");
 
 const Layer = @import("layer.zig");
 const LayerStack = @import("layer_stack.zig").LayerStack;
@@ -52,7 +52,7 @@ game_layer: GameLayer = undefined,
 editor_layer: EditorLayer = undefined,
 project_manager: ProjectManager = undefined,
 scene_manager: SceneManager = undefined,
-asset_manager: AssetManager = undefined,
+resource_manager: ResourceManager = undefined,
 world: World = undefined,
 
 pub fn init(self: *App, config: Config) !void {
@@ -66,7 +66,7 @@ pub fn init(self: *App, config: Config) !void {
     try self.engine.setup();
 
     self.scene_manager.init(self.allocator, self.io, &self.world);
-    self.asset_manager = .init(
+    self.resource_manager = try .init(
         self.allocator,
         self.io,
         &self.engine,
@@ -74,13 +74,12 @@ pub fn init(self: *App, config: Config) !void {
     // Must run before anything else can register a bindless texture:
     // `white` needs to claim slot 0 (the implicit fallback slot untextured
     // material fields default to).
-    try self.asset_manager.initBasicTextures();
-    self.project_manager = .init(self.allocator, self.io, config, &self.scene_manager, &self.asset_manager);
+    self.project_manager = .init(self.allocator, self.io, config, &self.scene_manager, &self.resource_manager);
 
     self.world = try .init(self.allocator, self.io);
 
     try self.world.app.addResource(World.Components.RawInputQueue{ .allocator = self.allocator, .io = self.io });
-    try self.world.app.addResource(World.Components.AssetManagerHandle{ .ptr = &self.asset_manager });
+    try self.world.app.addResource(World.Components.AssetManagerHandle{ .ptr = &self.resource_manager });
     try self.world.app.addPlugin(Systems.Plugins.Startup);
 
     self.render_layer = RenderLayer.init(self.allocator, self.io, &self.engine, &self.framerate, &self.world, &self.project_manager);
@@ -88,7 +87,9 @@ pub fn init(self: *App, config: Config) !void {
     self.editor_layer = EditorLayer.init(self.allocator, self.io, config, &self.project_manager, &self.world, &self.engine);
 
     try self.project_manager.open(config.default_project_name);
-
+    if (self.scene_manager.getCurrentScene() == null) {
+        _ = try self.scene_manager.createScene("test");
+    }
     // Update order must be game -> editor -> render
     try self.pushLayer(self.game_layer.interface());
     try self.pushLayer(self.editor_layer.interface());

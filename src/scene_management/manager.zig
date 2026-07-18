@@ -128,7 +128,12 @@ pub fn loadScenes(self: *SceneManager, project_path: []const u8) !void {
         defer self.allocator.free(content);
 
         // TODO: put it on the heap and copy it in the buffer, might stack overload otherwise if scene_data > 8Mb
-        var scene_data = try SceneSerializer.deserialize(self.allocator, content);
+        // A single incompatible/corrupt file must not abort loading every
+        // other scene in the project — skip it and keep going.
+        var scene_data = SceneSerializer.deserialize(self.allocator, content) catch |err| {
+            log.warn("loadScenes: skipping {s}: {}", .{ entry.name, err });
+            continue;
+        };
 
         scene_data.scene_name = try self.allocator.dupe(u8, scene_data.scene_name);
         scene_data.skybox_filepath = try self.allocator.dupe(u8, scene_data.skybox_filepath);
@@ -137,8 +142,8 @@ pub fn loadScenes(self: *SceneManager, project_path: []const u8) !void {
         const scene: Scene = .{
             .guid = scene_data.scene_guid,
             .name = scene_data.scene_name,
-            .skybox_guid = scene_data.skybox_guid,
-            .skybox_filepath = scene_data.skybox_filepath,
+            // .skybox_guid = scene_data.skybox_guid,
+            // .skybox_filepath = scene_data.skybox_filepath,
             .reg = self.world,
         };
         _ = try self.scenes.fetchPut(scene.guid, scene);
@@ -166,8 +171,7 @@ fn extractGuidFromSceneName(scene_name: []const u8) ?Uuid.Uuid {
 }
 
 const EntityData = struct {
-    entity_guid: Uuid.Uuid,
-    gltf_uuid: ?Uuid.Uuid = null,
+    guid: Uuid.Uuid,
     components: SceneSerializer.OptionalFields(World.SavedConfig.SavedComponentList) = .{},
 };
 
@@ -177,12 +181,32 @@ fn emitEcsEvent(self: *SceneManager, comptime Event: type, value: Event) !void {
 }
 
 pub const SceneData = struct {
+    pub const CURRENT_FORMAT_VERSION: u32 = 1;
+
+    format_version: u32 = CURRENT_FORMAT_VERSION,
     scene_guid: Uuid.Uuid = 0,
-    scene_name: []const u8 = "Untitled Scene",
+    // Empty, not "Untitled Scene" — a non-empty compile-time string
+    // default is a .rodata pointer. If ANY later field in this struct
+    // fails to parse before this one is reached, serde's errdefer cleanup
+    // (deserializeStructFieldsSchema, core/deserialize.zig:210) frees every
+    // field it marked "seen" — including ones still holding their
+    // untouched default, not just ones actually read from input
+    // (core/deserialize.zig:231-234 marks a field "seen" the instant it
+    // gets a default, before any input is even read). Freeing a .rodata
+    // pointer segfaults on the @memset inside Allocator.free. An empty
+    // slice sidesteps this: freeing 0 bytes is always a safe no-op,
+    // regardless of whether the pointer behind it is heap or .rodata.
+    // Same reasoning already applied to skybox_filepath below — this was
+    // the one remaining unsafe default in this schema.
+    scene_name: []const u8 = "",
     skybox_guid: Uuid.Uuid = 0,
     skybox_filepath: []const u8 = "",
     resources: SceneSerializer.OptionalFields(World.SavedConfig.SavedResourceList) = .{},
     entities: []EntityData = &.{},
+};
+
+const SceneFormatCheck = struct {
+    format_version: u32 = 0,
 };
 
 const SceneSerializer = struct {
@@ -220,12 +244,12 @@ const SceneSerializer = struct {
 
         { // Entities
 
-            const query_all = try World.Ecs.Query(struct { entity: World.Ecs.Entity, guid: *const World.Components.ID }).fromWorld(world.app);
+            const query_all = try World.Ecs.QueryF(struct { entity: World.Ecs.Entity, guid: *const World.Components.ID }, World.Ecs.Filter.Without(World.Components.NodeComponent)).fromWorld(world.app);
 
             var it = query_all.iter();
             while (it.next()) |entry| {
                 var entity_data: EntityData = .{
-                    .entity_guid = entry.guid.guid,
+                    .guid = entry.guid.guid,
                 };
 
                 inline for (World.SavedConfig.SavedComponentList) |C| {
@@ -240,11 +264,23 @@ const SceneSerializer = struct {
             scene_data.entities = entities.items;
         }
 
-        return try Serde.zon.toSlice(allocator, scene_data);
+        return try Serde.json.toSlice(allocator, scene_data);
     }
 
     pub fn deserialize(allocator: std.mem.Allocator, data: []const u8) !SceneData {
-        return Serde.zon.fromSlice(SceneData, allocator, data) catch |err| {
+        const check = Serde.json.fromSlice(SceneFormatCheck, allocator, data) catch |err| {
+            log.err("Scene format pre-check failed (malformed file): {}", .{err});
+            return err;
+        };
+        if (check.format_version != SceneData.CURRENT_FORMAT_VERSION) {
+            log.warn(
+                "Scene file format_version {} != current {} — skipping (incompatible schema, re-save under the new format to upgrade)",
+                .{ check.format_version, SceneData.CURRENT_FORMAT_VERSION },
+            );
+            return error.IncompatibleSceneFormat;
+        }
+
+        return Serde.json.fromSlice(SceneData, allocator, data) catch |err| {
             log.err("Scene parse failed: {}", .{err});
             return err;
         };

@@ -56,8 +56,8 @@ pub const Texture = struct {
     pub fn load(self: *Texture, res_manager: *ResourceManager) !void {
         const engine = res_manager.engine;
 
-        switch (self.source) {
-            .gltf_texture => |s| {
+        const handle = switch (self.source) {
+            .gltf_texture => |s| blk: {
                 const gltf_texture = s.gltf.data.textures[s.texture_idx];
 
                 // Sampler: glTF record -> SamplerOption -> engine cache (or default).
@@ -68,39 +68,37 @@ pub const Texture = struct {
 
                 if (gltf_texture.source) |image_idx| {
                     const img = s.gltf.data.images[image_idx];
-                    self.image_id = if (img.uri) |uri|
+                    const image_id = if (img.uri) |uri|
                         ResourceManager.makeId(.{ .content = uri })
                     else
                         ResourceManager.makeId(.{ .local = .{ .file_guid = s.guid, .index = @intCast(image_idx) } });
 
-                    const handle = try res_manager.loadImage(Image.init(self.image_id, img.name orelse img.uri orelse "embedded", .{
+                    break :blk try res_manager.loadImage(Image.init(image_id, img.name orelse img.uri orelse "embedded", .{
                         .gltf_image = .{ .gltf = s.gltf, .image_idx = @intCast(image_idx) },
                     }));
-                    self.image = handle.get().?;
                 } else {
                     // No source image at all: one shared "missing" placeholder
                     // per file — sentinel index collapses every source-less
                     // texture in one glTF onto the same entry, matching prior
                     // behavior.
-                    self.image_id = ResourceManager.makeId(.{ .local = .{ .file_guid = s.guid, .index = std.math.maxInt(u32) } });
-                    const handle = try res_manager.loadImage(Image.init(self.image_id, "missing", .missing));
-                    self.image = handle.get().?;
+                    break :blk try res_manager.loadImage(Image.init(ResourceManager.makeId(.{ .local = .{ .file_guid = s.guid, .index = std.math.maxInt(u32) } }), "missing", .missing));
                 }
             },
-            .basic => |kind| {
+            .basic => |kind| blk: {
                 // Nearest, not the gltf-default linear: these are 1x1/2x2
                 // solid blocks — sampling should just return the block's
                 // color, not blur across a texture that has no useful
                 // neighboring texels.
                 self.sampler = try engine.getSampler(.{ .min_filter = .nearest, .mag_filter = .nearest, .mipmap_mode = .nearest, .max_lod = 1000 });
 
-                self.image_id = ResourceManager.basicTextureId(kind);
-                const handle = try res_manager.loadImage(Image.init(self.image_id, @tagName(kind), .{
+                break :blk try res_manager.loadImage(Image.init(self.image_id, @tagName(kind), .{
                     .solid = .{ .pixels = kind.pixels(), .size = kind.size() },
                 }));
-                self.image = handle.get().?;
             },
-        }
+        };
+
+        self.image = handle.get().?;
+        self.image_id = handle._id;
 
         // The texture's own GPU footprint: one (image view, sampler) pair
         // registered on the bindless array.

@@ -124,6 +124,13 @@ pub fn open(self: *Manager, name: []const u8) !void {
     try self.asset_manager.loadAssetPool(self.project_folder);
     try self.scene_manager.loadScenes(self.project_folder);
 
+    if (self.scene_manager.getCurrentScene() == null) {
+        const new_scene = try self.scene_manager.createScene("test");
+
+        self.loaded = self.scene_manager.setLoadedScene(new_scene);
+        return;
+    }
+
     self.loaded = true;
 }
 

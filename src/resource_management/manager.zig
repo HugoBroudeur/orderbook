@@ -5,7 +5,7 @@ const Uuid = @import("uuid");
 const Gltf = @import("zgltf").Gltf;
 const Serde = @import("serde");
 
-const ResourceManager = @This();
+pub const ResourceManager = @This();
 const Config = @import("../config.zig");
 
 const Resource = @import("resource.zig").Resource;
@@ -35,11 +35,21 @@ pool: Pool,
 // meshes: RefCountedPool(Mesh),
 ref_pool: RefCountedPool,
 
+common_resources: struct {
+    image: struct {
+        white: Uuid.Uuid = undefined,
+        black: Uuid.Uuid = undefined,
+        grey: Uuid.Uuid = undefined,
+        checker: Uuid.Uuid = undefined,
+    } = .{},
+} = .{},
+
 const asset_dirs = [_][]const u8{
     "assets/meshes",
 };
 
 pub const ASSET_META_FILE_EXTENSION = ".dlmeta";
+pub const MAX_FILE_SIZE = 512_000_000_000;
 
 pub const AssetMetaFile = struct {
     guid: Uuid.Uuid,
@@ -48,8 +58,6 @@ pub const AssetMetaFile = struct {
 };
 
 pub const Pool = struct {
-    pub const MAX_FILE_SIZE = 512_000_000_000;
-
     arena: std.heap.ArenaAllocator,
 
     asset_metadata: std.hash_map.AutoHashMap(Uuid.Uuid, AssetMetaFile),
@@ -81,7 +89,7 @@ pub const Pool = struct {
     }
 };
 
-pub fn init(allocator: std.mem.Allocator, io: std.Io, engine: *Engine) ResourceManager {
+pub fn init(allocator: std.mem.Allocator, io: std.Io, engine: *Engine) !ResourceManager {
     const arena = std.heap.ArenaAllocator.init(allocator);
 
     var manager: ResourceManager = .{
@@ -94,7 +102,13 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, engine: *Engine) ResourceM
     };
     // Create common basic resources like 1px white image, etc...
     inline for (std.meta.tags(BasicTexture)) |kind| {
-        _ = try manager.loadTexture(Texture.init(.{ .reserved = @intFromEnum(kind) }, @tagName(kind), .{ .basic = kind }));
+        const handle = try manager.loadTexture(Texture.init(makeId(.{ .reserved = @intFromEnum(kind) }), @tagName(kind), .{ .basic = kind }));
+        switch (kind) {
+            .white => manager.common_resources.image.white = handle._id,
+            .black => manager.common_resources.image.black = handle._id,
+            .grey => manager.common_resources.image.grey = handle._id,
+            .checker => manager.common_resources.image.checker = handle._id,
+        }
     }
 
     return manager;
@@ -171,7 +185,7 @@ fn saveMetaFile(self: *ResourceManager, metafile_path: []const u8, metafile: Ass
         return error.InvalidExtension;
     }
 
-    const content = try Serde.zon.toSlice(self.allocator, metafile);
+    const content = try Serde.json.toSlice(self.allocator, metafile);
     defer self.allocator.free(content);
 
     try std.Io.Dir.writeFile(.cwd(), self.io, .{ .data = content, .sub_path = metafile_path, .flags = .{} });
@@ -187,7 +201,8 @@ fn loadMetaFile(self: *ResourceManager, metafile_path: []const u8) ?AssetMetaFil
     };
     defer self.allocator.free(content);
 
-    return Serde.zon.fromSlice(AssetMetaFile, self.allocator, content) catch |err| {
+    log.info("content: {s}", .{content});
+    return Serde.json.fromSlice(AssetMetaFile, self.allocator, content) catch |err| {
         log.warn("loadMetaFile: failed to parse {s}: {}", .{ metafile_path, err });
         return null;
     };

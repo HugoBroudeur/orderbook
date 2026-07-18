@@ -8,6 +8,7 @@ const World = @import("world.zig");
 const Components = World.Components;
 const Schedule = World.Schedule;
 const Gamestate = World.Gamestate;
+const GameComponents = @import("components.zig");
 
 const Query = World.Ecs.Query;
 const QueryF = World.Ecs.QueryF;
@@ -19,67 +20,69 @@ const EventReader = World.Ecs.EventReader;
 const EventWriter = World.Ecs.EventWriter;
 
 const Resource = @import("../resource_management/resource.zig");
+const SerdeCodec = @import("../scene_management/serializer.zig").SerdeCodec;
 
 const Uuid = @import("uuid");
 const SceneObjects = @import("../scene_management/objects.zig");
 
 pub const Plugins = struct {
-    pub const Startup = struct {
+    pub const Game = struct {
         pub fn plugin(world: *World.Ecs.App) !void {
+            world.addResource(GameComponents.MapBoardState);
             // Create resources
-            try world.addResource(Components.Timers{});
-            try world.addResource(Components.Stats.init());
-            try world.addResource(Components.WindowState{});
-            try world.addResource(Components.InputState{});
-            try world.addResource(Components.CameraSpeed{});
-            try world.addResource(Components.CameraSensitivity{});
-            try world.addResource(Components.Lights{});
-            try world.addResource(Components.RenderCamera{ .kind = .perspective });
-            try world.addResource(Components.DrawContextQueue.init(world.memtator.parent));
-            world.flushCommands();
+            // try world.addResource(Components.Timers{});
+            // try world.addResource(Components.Stats.init());
+            // try world.addResource(Components.WindowState{});
+            // try world.addResource(Components.InputState{});
+            // try world.addResource(Components.CameraSpeed{});
+            // try world.addResource(Components.CameraSensitivity{});
+            // try world.addResource(Components.Lights{});
+            // try world.addResource(Components.RenderCamera{ .kind = .perspective });
+            // try world.addResource(Components.DrawContextQueue.init(world.memtator.parent));
+            // world.flushCommands();
 
             // Register States
-            try world.addPlugin(World.Ecs.StatePlugin(World.Gamestate.boot, World.Schedule.cleanup));
+            // try world.addPlugin(World.Ecs.StatePlugin(World.Gamestate.boot, World.Schedule.cleanup));
 
             // Register Events
-            try world.addPlugin(World.Ecs.EventPlugin(Components.PendingSceneEvent, Schedule.post_update));
-            try world.addPlugin(World.Ecs.EventPlugin(Components.LoadedSceneEvent, Schedule.cleanup));
-            try world.addPlugin(World.Ecs.EventPlugin(Components.AssetLoaded, Schedule.cleanup));
-            try world.addPlugin(World.Ecs.EventPlugin(Components.SkyboxRenamed, Schedule.cleanup));
+            // try world.addPlugin(World.Ecs.EventPlugin(Components.PendingSceneEvent, Schedule.post_update));
+            // try world.addPlugin(World.Ecs.EventPlugin(Components.LoadedSceneEvent, Schedule.cleanup));
+            // try world.addPlugin(World.Ecs.EventPlugin(Components.AssetLoaded, Schedule.cleanup));
+            // try world.addPlugin(World.Ecs.EventPlugin(Components.SkyboxRenamed, Schedule.cleanup));
 
             // Pre update systems
-            try world.addSystem(Schedule.pre_update, World.Ecs.Chain(.{
-                &updateTimers,
-                &updateInputState,
-                &cameraInput,
-            }));
-            try world.addSystemEx(Schedule.pre_update, &debugGamestate, World.Ecs.OnTransition(Gamestate));
-
-            try world.addSystemEx(Schedule.pre_update, World.Ecs.Chain(.{
-                &instantiateScene,
-                &finalizeSceneLoad,
-            }), World.Ecs.InState(Gamestate.loading));
-
-            try world.addSystemEx(Schedule.pre_update, &spawnCamera, World.Ecs.OnEnter(Gamestate.main));
-
-            // Update systems
-            try world.addSystem(Schedule.update, World.Ecs.Chain(.{
-                &transformVelocity,
-                &transformRotated,
-            }));
-
-            // Pre Render Systems
-            try world.addSystem(Schedule.pre_render, World.Ecs.Chain(.{
-                &onAssetLoaded,
-            }));
-
-            try world.addSystem(Schedule.pre_render, &updateRenderCamera);
-
-            // Render Systems
-            try world.addSystem(Schedule.render, &drawScene);
-
-            // Shutdown Systems
-            try world.addSystemEx(Schedule.cleanup, &shutdown, World.Ecs.OnEnter(Gamestate.shutdown));
+            // try world.addSystem(Schedule.pre_update, World.Ecs.Chain(.{
+            //     &updateTimers,
+            //     &updateInputState,
+            //     &cameraInput,
+            // }));
+            // try world.addSystemEx(Schedule.pre_update, &debugGamestate, World.Ecs.OnTransition(Gamestate));
+            //
+            // try world.addSystemEx(Schedule.pre_update, World.Ecs.Chain(.{
+            //     &instantiateScene,
+            //     &finalizeSceneLoad,
+            // }), World.Ecs.InState(Gamestate.loading));
+            //
+            // try world.addSystemEx(Schedule.pre_update, &spawnCamera, World.Ecs.OnEnter(Gamestate.main));
+            //
+            // // Update systems
+            // try world.addSystem(Schedule.update, World.Ecs.Chain(.{
+            //     &transformVelocity,
+            //     &transformRotated,
+            // }));
+            //
+            // // Pre Render Systems
+            // try world.addSystem(Schedule.pre_render, World.Ecs.Chain(.{
+            //     &onAssetLoaded,
+            // }));
+            //
+            // try world.addSystem(Schedule.pre_render, &updateRenderCamera);
+            //
+            // // Render Systems
+            // try world.addSystem(Schedule.render, &drawScene);
+            //
+            // // Shutdown Systems
+            // try world.addSystemEx(Schedule.cleanup, &shutdown, World.Ecs.OnEnter(Gamestate.shutdown));
         }
     };
 };
@@ -453,14 +456,6 @@ fn instantiateScene(
     }
 }
 
-fn finalizeSceneLoad(
-    reader: World.Ecs.EventReader(Components.LoadedSceneEvent),
-) !void {
-    for (reader.events) |event| {
-        log.info("Event scene loaded in ECS: {}", .{event.scene_guid});
-    }
-}
-
 fn onAssetLoaded(
     alloc: World.Ecs.Alloc,
     cmd: World.Ecs.Commands,
@@ -476,58 +471,4 @@ fn onAssetLoaded(
 
         log.info("Add GLTF model in ECS: {s}", .{event.name});
     }
-}
-
-fn onSkyboxRenamed(
-    alloc: World.Ecs.Alloc,
-    cmd: World.Ecs.Commands,
-    reader: World.Ecs.EventReader(Components.SkyboxRenamed),
-    skybox: ResMut(Components.Skybox),
-) !void {
-    _ = alloc; // autofix
-    _ = cmd; // autofix
-    for (reader.events) |event| {
-
-        // asset loader has a cube_image cache, it attempts to load the image if not exists
-        // return guid
-
-        // engine has a string hash map name/Skybox (same as pbr_material)
-        // upload data to GPU via the engine/graphic/skybox.zig
-
-        skybox.inner.name = event.name;
-        // skybox.inner.guid = guid;
-
-        log.info("Add GLTF Mesh in ECS: {s}", .{event.name});
-    }
-}
-
-/// This system free GPU/CPU memory when the app shutdown, the library does not seem to do that
-/// So it needs to be manually done here
-fn shutdown(
-    alloc: World.Ecs.Alloc,
-    draw_context: ResMut(Components.DrawContextQueue),
-) !void {
-    draw_context.inner.deinit(alloc.gpa);
-
-    log.info("Shutdown ECS", .{});
-}
-
-fn spawnAgent(
-    alloc: World.Ecs.Alloc,
-    cmd: Commands,
-) !void {
-    _ = try cmd.spawn(.{
-        Components.ID{ .guid = Uuid.v4.new(alloc.io) },
-        Components.Agent{},
-    });
-}
-
-fn spawnActors(
-    alloc: World.Ecs.Alloc,
-    cmd: Commands,
-) !void {
-    _ = try cmd.spawn(.{
-        Components.ID{ .guid = Uuid.v4.new(alloc.io) },
-        Components.Actor{},
-    });
 }

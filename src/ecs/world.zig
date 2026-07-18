@@ -32,6 +32,8 @@ pub const Gamestate = enum {
     loading,
     menu,
     main,
+    plan_turn,
+    resolve_turn,
     shutdown,
 };
 
