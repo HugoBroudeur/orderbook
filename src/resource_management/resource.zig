@@ -6,6 +6,7 @@ pub const Mesh = @import("mesh.zig").Mesh;
 pub const Material = @import("material.zig").Material;
 pub const Texture = @import("texture.zig").Texture;
 pub const Image = @import("image.zig").Image;
+pub const Font = @import("font.zig").Font;
 
 pub const ResourceId = Uuid.Uuid;
 

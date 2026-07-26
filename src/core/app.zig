@@ -71,6 +71,10 @@ pub fn init(self: *App, config: Config) !void {
         self.io,
         &self.engine,
     );
+    // After the resource manager: the UI's font atlas loads as a Font
+    // resource, and its Texture must register after the basic textures
+    // (`white` keeps bindless slot 0).
+    try self.engine.ui.init(&self.engine, &self.resource_manager);
     // Must run before anything else can register a bindless texture:
     // `white` needs to claim slot 0 (the implicit fallback slot untextured
     // material fields default to).
@@ -80,6 +84,7 @@ pub fn init(self: *App, config: Config) !void {
 
     try self.world.app.addResource(World.Components.RawInputQueue{ .allocator = self.allocator, .io = self.io });
     try self.world.app.addResource(World.Components.AssetManagerHandle{ .ptr = &self.resource_manager });
+    try self.world.app.addResource(World.Components.UIHandle{ .ptr = &self.engine.ui });
     try self.world.app.addPlugin(Systems.Plugins.Startup);
 
     self.render_layer = RenderLayer.init(self.allocator, self.io, &self.engine, &self.framerate, &self.world, &self.project_manager);

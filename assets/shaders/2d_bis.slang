@@ -1,8 +1,9 @@
 import include.scene;
 
-// UI vertex, pulled via buffer-device-address. Field layout MUST match the
-// Zig `UIVertex` extern struct (engine/data.zig): pos@0, uv@8, col@16 (float4,
-// 16-aligned), tex_id@32, stride 48.
+// UI vertex, pulled via buffer-device-address. Slang uses NATURAL (scalar)
+// layout for pointer types: pos@0, uv@8, col@16, tex_id@32, ArrayStride 36
+// (not std430's 48). The Zig `UIVertex` extern struct (engine/data.zig) must
+// match byte for byte — its layout test asserts size 36.
 struct UIVertex {
   float2 Position;
   float2 TexCoord;

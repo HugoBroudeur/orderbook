@@ -96,8 +96,11 @@ skybox_texture: Skybox.CubemapTexture = .create(),
 
 compute_effect: ComputeEffect = .create(),
 
-// Game UI (Clay) renderer — owns its clay context, font atlas and buffers.
-ui: UI = undefined,
+// Game UI (Clay) renderer — owns its clay context and buffers; its font is
+// a Font resource in the manager's pool. Initialized by App after the
+// resource manager exists (`App.init`), not in `setup` — the default keeps
+// `deinit` safe if init never ran.
+ui: UI = .{},
 
 // Draw optimisation
 last_pipeline: ?*materials.MaterialPipeline = null,
@@ -119,7 +122,6 @@ pub fn init(
         .io = io,
         .allocator = allocator,
         .batcher = try .init(allocator),
-        .ui = UI.init(allocator),
         .ctx = ctx,
         // .draw_context = try .init(allocator),
     };
@@ -253,15 +255,6 @@ pub fn render(self: *Engine, scene: *Scene, asset_pool: *ResourceManager) !void 
 
     self.getCurrentFrame().scene_data = scene_data;
 
-    // Build the game UI for this frame (CPU-side: clay layout -> geometry ->
-    // upload). ensureInit's first call bakes the font atlas — it must run
-    // after the resource manager has claimed bindless slot 0 for white, which
-    // it has by the time any frame renders.
-    try self.ui.ensureInit(self);
-    self.ui.buildFrame(self.swapchain.extent) catch |err| {
-        Logger.err("[Engine.render] UI buildFrame failed: {}", .{err});
-    };
-
     // TODO
     // self.skybox_texture.load(self, asset_pool._images(skybox.));
 
@@ -366,6 +359,12 @@ fn fillCommandBuffers(self: *Engine) !void {
 
         self.stats.tickClock(.fence_wait);
     }
+
+    // Game UI (Clay): CPU-side layout -> geometry -> upload, before any
+    // recording so recordDraw below draws this frame's geometry.
+    self.ui.buildFrame(self.swapchain.extent) catch |err| {
+        Logger.err("[Engine.fillCommandBuffers] UI buildFrame failed: {}", .{err});
+    };
 
     const cmd_buf = &current_frame.cmd_buf.vk_command_buffer;
     const swapchain_img = &self.swapchain.currentImage();

@@ -47,10 +47,20 @@ pub const Quad = struct {
 pub const UIVertex = extern struct {
     pos: [2]f32, //   offset 0
     uv: [2]f32, //    offset 8
-    col: [4]f32, //   offset 16 (16-aligned)
+    col: [4]f32, //   offset 16
     tex_id: u32, //   offset 32 — bindless slot; 0 = engine white 1x1 fallback
-    _pad: [3]u32 = .{ 0, 0, 0 }, // stride -> 48
+    // No tail padding: Slang lays out the buffer-device-address `UIVertex*`
+    // in natural (scalar) layout — ArrayStride 36, NOT std430's 48. Verify
+    // with: spirv-dis assets/shaders/2d_bis.spv | grep ArrayStride
 };
+
+test "UIVertex layout matches 2d_bis.slang natural layout (ArrayStride 36)" {
+    try @import("std").testing.expectEqual(@as(usize, 36), @sizeOf(UIVertex));
+    try @import("std").testing.expectEqual(@as(usize, 0), @offsetOf(UIVertex, "pos"));
+    try @import("std").testing.expectEqual(@as(usize, 8), @offsetOf(UIVertex, "uv"));
+    try @import("std").testing.expectEqual(@as(usize, 16), @offsetOf(UIVertex, "col"));
+    try @import("std").testing.expectEqual(@as(usize, 32), @offsetOf(UIVertex, "tex_id"));
+}
 
 pub const triangle_vertices = [_]Quad.Vertex{
     .{ .pos = .{ 0, -0.5 }, .uv = .{ 0.5, 0 }, .col = .{ 1, 0, 0, 1 } },

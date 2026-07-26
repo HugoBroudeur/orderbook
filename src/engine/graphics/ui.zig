@@ -15,7 +15,8 @@ const Engine = @import("../vulkan/engine.zig");
 const Buffer = @import("../vulkan/buffer.zig");
 const Buffers = @import("buffers.zig");
 const UIVertex = @import("../data.zig").UIVertex;
-const FontManager = @import("font_manager.zig");
+const ResourceManager = @import("../../resource_management/manager.zig");
+const Font = @import("../../resource_management/font.zig").Font;
 
 const UI = @This();
 
@@ -31,8 +32,12 @@ const ScissorGroup = struct {
     scissor: vk.Rect2D,
 };
 
-allocator: std.mem.Allocator,
-font_manager: FontManager,
+engine: *Engine = undefined,
+/// Ref-counted Font resource from the manager's pool — heap-allocated and
+/// pointer-stable, so Clay can hold it as measure-text context. The pool
+/// owns the ref; it unloads at ResourceManager.deinit (before Engine.deinit
+/// in RenderLayer), so UI.deinit must not touch it.
+font: *Font = undefined,
 
 clay_arena: []u8 = &.{},
 initialized: bool = false,
@@ -43,45 +48,55 @@ vertex_buffer: Buffer = undefined,
 index_buffer: Buffer = undefined,
 
 // CPU-side accumulation, rebuilt every frame.
-verts: std.ArrayList(UIVertex),
-indices: std.ArrayList(u16),
-groups: std.ArrayList(ScissorGroup),
+verts: std.ArrayList(UIVertex) = .empty,
+indices: std.ArrayList(u16) = .empty,
+groups: std.ArrayList(ScissorGroup) = .empty,
 
-pub fn init(allocator: std.mem.Allocator) UI {
-    return .{
-        .allocator = allocator,
-        .font_manager = FontManager.init(allocator),
-        .verts = .empty,
-        .indices = .empty,
-        .groups = .empty,
-    };
+// Text submitted for the current frame (e.g. by the ECS drawUIText system),
+// consumed and cleared by buildFrame. `text_bytes` owns the string copies;
+// items store offsets, not slices, because the backing array can realloc
+// between submits.
+submitted: std.ArrayList(SubmittedText) = .empty,
+text_bytes: std.ArrayList(u8) = .empty,
+
+pub const TextOptions = struct {
+    font_size: u16 = 28,
+    /// RGBA, 0-255 (Clay's color convention).
+    color: [4]f32 = .{ 235, 235, 245, 255 },
+};
+
+const SubmittedText = struct {
+    start: usize,
+    len: usize,
+    opts: TextOptions,
+};
+
+/// Queue one line of text for this frame's UI. The bytes are copied, so the
+/// caller's buffer only needs to live until this call returns.
+pub fn submitText(self: *UI, text: []const u8, opts: TextOptions) !void {
+    const start = self.text_bytes.items.len;
+    try self.text_bytes.appendSlice(self.engine.allocator, text);
+    try self.submitted.append(self.engine.allocator, .{ .start = start, .len = text.len, .opts = opts });
 }
 
-pub fn deinit(self: *UI) void {
-    if (self.initialized) {
-        self.vertex_buffer.destroy();
-        self.index_buffer.destroy();
-        self.allocator.free(self.clay_arena);
-    }
-    self.font_manager.deinit();
-    self.verts.deinit(self.allocator);
-    self.indices.deinit(self.allocator);
-    self.groups.deinit(self.allocator);
-}
+/// In-place init (`self` must be at its final address — Clay keeps pointers).
+/// Must run after the resource manager has seeded the basic textures, so the
+/// font atlas Texture registers after `white` (which must keep bindless
+/// slot 0); loading the Font through the manager makes that ordering explicit.
+pub fn init(self: *UI, engine: *Engine, res_manager: *ResourceManager) !void {
+    self.engine = engine;
 
-/// Deferred one-time init. Called at the top of each frame; the first call
-/// bakes the font atlas + inits Clay. Deferred (not done in Engine.setup) so
-/// the resource manager registers the basic textures first and `white` keeps
-/// bindless slot 0.
-pub fn ensureInit(self: *UI, engine: *Engine) !void {
-    if (self.initialized) return;
+    const handle = try res_manager.loadFont(Font.init(
+        ResourceManager.makeId(.{ .content = FONT_PATH }),
+        "ui_font",
+        .{ .file = .{ .path = FONT_PATH, .size = FONT_SIZE } },
+    ));
+    self.font = handle.get().?;
 
-    try self.font_manager.load(engine, FONT_PATH, FONT_SIZE);
-
-    self.clay_arena = try self.allocator.alignedAlloc(u8, .@"8", clay.minMemorySize());
+    self.clay_arena = try engine.allocator.alignedAlloc(u8, .@"8", clay.minMemorySize());
     const arena: clay.Arena = .init(self.clay_arena);
     _ = clay.initialize(arena, .{ .w = 100, .h = 100 }, .{});
-    clay.setMeasureTextFunction(*FontManager, &self.font_manager, FontManager.measureText);
+    clay.setMeasureTextFunction(*Font, self.font, measureText);
 
     self.vertex_buffer = try Buffer.create(
         engine,
@@ -97,19 +112,49 @@ pub fn ensureInit(self: *UI, engine: *Engine) !void {
     );
 
     self.initialized = true;
-    log.info("[UI] initialized (font slot {d})", .{self.font_manager.font.atlas_slot});
+    log.info("[UI] initialized (font slot {d})", .{self.font.atlasSlot()});
+}
+
+pub fn deinit(self: *UI) void {
+    if (!self.initialized) return;
+    self.vertex_buffer.destroy();
+    self.index_buffer.destroy();
+    self.engine.allocator.free(self.clay_arena);
+    self.verts.deinit(self.engine.allocator);
+    self.indices.deinit(self.engine.allocator);
+    self.groups.deinit(self.engine.allocator);
+    self.submitted.deinit(self.engine.allocator);
+    self.text_bytes.deinit(self.engine.allocator);
+}
+
+/// Clay text-measurement callback; `ctx` is the UI's Font resource, passed
+/// via clay.setMeasureTextFunction(*Font, font, measureText).
+fn measureText(text: []const u8, config: *clay.TextElementConfig, ctx: *Font) clay.Dimensions {
+    const scale = @as(f32, @floatFromInt(config.font_size)) / ctx.base_size;
+
+    var width: f32 = 0;
+    for (text) |c| {
+        const g = ctx.glyph(c) orelse continue;
+        width += g.advance * scale + @as(f32, @floatFromInt(config.letter_spacing));
+    }
+    return .{ .w = width, .h = @floatFromInt(config.font_size) };
 }
 
 /// Build this frame's UI layout, translate it to geometry, upload it.
 /// `extent` is the target surface size in pixels.
 pub fn buildFrame(self: *UI, extent: vk.Extent2D) !void {
+    if (!self.initialized) return;
     clay.setLayoutDimensions(.{ .w = @floatFromInt(extent.width), .h = @floatFromInt(extent.height) });
 
     clay.beginLayout();
-    buildTestLayout();
+    self.buildLayout();
     const cmds = clay.endLayout();
+    // Consumed: translate() below reads the command array (which references
+    // text_bytes) before anything can overwrite it next frame.
+    defer self.submitted.clearRetainingCapacity();
+    defer self.text_bytes.clearRetainingCapacity();
 
-    try self.translate(cmds, extent);
+    try self.drainCommands(cmds, extent);
 
     if (self.verts.items.len > 0)
         try self.vertex_buffer.copyInto(std.mem.sliceAsBytes(self.verts.items), 0);
@@ -117,23 +162,33 @@ pub fn buildFrame(self: *UI, extent: vk.Extent2D) !void {
         try self.index_buffer.copyInto(std.mem.sliceAsBytes(self.indices.items), 0);
 }
 
-/// TEST layout: a padded rounded panel containing a line of text.
-fn buildTestLayout() void {
+/// One rounded panel per submitted text line, stacked in the screen center
+/// (centered so the editor's docked panels can't sit on top of it).
+fn buildLayout(self: *UI) void {
     const panel: clay.Color = .{ 40, 44, 62, 255 };
-    const text_col: clay.Color = .{ 235, 235, 245, 255 };
 
     clay.UI()(.{
         .id = .ID("Root"),
-        .layout = .{ .sizing = .grow, .padding = .all(24), .child_alignment = .{ .x = .left, .y = .top } },
+        .layout = .{
+            .sizing = .grow,
+            .child_alignment = .{ .x = .center, .y = .center },
+            .direction = .top_to_bottom,
+            .child_gap = 8,
+        },
     })({
-        clay.UI()(.{
-            .id = .ID("Panel"),
-            .layout = .{ .padding = .all(20), .sizing = .{ .w = .fixed(320), .h = .fixed(90) } },
-            .background_color = panel,
-            .corner_radius = .all(8),
-        })({
-            clay.text("Hello Clay UI!", .{ .font_size = 28, .color = text_col });
-        });
+        for (self.submitted.items, 0..) |item, i| {
+            clay.UI()(.{
+                .id = .IDI("TextPanel", @intCast(i)),
+                .layout = .{ .padding = .all(20) },
+                .background_color = panel,
+                .corner_radius = .all(8),
+            })({
+                clay.text(
+                    self.text_bytes.items[item.start..][0..item.len],
+                    .{ .font_size = item.opts.font_size, .color = item.opts.color },
+                );
+            });
+        }
     });
 }
 
@@ -153,7 +208,7 @@ fn boxToRect(box: clay.BoundingBox, clamp: vk.Extent2D) vk.Rect2D {
     };
 }
 
-fn translate(self: *UI, cmds: []clay.RenderCommand, extent: vk.Extent2D) !void {
+fn drainCommands(self: *UI, cmds: []clay.RenderCommand, extent: vk.Extent2D) !void {
     self.verts.clearRetainingCapacity();
     self.indices.clearRetainingCapacity();
     self.groups.clearRetainingCapacity();
@@ -166,7 +221,7 @@ fn translate(self: *UI, cmds: []clay.RenderCommand, extent: vk.Extent2D) !void {
         fn call(u: *UI, start: *u32, scissor: vk.Rect2D) !void {
             const idx_now: u32 = @intCast(u.indices.items.len);
             if (idx_now > start.*) {
-                try u.groups.append(u.allocator, .{
+                try u.groups.append(u.engine.allocator, .{
                     .first_index = start.*,
                     .index_count = idx_now - start.*,
                     .scissor = scissor,
@@ -223,37 +278,37 @@ fn pushQuad(self: *UI, box: clay.BoundingBox, uv_min: [2]f32, uv_max: [2]f32, co
     const y0 = box.y;
     const x1 = box.x + box.width;
     const y1 = box.y + box.height;
-    try self.verts.appendSlice(self.allocator, &.{
+    try self.verts.appendSlice(self.engine.allocator, &.{
         .{ .pos = .{ x0, y0 }, .uv = .{ uv_min[0], uv_min[1] }, .col = col, .tex_id = tex_id },
         .{ .pos = .{ x1, y0 }, .uv = .{ uv_max[0], uv_min[1] }, .col = col, .tex_id = tex_id },
         .{ .pos = .{ x1, y1 }, .uv = .{ uv_max[0], uv_max[1] }, .col = col, .tex_id = tex_id },
         .{ .pos = .{ x0, y1 }, .uv = .{ uv_min[0], uv_max[1] }, .col = col, .tex_id = tex_id },
     });
-    try self.indices.appendSlice(self.allocator, &.{ base, base + 1, base + 2, base + 2, base + 3, base });
+    try self.indices.appendSlice(self.engine.allocator, &.{ base, base + 1, base + 2, base + 2, base + 3, base });
 }
 
 fn pushText(self: *UI, cmd: clay.RenderCommand) !void {
-    const font = &self.font_manager.font;
+    const font = self.font;
     const d = cmd.render_data.text;
     const col = colorToVec(d.text_color);
     const scale = @as(f32, @floatFromInt(d.font_size)) / font.base_size;
-    const baseline_y = cmd.bounding_box.y + font.ascent * scale;
 
     var pen_x = cmd.bounding_box.x;
     const chars = d.string_contents.chars[0..@intCast(d.string_contents.length)];
     for (chars) |c| {
         const g = font.glyph(c) orelse continue;
         if (g.size[0] > 0 and g.size[1] > 0) {
-            const gw = g.size[0] * scale;
-            const gh = g.size[1] * scale;
-            const gx = pen_x + g.bearing[0] * scale; // left bearing
-            const gy = baseline_y - g.bearing[1] * scale; // top = baseline - (glyph top above baseline)
+            // SDL_ttf's renderGlyphBlended bakes both bearings into the cell:
+            // the surface is full line height with the glyph pre-positioned
+            // (the atlas rows share a baseline). Applying the metrics bearing
+            // here again would double-offset — place the cell at the pen/line
+            // origin as-is.
             try self.pushQuad(
-                .{ .x = gx, .y = gy, .width = gw, .height = gh },
+                .{ .x = pen_x, .y = cmd.bounding_box.y, .width = g.size[0] * scale, .height = g.size[1] * scale },
                 g.uv_min,
                 g.uv_max,
                 col,
-                font.atlas_slot,
+                font.atlasSlot(),
             );
         }
         pen_x += g.advance * scale + @as(f32, @floatFromInt(d.letter_spacing));

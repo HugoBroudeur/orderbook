@@ -61,6 +61,7 @@ pub const Plugins = struct {
             }), World.Ecs.InState(Gamestate.loading));
 
             try world.addSystemEx(Schedule.pre_update, &spawnCamera, World.Ecs.OnEnter(Gamestate.main));
+            try world.addSystemEx(Schedule.pre_update, &spawnTestUIText, World.Ecs.OnEnter(Gamestate.main));
 
             // Update systems
             try world.addSystem(Schedule.update, World.Ecs.Chain(.{
@@ -77,6 +78,7 @@ pub const Plugins = struct {
 
             // Render Systems
             try world.addSystem(Schedule.render, &drawScene);
+            try world.addSystem(Schedule.render, &drawUIText);
 
             // Shutdown Systems
             try world.addSystemEx(Schedule.cleanup, &shutdown, World.Ecs.OnEnter(Gamestate.shutdown));
@@ -162,6 +164,37 @@ fn spawnCamera(
         Components.Velocity{},
         World.Ecs.StateScoped(World.Gamestate){ .state = .main },
     });
+}
+
+/// TEST: proves the ECS -> UI text path end to end. Delete once real game
+/// UI drives UIText entities.
+fn spawnTestUIText(
+    alloc: World.Ecs.Alloc,
+    cmd: Commands,
+) !void {
+    _ = try cmd.spawn(.{
+        Components.ID{ .guid = Uuid.v4.new(alloc.io) },
+        Components.UIText{ .text = "Hello from the ECS!" },
+        World.Ecs.StateScoped(World.Gamestate){ .state = .main },
+    });
+}
+
+/// Render prep: funnel every UIText entity into the engine's UI renderer.
+/// Runs in Schedule.render (same as drawScene) — the engine consumes the
+/// submissions later this frame in buildFrame.
+fn drawUIText(
+    query: Query(struct {
+        txt: *const Components.UIText,
+    }),
+    ui: Res(Components.UIHandle),
+) !void {
+    var it = query.iter();
+    while (it.next()) |entry| {
+        try ui.inner.ptr.submitText(entry.txt.text, .{
+            .font_size = entry.txt.font_size,
+            .color = entry.txt.color,
+        });
+    }
 }
 
 fn transformVelocity(

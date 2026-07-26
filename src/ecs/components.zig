@@ -40,6 +40,17 @@ pub const WindowState = struct {
 pub const Stats = @import("../engine/stats.zig");
 
 pub const AssetManagerHandle = struct { ptr: *AssetManager };
+pub const UIHandle = struct { ptr: *@import("../engine/graphics/ui.zig") };
+
+/// Screen-space text drawn through the game UI (Clay). Entities carrying
+/// this are picked up each frame by the drawUIText render system, which
+/// submits them to the engine's UI renderer.
+pub const UIText = struct {
+    text: []const u8,
+    font_size: u16 = 28,
+    /// RGBA, 0-255 (Clay's color convention).
+    color: [4]f32 = .{ 235, 235, 245, 255 },
+};
 
 //  ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗██╗ ██████╗███████╗
 // ██╔════╝ ██╔══██╗██╔══██╗██╔══██╗██║  ██║██║██╔════╝██╔════╝

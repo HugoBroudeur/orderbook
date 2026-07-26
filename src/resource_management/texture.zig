@@ -35,6 +35,10 @@ pub const Texture = struct {
         /// grey/checker), generated at `AssetManager.initBasicTextures`
         /// instead of loaded from a glTF file.
         basic: BasicTexture,
+        /// Raw NxN RGBA pixels baked at load time by another resource (e.g.
+        /// a Font's glyph atlas) — not read from any file. The pixel slice
+        /// must outlive the texture; the baking resource owns it.
+        raw_pixels: struct { pixels: []const u8, size: u32 },
     };
 
     pub fn interface(self: *Texture) Resource {
@@ -91,8 +95,24 @@ pub const Texture = struct {
                 // neighboring texels.
                 self.sampler = try engine.getSampler(.{ .min_filter = .nearest, .mag_filter = .nearest, .mipmap_mode = .nearest, .max_lod = 1000 });
 
-                break :blk try res_manager.loadImage(Image.init(self.image_id, @tagName(kind), .{
+                // Image id = this texture's own id (the pool namespaces ids
+                // per type): `self.image_id` here would read the field's
+                // default 0 before load ever sets it, deduping every basic
+                // image onto one entry — and breaking the
+                // `getResource(Image, common_resources.image.checker)`
+                // lookup the missing-texture fallback relies on.
+                break :blk try res_manager.loadImage(Image.init(self.id, @tagName(kind), .{
                     .solid = .{ .pixels = kind.pixels(), .size = kind.size() },
+                }));
+            },
+            .raw_pixels => |s| blk: {
+                // Linear: a baked atlas is real image content, unlike the
+                // 1x1/2x2 basic blocks — bilinear sampling is what scaled
+                // text rendering wants.
+                self.sampler = try engine.getSampler(.{ .min_filter = .linear, .mag_filter = .linear, .mipmap_mode = .linear, .max_lod = 1000 });
+
+                break :blk try res_manager.loadImage(Image.init(self.id, self.name, .{
+                    .solid = .{ .pixels = s.pixels, .size = s.size },
                 }));
             },
         };

@@ -23,6 +23,7 @@ const Surface = @import("mesh.zig").Surface;
 const Material = @import("material.zig").Material;
 const Texture = @import("texture.zig").Texture;
 const Image = @import("image.zig").Image;
+const Font = @import("font.zig").Font;
 const BasicTexture = @import("image.zig").BasicTexture;
 const AllocatedImage = @import("../engine/vulkan/image.zig").AllocatedImage;
 
@@ -293,6 +294,10 @@ pub fn loadTexture(self: *ResourceManager, texture: Texture) !ResourceHandle(Tex
 
 pub fn loadImage(self: *ResourceManager, image: Image) !ResourceHandle(Image) {
     return self.load(Image, image);
+}
+
+pub fn loadFont(self: *ResourceManager, font: Font) !ResourceHandle(Font) {
+    return self.load(Font, font);
 }
 
 fn load(self: *ResourceManager, comptime T: type, value: T) !ResourceHandle(T) {

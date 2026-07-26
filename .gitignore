@@ -14,5 +14,7 @@ zig-out/
 build/
 build-*/
 docgen_tmp/
+docs/
+game-doc/
 
 src/proto/

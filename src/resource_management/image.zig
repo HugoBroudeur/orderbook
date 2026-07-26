@@ -28,8 +28,9 @@ pub const Image = struct {
         /// glTF texture had no source image -> checker fallback (the
         /// resource manager's basic checker texture, borrowed not owned).
         missing,
-        /// NxN solid pixel data generated at load time, not read from any
-        /// file — used by AssetManager's basic placeholder textures.
+        /// NxN raw RGBA pixel data generated at load time, not read from
+        /// any file — AssetManager's basic placeholder textures and baked
+        /// content like Font glyph atlases (via Texture.Source.raw_pixels).
         solid: struct { pixels: []const u8, size: u32 },
     };
 
