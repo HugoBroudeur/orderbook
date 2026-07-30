@@ -7,9 +7,10 @@ const tracy = @import("tracy");
 const zm = @import("zmath");
 
 const materials = @import("../graphics/materials.zig");
+const UI = @import("../graphics/ui.zig");
+const UiManager = @import("../../ui/manager.zig");
 const ComputeEffect = @import("../graphics/effects.zig").ComputeEffect;
 const Skybox = @import("../graphics/skybox.zig");
-const UI = @import("../graphics/ui.zig");
 const Scene = @import("../../scene_management/scene.zig");
 const SceneGraph = @import("../../scene_management/graph.zig").SceneGraph;
 const Objects = @import("../../scene_management/objects.zig");
@@ -48,11 +49,7 @@ const BindlessRegistry = Bindless.Registry;
 
 const Engine = @This();
 
-pub const GPUCommandFn = fn (vk.CommandBuffer) anyerror!void;
-pub const DrawPassType = enum { demo, ui, shadow, ssao, sky, solid, raycast, transparent };
-pub const TransferBufferType = enum { atlas_buffer_data, atlas_texture_data };
 pub const SamplerType = enum { nearest, linear };
-pub const PipelineType = enum { _2d };
 
 pub const FRAME_OVERLAP = 2;
 
@@ -73,8 +70,6 @@ descriptor: BindlessRegistry = undefined,
 
 draw_image: AllocatedImage = undefined,
 depth_image: AllocatedImage = undefined,
-pipelines: std.EnumArray(PipelineType, Pipeline) = .initUndefined(),
-pipeline_layouts: std.EnumArray(PipelineType, vk.PipelineLayout) = .initUndefined(),
 samplers: std.EnumArray(SamplerType, Sampler) = .initUndefined(),
 
 gui_render_fn: ?*const fn (vk.CommandBuffer) void = null,
@@ -91,16 +86,13 @@ scene_graph: *SceneGraph = undefined,
 // material_default_data: materials.MaterialInstance = undefined,
 pbr_material: materials.PBRMaterial = .create(),
 
+ui: UI.Ui = .init(),
+ui_manager: *UiManager = undefined,
+
 skybox_constants_buffer: Buffer = undefined,
 skybox_texture: Skybox.CubemapTexture = .create(),
 
 compute_effect: ComputeEffect = .create(),
-
-// Game UI (Clay) renderer — owns its clay context and buffers; its font is
-// a Font resource in the manager's pool. Initialized by App after the
-// resource manager exists (`App.init`), not in `setup` — the default keeps
-// `deinit` safe if init never ran.
-ui: UI = .{},
 
 // Draw optimisation
 last_pipeline: ?*materials.MaterialPipeline = null,
@@ -137,13 +129,6 @@ pub fn deinit(self: *Engine) void {
     // before any other GPU resource cleanup.
     self.swapchain.deinit(self);
 
-    for (&self.pipelines.values) |*pipeline| {
-        pipeline.destroy(self.ctx);
-    }
-    for (&self.pipeline_layouts.values) |pipeline_layout| {
-        self.ctx.device.destroyPipelineLayout(pipeline_layout, null);
-    }
-
     self.descriptor.destroy(self);
 
     self.draw_image.destroy(self);
@@ -162,12 +147,12 @@ pub fn deinit(self: *Engine) void {
     self.batcher.deinit();
 
     self.pbr_material.destroy(self);
+    self.ui.destroy(self);
 
     self.skybox_constants_buffer.destroy();
     self.skybox_texture.destroy(self);
 
     self.compute_effect.destroy(self);
-    self.ui.deinit();
     // self.draw_context.deinit();
 }
 
@@ -177,26 +162,6 @@ pub fn setup(self: *Engine) !void {
     self.samplers.set(.nearest, try .create(self.ctx, .{}));
     self.samplers.set(.linear, try .create(self.ctx, .{ .min_filter = .linear, .mag_filter = .linear, .mipmap_mode = .linear, .max_lod = 1000 }));
 
-    try self.createTextures();
-
-    // self.descriptor = try GlobalDescriptor.create(self.allocator, self.ctx);
-    self.descriptor = try BindlessRegistry.init(self);
-    try self.descriptor.setupComputeImageSet(self.draw_image);
-    try self.descriptor.setupGlobalSet();
-
-    self.batcher_buffer = try Buffer.create(self, self.batcher.getTransferBufferSizeInBytes(), .{ .vertex_buffer_bit = true, .transfer_dst_bit = true }, .{ .host_coherent_bit = true, .host_visible_bit = true });
-
-    // Create Pipelines
-    try self.create2DPipeline();
-    try self.pbr_material.buildPipeline(self);
-    try self.skybox_texture.buildPipeline(self);
-
-    try self.compute_effect.buildPipeline(self);
-
-    self.skybox_constants_buffer = try Skybox.CubemapTexture.createSkyboxPushConstantsBuffer(self, 1);
-}
-
-fn createTextures(self: *Engine) !void {
     { // Main Draw image
         self.draw_image = try AllocatedImage.create(self, self.ctx.window.getDimension(), .r16g16b16a16_sfloat, .{
             .transfer_src_bit = true,
@@ -212,23 +177,19 @@ fn createTextures(self: *Engine) !void {
         }, false, 1);
     }
 
-    // Basic placeholder textures (white/black/grey/checker) moved to
-    // AssetManager.initBasicTextures — real ref-counted Texture/Image
-    // resources with stable ids, not raw engine-owned images.
+    self.descriptor = try BindlessRegistry.init(self);
+    try self.descriptor.setupComputeImageSet(self.draw_image);
+    try self.descriptor.setupGlobalSet();
 
-    // { // Atlas
-    //     const surface = try ImageMetadata.loadImageAssetWithFormat("assets/images/Background.jpg", .array_rgba_32);
-    //     defer surface.deinit();
-    //     const image = try ImageMetadata.createFromPath(
-    //         self,
-    //         "assets/images/Background.jpg",
-    //         .array_rgba_32,
-    //         .{ .sampled_bit = true },
-    //     );
-    //     self.images.set(.atlas, image);
-    //     self.text_buffer = try Buffer.create(self.ctx, @intCast(self.images.get(.atlas).size), .{ .transfer_dst_bit = true }, .{ .device_local_bit = true });
-    //     try self.text_buffer.fastTransfer(self.ctx, &self.getCurrentFrame().cmd_pool, surface.getPixels().?);
-    // }
+    self.batcher_buffer = try Buffer.create(self, self.batcher.getTransferBufferSizeInBytes(), .{ .vertex_buffer_bit = true, .transfer_dst_bit = true }, .{ .host_coherent_bit = true, .host_visible_bit = true });
+
+    // Create Pipelines
+    try self.ui.buildPipeline(self);
+    try self.pbr_material.buildPipeline(self);
+    try self.skybox_texture.buildPipeline(self);
+    try self.compute_effect.buildPipeline(self);
+
+    self.skybox_constants_buffer = try Skybox.CubemapTexture.createSkyboxPushConstantsBuffer(self, 1);
 }
 
 pub fn getCurrentFrame(self: *Engine) *Frame {
@@ -249,7 +210,8 @@ pub fn render(self: *Engine, scene: *Scene, asset_pool: *ResourceManager) !void 
         .ambient_color = lights.ambient_color,
     };
 
-    self.scene_graph = try scene.reg.app.getResource(Components.DrawContextQueue);
+    self.scene_graph = try scene.reg.app.getResource(Components.SceneGraph);
+    self.ui_manager = (try scene.reg.app.getResource(Components.UIManagerHandle)).ptr;
 
     self.stats = try scene.reg.app.getResource(Components.Stats);
 
@@ -360,12 +322,6 @@ fn fillCommandBuffers(self: *Engine) !void {
         self.stats.tickClock(.fence_wait);
     }
 
-    // Game UI (Clay): CPU-side layout -> geometry -> upload, before any
-    // recording so recordDraw below draws this frame's geometry.
-    self.ui.buildFrame(self.swapchain.extent) catch |err| {
-        Logger.err("[Engine.fillCommandBuffers] UI buildFrame failed: {}", .{err});
-    };
-
     const cmd_buf = &current_frame.cmd_buf.vk_command_buffer;
     const swapchain_img = &self.swapchain.currentImage();
     try current_frame.frame_descriptor.clear(self.ctx);
@@ -398,7 +354,7 @@ fn fillCommandBuffers(self: *Engine) !void {
 
     // Skybox
     {
-        self.stats.startClock(.render_pass_3d);
+        self.stats.startClock(.draw_skybox);
 
         self.draw_image.transitionLayout(self, current_frame.cmd_buf, .general, .color_attachment_optimal, 0, 1);
         self.depth_image.transitionLayout(self, current_frame.cmd_buf, .undefined, .depth_attachment_optimal, 0, 1);
@@ -411,21 +367,23 @@ fn fillCommandBuffers(self: *Engine) !void {
         // Image.copyImageToImage(self, current_frame.cmd_buf, draw_image.vk_image, self.swapchain.currentImage(), self.draw_extent, self.swapchain.extent);
         // Image.vkTransitionToLayout(self, current_frame.cmd_buf, self.swapchain.currentImage(), .transfer_dst_optimal, .color_attachment_optimal, 0);
 
-        self.stats.tickClock(.render_pass_3d);
+        self.stats.tickClock(.draw_skybox);
     }
 
     // Geometry
     {
-        self.stats.startClock(.render_pass_3d);
+        self.stats.startClock(.draw_geometry);
 
-        // draw_image.transitionToLayout(self, current_frame.cmd_buf, .general, .color_attachment_optimal);
-        // depth_image.transitionToLayout(self, current_frame.cmd_buf, .undefined, .depth_attachment_optimal);
-        // self.images.getPtr(.atlas).transitionToLayout(self, current_frame.cmd_buf, .undefined, .shader_read_only_optimal);
         try self.drawGeometry();
 
-        // Game UI (Clay) composites on top of the 3D scene, into draw_image
-        // while it's still a color attachment, before the blit to swapchain.
-        self.ui.recordDraw(self, self.swapchain.extent);
+        self.stats.tickClock(.draw_geometry);
+    }
+
+    // UI
+    {
+        self.stats.startClock(.draw_ui);
+
+        self.drawUi();
 
         self.draw_image.transitionLayout(self, current_frame.cmd_buf, .color_attachment_optimal, .transfer_src_optimal, 0, 1);
 
@@ -434,7 +392,7 @@ fn fillCommandBuffers(self: *Engine) !void {
         self.draw_image.copyTo(self, current_frame.cmd_buf, self.swapchain.currentImage());
         swapchain_img.transitionLayout(self, current_frame.cmd_buf, .transfer_dst_optimal, .color_attachment_optimal, 0, 1);
 
-        self.stats.tickClock(.render_pass_3d);
+        self.stats.tickClock(.draw_ui);
     }
 
     // Editor GUI
@@ -550,10 +508,6 @@ fn drawSkybox(self: *Engine) !void {
 
         const pipeline = st.opaque_pipeline;
 
-        // rebind pipeline and descriptor if the skybox has changed
-        // rebind index buffer
-        // if (@intFromPtr(so.skybox) != @intFromPtr(self.last_skybox)) {
-        //     self.last_skybox = so.skybox;
         self.stats.addMaterialBind();
 
         self.stats.addPipelineBind();
@@ -564,11 +518,8 @@ fn drawSkybox(self: *Engine) !void {
         self.ctx.device.cmdSetViewport(current_frame.cmd_buf.vk_command_buffer, 0, &.{self.getCurrentFrame().viewport});
         self.ctx.device.cmdSetScissor(current_frame.cmd_buf.vk_command_buffer, 0, &.{self.getCurrentFrame().scissor});
 
-        // self.ctx.device.cmdBindDescriptorSets(cmdbuf.vk_command_buffer, .graphics, pipeline.pipeline_layout, 1, &.{ro.material.material_set}, null);
-
         self.stats.addIndexBufferBind();
         self.ctx.device.cmdBindIndexBuffer(current_frame.cmd_buf.vk_command_buffer, so.index_buffer.vk_buffer, 0, .uint32);
-        // }
 
         const push_constant: GPUDrawPushConstants = .{
             .render_matrix = so.transform,
@@ -734,43 +685,62 @@ fn drawGuiEditor(self: *Engine) void {
     }
 }
 
-fn create2DPipeline(self: *Engine) !void {
-    var vert = try Shader.create(self, .{ .name = "2d_bis.spv", .stage = .vertex });
-    defer vert.destroy(self.ctx);
-    var frag = try Shader.create(self, .{ .name = "2d_bis.spv", .stage = .fragment });
-    defer frag.destroy(self.ctx);
+fn drawUi(self: *Engine) void {
+    const frame = self.getCurrentFrame();
+    const cmd = frame.cmd_buf.vk_command_buffer;
 
-    var pipeline_builder = try Pipeline.Builder.init(self.allocator);
-    defer pipeline_builder.deinit();
-    try pipeline_builder.setShaders(&vert, &frag);
-    pipeline_builder.setInputTopology(.triangle_list);
-    pipeline_builder.setPolygonMode(.fill);
-    pipeline_builder.setCullMode(.{}, .clockwise);
-    pipeline_builder.setMultisamplingNone();
-    pipeline_builder.enableBlendingAlphablend(); // UI needs alpha blending (glyph edges, translucent panels)
-    pipeline_builder.disableDepthTest();
-    pipeline_builder.setColorAttachmentFormat(self.draw_image.format);
-    pipeline_builder.setDepthFormat(.undefined);
-
-    const push_constant_range: vk.PushConstantRange = .{ .offset = 0, .size = @sizeOf(Buffers.UIPushConstants), .stage_flags = .{ .vertex_bit = true } };
-
-    const set_layouts = [_]vk.DescriptorSetLayout{
-        self.descriptor.vk_global_descriptor_set_layout, // set 0
-        // self.descriptor.vk_material_descriptor_set_layout, // set 1
+    const color_attachment: vk.RenderingAttachmentInfo = .{
+        .image_layout = .color_attachment_optimal,
+        .image_view = self.draw_image.view,
+        .resolve_mode = .{},
+        .resolve_image_view = .null_handle,
+        .resolve_image_layout = .undefined,
+        .load_op = .load,
+        .store_op = .store,
+        .clear_value = .{ .color = .{ .float_32 = .{ 0, 0, 0, 0 } } },
+    };
+    const rendering_info: vk.RenderingInfo = .{
+        .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = self.swapchain.extent },
+        .layer_count = 1,
+        .view_mask = 0,
+        .color_attachment_count = 1,
+        .p_color_attachments = @ptrCast(&color_attachment),
+        .p_depth_attachment = null,
+        .p_stencil_attachment = null,
     };
 
-    const pipeline_layout = try self.ctx.device.createPipelineLayout(&.{
-        .set_layout_count = set_layouts.len,
-        .p_set_layouts = @ptrCast(&set_layouts),
-        .push_constant_range_count = 1,
-        .p_push_constant_ranges = @ptrCast(&push_constant_range),
-    }, null);
+    self.ctx.device.cmdBeginRendering(cmd, &rendering_info);
+    defer self.ctx.device.cmdEndRendering(cmd);
 
-    pipeline_builder.pipeline_layout = pipeline_layout;
-    const pipeline = try pipeline_builder.buildPipeline(self.ctx);
+    const pipeline = self.ui.pipeline;
+    const layout = self.ui.pipeline_layout;
 
-    self.pipelines.set(._2d, pipeline);
-    self.pipeline_layouts.set(._2d, pipeline_layout);
+    self.ctx.device.cmdBindPipeline(cmd, .graphics, pipeline.vk_pipeline);
+    self.ctx.device.cmdBindDescriptorSets(cmd, .graphics, layout, 0, &.{frame.descriptor_set}, null);
+    self.ctx.device.cmdSetViewport(cmd, 0, &.{frame.viewport});
+
+    for (self.ui_manager.queue.items) |id| {
+        if (self.ui_manager.canvas.get(id)) |data| {
+            const canvas = data.canvas;
+            const pc: Buffers.UIPushConstants = .{
+                .mvp = canvas.world_transform,
+                .vb_address = data.vertex_buffer.address.?,
+            };
+            self.ctx.device.cmdPushConstants(cmd, layout, .{ .vertex_bit = true }, 0, @sizeOf(Buffers.UIPushConstants), @ptrCast(&pc));
+            self.ctx.device.cmdBindIndexBuffer(cmd, data.index_buffer.vk_buffer, 0, .uint16);
+
+            for (data.groups.items) |group| {
+                self.ctx.device.cmdSetScissor(cmd, 0, &.{.{ .offset = .{
+                    .x = group.scissor.offset.x,
+                    .y = group.scissor.offset.y,
+                }, .extent = .{
+                    .width = group.scissor.extent.width,
+                    .height = group.scissor.extent.height,
+                } }});
+                self.ctx.device.cmdDrawIndexed(cmd, group.index_count, 1, group.first_index, 0, 0);
+            }
+        }
+    }
 }
 
 pub fn getSampler(self: *Engine, option: Sampler.SamplerOption) !Sampler {

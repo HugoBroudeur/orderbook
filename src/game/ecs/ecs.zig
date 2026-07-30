@@ -21,7 +21,6 @@ const UiSystem = @import("systems/ui_system.zig");
 // const SokolRenderSystem = @import("systems/sokol_render_system.zig");
 
 // pub const MarketManager = @import("market_manager.zig");
-const UiManager = @import("../ui_manager.zig");
 
 pub const Entities = zcs.Entities;
 pub const Entity = zcs.Entity;

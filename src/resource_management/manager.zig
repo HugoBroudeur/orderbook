@@ -90,10 +90,10 @@ pub const Pool = struct {
     }
 };
 
-pub fn init(allocator: std.mem.Allocator, io: std.Io, engine: *Engine) !ResourceManager {
+pub fn init(allocator: std.mem.Allocator, io: std.Io, engine: *Engine) ResourceManager {
     const arena = std.heap.ArenaAllocator.init(allocator);
 
-    var manager: ResourceManager = .{
+    return .{
         .allocator = allocator,
         .arena = arena,
         .engine = engine,
@@ -101,24 +101,25 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, engine: *Engine) !Resource
         .pool = .init(allocator),
         .ref_pool = .init(allocator),
     };
-    // Create common basic resources like 1px white image, etc...
-    inline for (std.meta.tags(BasicTexture)) |kind| {
-        const handle = try manager.loadTexture(Texture.init(makeId(.{ .reserved = @intFromEnum(kind) }), @tagName(kind), .{ .basic = kind }));
-        switch (kind) {
-            .white => manager.common_resources.image.white = handle._id,
-            .black => manager.common_resources.image.black = handle._id,
-            .grey => manager.common_resources.image.grey = handle._id,
-            .checker => manager.common_resources.image.checker = handle._id,
-        }
-    }
-
-    return manager;
 }
 
 pub fn deinit(self: *ResourceManager, engine: *Engine) void {
     self.pool.deinit(self.allocator, engine);
 
     self.ref_pool.deinit(self);
+}
+
+pub fn loadDefaultResources(self: *ResourceManager) !void {
+    // Create common basic resources like 1px white image, etc...
+    inline for (std.meta.tags(BasicTexture)) |kind| {
+        const handle = try self.loadTexture(Texture.init(makeId(.{ .reserved = @intFromEnum(kind) }), @tagName(kind), .{ .basic = kind }));
+        switch (kind) {
+            .white => self.common_resources.image.white = handle._id,
+            .black => self.common_resources.image.black = handle._id,
+            .grey => self.common_resources.image.grey = handle._id,
+            .checker => self.common_resources.image.checker = handle._id,
+        }
+    }
 }
 
 // TODO, I need to improve that to make a copy of the file first, then save, then use the copy.

@@ -19,8 +19,7 @@ struct PS_Input {
 };
 
 struct UIPushConstants {
-  float2 screen_size; // window size in pixels
-  float2 _pad;
+  float4x4 mvp; // canvas-local pixel space -> clip space
   UIVertex *vertexBuffer;
 }
 
@@ -37,10 +36,12 @@ PS_Input vertex(uint vertexID: SV_VertexID) {
   UIVertex input = pc.vertexBuffer[vertexID];
   PS_Input output;
 
-  // Pixel space (origin top-left) -> NDC. Vulkan NDC has +Y down, matching
-  // top-left pixel origin, so no Y flip needed.
-  float2 ndc = (input.Position / pc.screen_size) * 2.0 - 1.0;
-  output.Position = float4(ndc.x, ndc.y, 0.0, 1.0);
+  // `mvp` is a zmath row-vector matrix read column-major by Slang, so mul(M, v)
+  // == v * M (same convention as the 3D pipeline). Screen canvases pass a
+  // pixel->NDC ortho (Vulkan +Y down matches the top-left pixel origin, no Y
+  // flip); world canvases pass world_transform * view_proj. The quad lives in
+  // the canvas's local z=0 plane.
+  output.Position = mul(pc.mvp, float4(input.Position, 0.0, 1.0));
 
   output.Color = input.Color;
   output.TexCoord = input.TexCoord;

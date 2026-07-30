@@ -12,6 +12,8 @@ const Engine = @import("../engine/vulkan/engine.zig");
 const Framerate = @import("../core/framerate.zig");
 const World = @import("../ecs/world.zig");
 const ProjectManager = @import("../project/manager.zig");
+const ResourceManager = @import("../resource_management/manager.zig");
+const UiManager = @import("../ui/manager.zig");
 
 const RenderLayer = @This();
 
@@ -24,8 +26,17 @@ world: *World,
 // draw_context: *Scene.DrawContext, // App-owned (Step 3)
 framerate: *Framerate,
 project_manager: *ProjectManager,
+ui_manager: *UiManager,
 
-pub fn init(allocator: std.mem.Allocator, io: std.Io, engine: *Engine, framerate: *Framerate, world: *World, project_manager: *ProjectManager) RenderLayer {
+pub fn init(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    engine: *Engine,
+    framerate: *Framerate,
+    world: *World,
+    project_manager: *ProjectManager,
+    ui_manager: *UiManager,
+) RenderLayer {
     return .{
         .allocator = allocator,
         .io = io,
@@ -33,6 +44,7 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, engine: *Engine, framerate
         .framerate = framerate,
         .world = world,
         .project_manager = project_manager,
+        .ui_manager = ui_manager,
     };
 }
 
@@ -42,8 +54,6 @@ pub fn deinit(self: *RenderLayer) void {
     self.project_manager.asset_manager.deinit(self.engine);
     zgui.backend.deinit();
     zgui.deinit();
-
-    self.engine.deinit();
 }
 
 pub fn interface(self: *RenderLayer) Layer {

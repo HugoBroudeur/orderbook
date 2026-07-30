@@ -19,6 +19,7 @@ const MarketManager = @import("../game/market_manager.zig");
 const Engine = @import("../engine/vulkan/engine.zig");
 const Framerate = @import("../core/framerate.zig");
 const World = @import("../ecs/world.zig");
+const Systems = @import("../game/systems.zig");
 // const UiManager = @import("../game/ui_manager.zig");
 // const UiSystem = @import("../game/ecs/systems/ui_system.zig");
 
@@ -100,6 +101,9 @@ pub fn onAttach(self: *RuntimeLayer) !void {
         log.err("Can't setup the MarketManager : {}", .{err});
         return err;
     };
+
+    // Register ECS Game plugin
+    try self.world.app.addPlugin(Systems.Plugins.Game);
 }
 
 pub fn onUpdate(self: *RuntimeLayer) void {

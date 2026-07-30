@@ -13,6 +13,7 @@ const sdl = @import("sdl3");
 const ProjectManager = @import("../project/manager.zig");
 const SceneManager = @import("../scene_management/manager.zig");
 const ResourceManager = @import("../resource_management/manager.zig");
+const UiManager = @import("../ui/manager.zig");
 
 const Layer = @import("layer.zig");
 const LayerStack = @import("layer_stack.zig").LayerStack;
@@ -53,6 +54,7 @@ editor_layer: EditorLayer = undefined,
 project_manager: ProjectManager = undefined,
 scene_manager: SceneManager = undefined,
 resource_manager: ResourceManager = undefined,
+ui_manager: UiManager = undefined,
 world: World = undefined,
 
 pub fn init(self: *App, config: Config) !void {
@@ -66,28 +68,26 @@ pub fn init(self: *App, config: Config) !void {
     try self.engine.setup();
 
     self.scene_manager.init(self.allocator, self.io, &self.world);
-    self.resource_manager = try .init(
+    self.resource_manager = .init(
         self.allocator,
         self.io,
         &self.engine,
     );
-    // After the resource manager: the UI's font atlas loads as a Font
-    // resource, and its Texture must register after the basic textures
-    // (`white` keeps bindless slot 0).
-    try self.engine.ui.init(&self.engine, &self.resource_manager);
-    // Must run before anything else can register a bindless texture:
-    // `white` needs to claim slot 0 (the implicit fallback slot untextured
-    // material fields default to).
+
+    try self.resource_manager.loadDefaultResources();
+
     self.project_manager = .init(self.allocator, self.io, config, &self.scene_manager, &self.resource_manager);
+
+    self.ui_manager = try .init(&self.engine, &self.resource_manager);
 
     self.world = try .init(self.allocator, self.io);
 
     try self.world.app.addResource(World.Components.RawInputQueue{ .allocator = self.allocator, .io = self.io });
     try self.world.app.addResource(World.Components.AssetManagerHandle{ .ptr = &self.resource_manager });
-    try self.world.app.addResource(World.Components.UIHandle{ .ptr = &self.engine.ui });
+    try self.world.app.addResource(World.Components.UIManagerHandle{ .ptr = &self.ui_manager });
     try self.world.app.addPlugin(Systems.Plugins.Startup);
 
-    self.render_layer = RenderLayer.init(self.allocator, self.io, &self.engine, &self.framerate, &self.world, &self.project_manager);
+    self.render_layer = RenderLayer.init(self.allocator, self.io, &self.engine, &self.framerate, &self.world, &self.project_manager, &self.ui_manager);
     self.game_layer = GameLayer.init(self.allocator, self.io, config, &self.engine, &self.framerate, &self.world);
     self.editor_layer = EditorLayer.init(self.allocator, self.io, config, &self.project_manager, &self.world, &self.engine);
 
@@ -160,11 +160,12 @@ pub fn shutdown(self: *App) void {
         layer.deinit();
     }
 
-    // Engine is owned and deinited by the RenderLayer (layer loop above).
-    self.graphics_context.deinit();
     self.project_manager.deinit();
     self.scene_manager.deinit();
+    self.ui_manager.deinit();
     self.world.deinit();
+    self.engine.deinit();
+    self.graphics_context.deinit();
 
     log.info("Closing... Good Bye!", .{});
     tracy.cleanExit(self.io);

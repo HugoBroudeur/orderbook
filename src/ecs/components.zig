@@ -7,6 +7,7 @@ const IRect = @import("../primitive.zig").IRect;
 const Uuid = @import("uuid");
 const SceneManager = @import("../scene_management/manager.zig");
 const AssetManager = @import("../resource_management/manager.zig");
+const UiManager = @import("../ui/manager.zig");
 const ImageMetadata = @import("../engine/vulkan/image.zig").ImageMetadata;
 const Resource = @import("../resource_management/resource.zig");
 const Node = @import("../scene_management/objects.zig").Node;
@@ -40,17 +41,7 @@ pub const WindowState = struct {
 pub const Stats = @import("../engine/stats.zig");
 
 pub const AssetManagerHandle = struct { ptr: *AssetManager };
-pub const UIHandle = struct { ptr: *@import("../engine/graphics/ui.zig") };
-
-/// Screen-space text drawn through the game UI (Clay). Entities carrying
-/// this are picked up each frame by the drawUIText render system, which
-/// submits them to the engine's UI renderer.
-pub const UIText = struct {
-    text: []const u8,
-    font_size: u16 = 28,
-    /// RGBA, 0-255 (Clay's color convention).
-    color: [4]f32 = .{ 235, 235, 245, 255 },
-};
+pub const UIManagerHandle = struct { ptr: *UiManager };
 
 //  ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗██╗ ██████╗███████╗
 // ██╔════╝ ██╔══██╗██╔══██╗██╔══██╗██║  ██║██║██╔════╝██╔════╝
@@ -59,7 +50,7 @@ pub const UIText = struct {
 // ╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║██║╚██████╗███████║
 //  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝
 
-pub const DrawContextQueue = @import("../scene_management/graph.zig").SceneGraph;
+pub const SceneGraph = @import("../scene_management/graph.zig").SceneGraph;
 
 pub const TransformComponent = struct {
     translation: Translation = .{},
@@ -128,6 +119,8 @@ pub const NodeComponent = struct {
 pub const MaterialComponent = struct {
     material: *Resource.Material,
 };
+
+pub const Visible = struct { visible: bool = true };
 
 //  ██████╗ █████╗ ███╗   ███╗███████╗██████╗  █████╗
 // ██╔════╝██╔══██╗████╗ ████║██╔════╝██╔══██╗██╔══██╗
@@ -476,3 +469,18 @@ pub const Agent = struct {};
 pub const Syndicate = struct {};
 
 pub const ZoneEvent = struct {};
+
+// ██╗   ██╗██╗
+// ██║   ██║██║
+// ██║   ██║██║
+// ██║   ██║██║
+// ╚██████╔╝██║
+//  ╚═════╝ ╚═╝
+
+pub const Ui = @import("../ui/objects.zig");
+
+/// Handle to a manager-owned canvas (buffers live in the UiManager pool, the
+/// same way NodeComponent points at Model-owned nodes). The producing system
+/// sets `canvas.root` to the widget tree to display; `drawUi` builds + enqueues
+/// every visible canvas.
+pub const UiCanvasComponent = struct { canvas: *Ui.UiCanva };

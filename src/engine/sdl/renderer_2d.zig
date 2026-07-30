@@ -10,7 +10,6 @@ const tracy = @import("tracy");
 // const impl_sdlgpu3 = @import("impl_sdlgpu3");
 const zm = @import("zmath");
 
-const UiManager = @import("../../game/ui_manager.zig");
 const EcsManager = @import("../../game/ecs_manager.zig");
 const ClayManager = @import("../../game/clay_manager.zig");
 const FontManager = @import("../../game/font_manager.zig");

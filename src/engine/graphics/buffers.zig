@@ -17,13 +17,14 @@ pub const GPUDrawPushConstants2D = extern struct {
     vb_address: vk.DeviceAddress = undefined,
 };
 
-/// Push constants for the 2D/UI pipeline (2d_bis.slang). `screen_size` (in
-/// pixels) drives the pixel->NDC transform in the vertex shader — no ortho
-/// matrix needed for a flat screen-space overlay. `vb_address` is the
-/// buffer-device-address of the UI vertex buffer the shader pulls from.
+/// Push constants for the UI pipeline (ui.slang). `mvp` is the full
+/// canvas->clip matrix, computed per canvas on the CPU: for a screen-space
+/// canvas it is a pixel->NDC ortho; for a world-space canvas it is
+/// `world_transform * camera.view_proj` (zmath row-vector convention, so the
+/// shader uses `mul(mvp, vertex)` exactly like the 3D pipeline). `vb_address`
+/// is the buffer-device-address of that canvas's UI vertex buffer.
 pub const UIPushConstants = extern struct {
-    screen_size: [2]f32,
-    _pad: [2]f32 = .{ 0, 0 }, // keep vb_address (u64) 8-byte aligned
+    mvp: zm.Mat,
     vb_address: vk.DeviceAddress = undefined,
 };
 

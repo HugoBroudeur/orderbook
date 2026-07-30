@@ -12,6 +12,7 @@ const Gamestate = World.Gamestate;
 const Query = World.Ecs.Query;
 const QueryF = World.Ecs.QueryF;
 const With = World.Ecs.Filter.With;
+const Without = World.Ecs.Filter.Without;
 const ResMut = World.Ecs.ResMut;
 const Res = World.Ecs.Res;
 const Commands = World.Ecs.Commands;
@@ -35,7 +36,7 @@ pub const Plugins = struct {
             try world.addResource(Components.CameraSensitivity{});
             try world.addResource(Components.Lights{});
             try world.addResource(Components.RenderCamera{ .kind = .perspective });
-            try world.addResource(Components.DrawContextQueue.init(world.memtator.parent));
+            try world.addResource(Components.SceneGraph.init(world.memtator.parent));
             world.flushCommands();
 
             // Register States
@@ -61,7 +62,6 @@ pub const Plugins = struct {
             }), World.Ecs.InState(Gamestate.loading));
 
             try world.addSystemEx(Schedule.pre_update, &spawnCamera, World.Ecs.OnEnter(Gamestate.main));
-            try world.addSystemEx(Schedule.pre_update, &spawnTestUIText, World.Ecs.OnEnter(Gamestate.main));
 
             // Update systems
             try world.addSystem(Schedule.update, World.Ecs.Chain(.{
@@ -78,7 +78,9 @@ pub const Plugins = struct {
 
             // Render Systems
             try world.addSystem(Schedule.render, &drawScene);
-            try world.addSystem(Schedule.render, &drawUIText);
+            // drawUi runs after the game systems have set each canvas's widget
+            // tree (they run in pre_render), so the trees are ready to build.
+            try world.addSystem(Schedule.render, &drawUi);
 
             // Shutdown Systems
             try world.addSystemEx(Schedule.cleanup, &shutdown, World.Ecs.OnEnter(Gamestate.shutdown));
@@ -164,37 +166,6 @@ fn spawnCamera(
         Components.Velocity{},
         World.Ecs.StateScoped(World.Gamestate){ .state = .main },
     });
-}
-
-/// TEST: proves the ECS -> UI text path end to end. Delete once real game
-/// UI drives UIText entities.
-fn spawnTestUIText(
-    alloc: World.Ecs.Alloc,
-    cmd: Commands,
-) !void {
-    _ = try cmd.spawn(.{
-        Components.ID{ .guid = Uuid.v4.new(alloc.io) },
-        Components.UIText{ .text = "Hello from the ECS!" },
-        World.Ecs.StateScoped(World.Gamestate){ .state = .main },
-    });
-}
-
-/// Render prep: funnel every UIText entity into the engine's UI renderer.
-/// Runs in Schedule.render (same as drawScene) — the engine consumes the
-/// submissions later this frame in buildFrame.
-fn drawUIText(
-    query: Query(struct {
-        txt: *const Components.UIText,
-    }),
-    ui: Res(Components.UIHandle),
-) !void {
-    var it = query.iter();
-    while (it.next()) |entry| {
-        try ui.inner.ptr.submitText(entry.txt.text, .{
-            .font_size = entry.txt.font_size,
-            .color = entry.txt.color,
-        });
-    }
 }
 
 fn transformVelocity(
@@ -344,7 +315,7 @@ fn drawScene(
     roots: Query(struct {
         t: *const Components.TransformComponent,
     }),
-    scene_graph: ResMut(Components.DrawContextQueue),
+    scene_graph: ResMut(Components.SceneGraph),
     stats: ResMut(Components.Stats),
 ) !void {
     stats.inner.startClock(.scene_build);
@@ -385,6 +356,45 @@ fn drawScene(
     }
 
     stats.inner.tickClock(.scene_build);
+}
+
+fn drawUi(
+    ui_manager_handle: ResMut(Components.UIManagerHandle),
+    window: Res(Components.WindowState),
+    render_camera: Res(Components.RenderCamera),
+    canvas: Query(struct {
+        c: *const Components.UiCanvasComponent,
+        v: *const Components.Visible,
+        t: *const Components.TransformComponent,
+    }),
+) !void {
+    // _ = render_camera; // autofix
+    const ui_manager = ui_manager_handle.inner.ptr;
+    ui_manager.resetQueue();
+
+    var it_world = canvas.iter();
+    while (it_world.next()) |entry| {
+        if (!entry.v.visible) continue;
+        const c = entry.c.canvas;
+        const t = entry.t;
+
+        switch (c.kind) {
+            .screen => {
+                c.kind = .{ .screen = .{
+                    .width = @intCast(@max(window.inner.width, 0)),
+                    .height = @intCast(@max(window.inner.height, 0)),
+                } };
+
+                c.refreshTransform(zm.identity());
+            },
+            .world => {
+                c.local_transform = t.toMatrix();
+                c.refreshTransform(render_camera.inner.mvp);
+            },
+        }
+
+        try ui_manager.addToDrawList(c);
+    }
 }
 
 fn spawnModelMeshEntities(
@@ -538,7 +548,7 @@ fn onSkyboxRenamed(
 /// So it needs to be manually done here
 fn shutdown(
     alloc: World.Ecs.Alloc,
-    draw_context: ResMut(Components.DrawContextQueue),
+    draw_context: ResMut(Components.SceneGraph),
 ) !void {
     draw_context.inner.deinit(alloc.gpa);
 

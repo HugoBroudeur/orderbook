@@ -9,7 +9,9 @@ pub const Timer = enum {
     fence_wait, // waitForAllFences() — GPU-CPU sync stall
     scene_build, // scene-graph traversal → opaque_surfaces list build
     compute_pass, // draw_background() compute dispatch
-    render_pass_3d, // cmdBeginRendering … cmdEndRendering for 3D objects
+    draw_geometry,
+    draw_ui,
+    draw_skybox,
     editor_pass, // draw_gui_editor()
     blit, // draw_image → swapchain blit + layout transitions
     present, // queueSubmit2 + queuePresentKHR + acquireNextImageKHR

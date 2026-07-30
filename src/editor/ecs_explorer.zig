@@ -24,6 +24,7 @@ const probed_components = .{
     .{ "Transform", Components.TransformComponent },
     .{ "Velocity", Components.Velocity },
     .{ "Rotated", Components.Rotated },
+    .{ "Ui", Components.UiCanvasComponent },
 };
 
 pub fn init(world: *World.Ecs.App) EcsExplorer {

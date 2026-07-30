@@ -6,7 +6,6 @@ const impl_sdlgpu3 = @import("impl_sdlgpu3");
 const ig = @import("cimgui");
 const zm = @import("zmath");
 
-const UiManager = @import("ui_manager.zig");
 const EcsManager = @import("ecs_manager.zig");
 const PipelineManager = @import("pipeline_manager.zig");
 const ClayManager = @import("clay_manager.zig");
